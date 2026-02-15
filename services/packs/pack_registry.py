@@ -1,9 +1,28 @@
 import os
+import re
 import shutil
 from typing import Dict, List, Optional
 
+from ..safe_io import resolve_under_root
 from .pack_archive import PackArchive, PackError
 from .pack_types import PackMetadata
+
+# Strict pattern for pack name and version path segments.
+# Only allows alphanumerics, hyphens, underscores, and dots.
+_SAFE_SEGMENT_RE = re.compile(r"^[a-zA-Z0-9._-]+$")
+
+
+def _validate_pack_segment(value: str, label: str) -> None:
+    """Validate a pack name or version segment against path traversal."""
+    if not value:
+        raise PackError(f"Pack {label} must not be empty")
+    if not _SAFE_SEGMENT_RE.match(value):
+        raise PackError(
+            f"Pack {label} contains invalid characters: {value!r}. "
+            f"Only alphanumerics, hyphens, underscores, and dots are allowed."
+        )
+    if value in (".", ".."):
+        raise PackError(f"Pack {label} must not be '.' or '..'")
 
 
 class PackRegistry:
@@ -33,7 +52,13 @@ class PackRegistry:
             name = meta["name"]
             version = meta["version"]
 
-            target_dir = os.path.join(self.packs_dir, name, version)
+            # Validate name/version from zip metadata against path traversal.
+            # A malicious pack.json could contain traversal sequences.
+            _validate_pack_segment(name, "name")
+            _validate_pack_segment(version, "version")
+            target_dir = resolve_under_root(
+                self.packs_dir, os.path.join(name, version)
+            )
 
             if os.path.exists(target_dir):
                 if not overwrite:

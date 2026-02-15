@@ -6,6 +6,7 @@ import unittest
 import zipfile
 
 from services.packs.pack_archive import PackArchive
+from services.packs.pack_registry import PackRegistry
 from services.packs.pack_manifest import (
     MAX_MANIFEST_FILES,
     PackError,
@@ -100,6 +101,59 @@ class TestPackSecurity(unittest.TestCase):
 
         with self.assertRaisesRegex(PackError, "Too many files"):
             PackArchive.extract_pack(zip_path, os.path.join(self.test_dir, "out"))
+
+
+class TestPackRegistryInstallTraversal(unittest.TestCase):
+    """Test that install_pack rejects traversal sequences in zip metadata."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self.registry = PackRegistry(self.test_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.test_dir)
+
+    def _make_pack_zip(self, name, version):
+        """Create a minimal valid pack zip with the given name/version in metadata."""
+        import hashlib
+
+        zip_path = os.path.join(self.test_dir, "test.zip")
+        pack_meta = {
+            "name": name,
+            "version": version,
+            "type": "preset",
+            "author": "tester",
+            "min_moltbot_version": "0.1.0",
+        }
+        pack_json = json.dumps(pack_meta).encode("utf-8")
+        pack_hash = hashlib.sha256(pack_json).hexdigest()
+        manifest = {"files": [{"path": "pack.json", "sha256": pack_hash}]}
+
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("pack.json", pack_json)
+            zf.writestr("manifest.json", json.dumps(manifest))
+        return zip_path
+
+    def test_install_rejects_traversal_in_name(self):
+        zip_path = self._make_pack_zip("../../etc", "1.0.0")
+        with self.assertRaises(PackError):
+            self.registry.install_pack(zip_path)
+
+    def test_install_rejects_traversal_in_version(self):
+        zip_path = self._make_pack_zip("legit-pack", "../../../tmp")
+        with self.assertRaises(PackError):
+            self.registry.install_pack(zip_path)
+
+    def test_install_rejects_dotdot_name(self):
+        zip_path = self._make_pack_zip("..", "1.0.0")
+        with self.assertRaises(PackError):
+            self.registry.install_pack(zip_path)
+
+    def test_install_accepts_valid_metadata(self):
+        zip_path = self._make_pack_zip("my-pack", "1.0.0")
+        meta = self.registry.install_pack(zip_path)
+        self.assertEqual(meta["name"], "my-pack")
+        self.assertEqual(meta["version"], "1.0.0")
 
 
 if __name__ == "__main__":
