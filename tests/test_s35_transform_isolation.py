@@ -131,5 +131,55 @@ def transform(data):
                 os.remove(module_path)
 
 
+class TestGetTransformExecutorFailClosed(unittest.TestCase):
+    """Test that get_transform_executor refuses to fall back to in-process executor."""
+
+    def setUp(self):
+        # Reset the global singleton before each test
+        import services.constrained_transforms as ct
+
+        ct._executor = None
+
+    def tearDown(self):
+        import services.constrained_transforms as ct
+
+        ct._executor = None
+
+    def test_raises_when_process_runner_unavailable(self):
+        """get_transform_executor must raise RuntimeError, not fall back."""
+        import importlib
+
+        import services.constrained_transforms as ct
+
+        # Force the module to re-evaluate the local import by removing the
+        # transform_runner module from sys.modules temporarily.
+        saved = sys.modules.pop("services.transform_runner", None)
+        # Also remove any cached reference
+        sys.modules["services.transform_runner"] = None  # type: ignore[assignment]
+        try:
+            with self.assertRaises((RuntimeError, ImportError)) as ctx:
+                ct.get_transform_executor()
+            error_msg = str(ctx.exception).lower()
+            self.assertTrue(
+                "unavailable" in error_msg or "import" in error_msg,
+                f"Expected 'unavailable' or 'import' in error: {ctx.exception}",
+            )
+        finally:
+            # Restore
+            if saved is not None:
+                sys.modules["services.transform_runner"] = saved
+            else:
+                sys.modules.pop("services.transform_runner", None)
+
+    def test_returns_process_runner_when_available(self):
+        """get_transform_executor returns TransformProcessRunner normally."""
+        from services.constrained_transforms import get_transform_executor
+
+        executor = get_transform_executor()
+        from services.transform_runner import TransformProcessRunner
+
+        self.assertIsInstance(executor, TransformProcessRunner)
+
+
 if __name__ == "__main__":
     unittest.main()
