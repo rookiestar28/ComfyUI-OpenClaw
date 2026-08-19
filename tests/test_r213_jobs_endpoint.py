@@ -136,6 +136,7 @@ def _normalize_queue(item, status: str) -> dict:
         "priority": priority,
         "create_time": extra_data.get("create_time"),
         "outputs_count": 0,
+        "previewable_outputs_count": 0,
         "workflow_id": extra_data.get("extra_pnginfo", {})
         .get("workflow", {})
         .get("id"),
@@ -175,6 +176,7 @@ def _normalize_history(prompt_id: str, item: dict) -> dict:
         "execution_start_time": start_time,
         "execution_end_time": end_time,
         "outputs_count": 1,
+        "previewable_outputs_count": 1,
         "workflow_id": extra_data.get("extra_pnginfo", {})
         .get("workflow", {})
         .get("id"),
@@ -372,6 +374,7 @@ class TestJobsReadModel(unittest.TestCase):
         encoded = json.dumps(body, sort_keys=True)
         for forbidden in (
             "preview_output",
+            "previewable_outputs_count",
             "secret-output.png",
             "secret-user-output",
             "secret-traceback",

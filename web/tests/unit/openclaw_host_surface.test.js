@@ -10,14 +10,14 @@ import {
 describe("openclaw_host_surface", () => {
     it("publishes exact standalone and two-generation desktop references", () => {
         expect(HOST_SURFACE_REFERENCES[HOST_SURFACES.standaloneFrontend]).toEqual({
-            frontendVersion: "1.49.1",
-            sourceRevision: "4b3866b838",
+            frontendVersion: "1.52.1",
+            sourceRevision: "569e65b30f",
         });
         expect(HOST_SURFACE_REFERENCES[HOST_SURFACES.desktop]).toEqual({
             desktopVersion: "0.9.4",
             coreVersion: "0.22.3",
             embeddedFrontendVersion: "1.43.18",
-            standaloneFrontendVersion: "1.49.1",
+            standaloneFrontendVersion: "1.52.1",
             frontendParity: "lagging",
             generation: "legacy_fixed_bundle",
             hostedVersionMode: "fixed",
@@ -263,7 +263,7 @@ describe("openclaw_host_surface", () => {
         });
         expect(container.dataset.openclawHostSurface).toBe("desktop");
         expect(container.dataset.openclawDesktopHost).toBe("true");
-        expect(container.dataset.openclawReferenceFrontend).toBe("1.49.1");
+        expect(container.dataset.openclawReferenceFrontend).toBe("1.52.1");
         expect(container.dataset.openclawCurrentDesktopVersion).toBe("1.0.32-rc.1");
         expect(container.dataset.openclawCurrentDesktopGeneration).toBe("managed_install");
         expect(container.dataset.openclawCurrentDesktopHostedVersionMode).toBe(

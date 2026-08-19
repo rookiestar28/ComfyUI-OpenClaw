@@ -66,7 +66,7 @@ If `assist_streaming` is unavailable or the stream transport degrades, Planner/R
 - The sidebar stamps its resolved host surface and refreshed host-reference metadata at mount time so desktop bundle drift is explicit in diagnostics and regression tests.
 - The standalone Remote Admin Console stamps the same host-surface metadata on its document root,
   including legacy Desktop `0.9.4`, fixed core `0.22.3`, embedded frontend `1.43.18`, and lagging
-  parity relative to standalone frontend `1.49.1`. It also exposes current Comfy-Desktop
+  parity relative to standalone frontend `1.52.1`. It also exposes current Comfy-Desktop
   `1.0.32-rc.1` with `installation_specific` hosted versions. Presence of
   `window.__comfyDesktop2` identifies that host generation only; it does not authorize privileged
   capability calls or inspect bridge members.

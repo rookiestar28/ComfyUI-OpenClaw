@@ -23,8 +23,8 @@ from services.operator_doctor import DoctorReport, check_compatibility_matrix_go
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_CURRENT_ANCHORS = {
-    "comfyui": "9cf91339 (v0.29.0-12-g9cf91339 / pyproject 0.29.0)",
-    "comfyui_frontend": "1.49.1 (4b3866b838 / v1.49.1-19-g4b3866b838)",
+    "comfyui": "3aba3dae (v0.33.0-27-g3aba3dae / pyproject 0.33.0)",
+    "comfyui_frontend": "1.52.1 (569e65b30f / v1.52.1-3-g569e65b30f)",
     "desktop": "0.9.4 (core 0.22.3 / frontend 1.43.18)",
     "comfy_desktop": "1.0.32-rc.1 (85e28b7a / v1.0.32-rc.1-3-g85e28b7)",
 }
@@ -85,6 +85,23 @@ class TestR90CompatMatrixGovernance(unittest.TestCase):
             if hits:
                 stale_hits[str(path.relative_to(REPO_ROOT))] = hits
         self.assertEqual(stale_hits, {})
+
+    def test_python_support_tiers_match_package_floor_and_test_sop_prerequisite(self):
+        matrix = (REPO_ROOT / "docs" / "release" / "compatibility_matrix.md").read_text(
+            encoding="utf-8"
+        )
+        support = (REPO_ROOT / "docs" / "release" / "support_policy.md").read_text(
+            encoding="utf-8"
+        )
+        pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        test_sop = (REPO_ROOT / "tests" / "TEST_SOP.md").read_text(encoding="utf-8")
+
+        self.assertIn('requires-python = ">=3.10"', pyproject)
+        self.assertIn("| **Python** | 3.10, 3.11, 3.12, 3.13 | 3.14 |", matrix)
+        self.assertIn("- **Python**: 3.10, 3.11, 3.12, and 3.13.", support)
+        self.assertIn("- **Python**: 3.14.", support)
+        self.assertIn("- **Python**: < 3.10.", support)
+        self.assertIn("Python 3.10+", test_sop)
 
     def test_detect_anchor_drift(self):
         published = {

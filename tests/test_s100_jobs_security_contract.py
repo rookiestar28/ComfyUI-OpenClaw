@@ -619,6 +619,7 @@ class TestJobsProjectionPrivacy(unittest.TestCase):
             "execution_start_time": 110,
             "execution_end_time": 120,
             "outputs_count": 2,
+            "previewable_outputs_count": 1,
             "workflow_id": "workflow-safe",
             "prompt": {"text": "secret-prompt"},
             "workflow": {"nodes": ["secret-workflow"]},

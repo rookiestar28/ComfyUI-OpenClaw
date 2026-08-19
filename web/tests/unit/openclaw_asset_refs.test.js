@@ -418,6 +418,31 @@ describe("openclaw asset refs", () => {
         expect(JSON.stringify(output)).not.toContain("evil.example");
     });
 
+    it.each([
+        "https://evil.example/asset.png",
+        "//evil.example/asset.png",
+        "data:text/html,not-a-preview",
+        "/absolute/asset.png",
+    ])("ignores untrusted host preview_url values: %s", (preview_url) => {
+        const output = normalizeComfyOutputRef({
+            filename: "safe.png",
+            subfolder: "reports",
+            type: "output",
+            preview_url,
+        });
+
+        expect(output).toEqual(expect.objectContaining({
+            resolution: "view",
+            viewParams: {
+                filename: "safe.png",
+                subfolder: "reports",
+                type: "output",
+            },
+        }));
+        expect(JSON.stringify(output)).not.toContain(preview_url);
+        expect(JSON.stringify(output)).not.toContain("api/assets");
+    });
+
     it("counts Unicode code points consistently and rejects trim-based bound bypasses", () => {
         expect(extractHistoryOutputRefs({
             outputs: { "9": { files: [{ filename: `${"😀".repeat(1020)}.txt`, type: "output" }] } },

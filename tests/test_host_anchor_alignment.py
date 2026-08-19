@@ -16,10 +16,14 @@ STALE_MARKERS = (
     "1377a2f7",
     "ceb5ae1eba",
     "standalone frontend `1.48.1`",
+    "9cf91339",
+    "v0.29.0-12-g9cf91339",
+    "4b3866b838",
+    "1.49.1",
 )
 CURRENT_MARKERS = (
-    "9cf91339",
-    "4b3866b838",
+    "3aba3dae",
+    "569e65b30f",
     "85e28b7a",
     "installation_specific",
 )

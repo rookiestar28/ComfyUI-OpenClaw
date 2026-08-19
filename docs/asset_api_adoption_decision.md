@@ -1,11 +1,13 @@
 # ComfyUI Asset API Adoption Decision (2026-04-16)
 
-## 2026-07-31 reference anchor update
+## 2026-08-19 reference anchor update
 
-- Current reference anchor is ComfyUI `9cf91339` (`v0.29.0-12-g9cf91339`, pyproject `0.29.0`).
+- Current reference anchor is ComfyUI `3aba3dae` (`v0.33.0-27-g3aba3dae`, pyproject `0.33.0`).
 - SaveImage output sockets, 3D preview refs, typed asset dimensions, grouped asset downloads, and optional `hash` / `asset_hash` aliases do not change the no-go decision.
 - ComfyUI asset hashing is host-side opt-in through `--enable-asset-hashing`, so normal filename-backed output refs must not require hash metadata.
 - Current host asset metadata may expose `loader_path`; model uploads require `model_type:<folder_name>` tags, and `/features.supports_model_type_tags` advertises that contract. OpenClaw does not upload through or directly consume `/api/assets`, so these facts do not change the no-go decision.
+- Current host asset responses derive `preview_url` from resolved file paths and support bounded tag filters; OpenClaw treats any incoming `preview_url` as untrusted metadata and continues to construct same-origin `/view` refs from validated fields.
+- Frontend cloud distributions may enrich persisted outputs through `/api/jobs/{job_id}/assets`, but that route is optional/cloud-only and is not an OpenClaw runtime dependency.
 - OpenClaw continues to use `/history` + `/view`; asset-service-only refs stay explicit `asset_api_required` states.
 
 ## 2026-06-12 reconfirmation
@@ -33,7 +35,7 @@
   - optional asset-hash-backed refs that still resolve through `/view?filename=blake3:...` when host metadata is present
   - media-aware output groups (`images`, `video`, `audio`, `3d`, and bounded `text`)
   - HDR `.exr` / `.hdr` image refs as explicit `/view` source-preview fallback links, not normal thumbnails
-- Current ComfyUI `9cf91339` / `v0.29.0-12-g9cf91339` / pyproject `0.29.0` reference facts:
+- Current ComfyUI `3aba3dae` / `v0.33.0-27-g3aba3dae` / pyproject `0.33.0` reference facts:
   - `/api/assets*` routes exist, but operational use is feature-gated behind `--enable-assets`
   - content hashing is opt-in through `--enable-asset-hashing`, so normal filename-backed refs may omit `asset_hash` / `hash`
   - `/features` exposes the `assets` capability flag so hosts can report whether the asset system is enabled

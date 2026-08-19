@@ -7,7 +7,7 @@
 **Definition**: Validated by CI/CD or core maintainers. Critical bugs block releases.
 
 - **Environment**: Linux (Ubuntu 22.04), Windows 11.
-- **Python**: 3.10, 3.11.
+- **Python**: 3.10, 3.11, 3.12, and 3.13.
 - **ComfyUI host**: current compatibility-matrix reference anchor and close neighbors.
 - **Frontend host**: current standalone frontend reference anchor for the sidebar extension contract.
 
@@ -16,7 +16,7 @@
 **Definition**: Should work, but not actively validated. Bugs fixed as resources allow.
 
 - **Environment**: macOS, older Windows versions.
-- **Python**: 3.12.
+- **Python**: 3.14.
 - **ComfyUI**: nightly builds and farther-from-anchor upstream drift.
 - **Desktop host**: legacy fixed-bundle variants outside the recorded legacy anchor and current managed-install variants whose installed host components fall outside their own supported anchors.
 
@@ -24,7 +24,7 @@
 
 **Definition**: Known to be incompatible or end-of-life.
 
-- **Python**: < 3.9.
+- **Python**: < 3.10.
 - **OS**: Windows 7/8.
 
 ## Deprecation Policy

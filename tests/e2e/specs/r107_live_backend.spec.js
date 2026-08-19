@@ -126,6 +126,8 @@ test.describe('R107 Live Backend Parity', () => {
     test('Job Monitor keeps asset hashing optional and asset API no-go explicit', async ({ page }) => {
         const jobId = "job-asset-phase2";
         let assetApiCalls = 0;
+        let jobsAssetsCalls = 0;
+        let hostilePreviewCalls = 0;
 
         await page.route(`**/history/${jobId}`, async route => {
             await route.fulfill({
@@ -140,6 +142,7 @@ test.describe('R107 Live Backend Parity', () => {
                                     {
                                         filename: "filename-only.png",
                                         type: "output",
+                                        preview_url: "https://evil.example/hostile-preview.png",
                                         asset: {
                                             id: "asset-without-hash",
                                         },
@@ -179,6 +182,24 @@ test.describe('R107 Live Backend Parity', () => {
             });
         });
 
+        await page.route(`**/api/jobs/${jobId}/assets**`, async route => {
+            jobsAssetsCalls += 1;
+            await route.fulfill({
+                status: 500,
+                contentType: 'application/json',
+                body: JSON.stringify({ error: 'jobs_assets_should_not_be_called' }),
+            });
+        });
+
+        await page.route('**://evil.example/**', async route => {
+            hostilePreviewCalls += 1;
+            await route.fulfill({
+                status: 500,
+                contentType: 'text/plain',
+                body: 'hostile_preview_should_not_be_requested',
+            });
+        });
+
         await page.route('**/view**', async route => {
             const request = route.request();
             const url = new URL(request.url());
@@ -211,10 +232,17 @@ test.describe('R107 Live Backend Parity', () => {
         await page.getByText('Add').click();
 
         await expect(page.locator('.openclaw-kv-val.ok')).toHaveText('completed', { timeout: 10000 });
-        await expect(page.locator('img[src*="filename-only.png"]')).toBeVisible();
+        const filenamePreview = page.locator('img[src*="filename-only.png"]').first();
+        await expect(filenamePreview).toBeVisible();
+        const filenamePreviewUrl = new URL(await filenamePreview.getAttribute('src'), page.url());
+        expect(filenamePreviewUrl.origin).toBe(new URL(page.url()).origin);
+        expect(filenamePreviewUrl.pathname).toMatch(/\/view$/);
+        expect(filenamePreviewUrl.searchParams.get('filename')).toBe('filename-only.png');
         await expect(page.locator('img[src*="blake3%3Aabc123"]')).toBeVisible();
         await expect(page.locator('.openclaw-job-output-fallback')).toContainText('Asset API output requires /api/assets');
         expect(assetApiCalls).toBe(0);
+        expect(jobsAssetsCalls).toBe(0);
+        expect(hostilePreviewCalls).toBe(0);
     });
 
     test('Job Monitor surfaces non-image media outputs as safe fallbacks', async ({ page }) => {

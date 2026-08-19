@@ -493,7 +493,7 @@ Canonical DOM/class ownership is now centered on `openclaw-*`; legacy `moltbot-*
 
 The sidebar now also resolves and stamps its active host surface (`standalone_frontend`, legacy
 `desktop`, or current managed-install `comfy_desktop`) and reference metadata at mount time, so
-Desktop `0.9.4` embedded-frontend lag against standalone frontend `1.49.1` is explicit and
+Desktop `0.9.4` embedded-frontend lag against standalone frontend `1.52.1` is explicit and
 testable. The current Comfy-Desktop `1.0.32-rc.1` reference keeps hosted component versions
 installation-specific and recognizes `window.__comfyDesktop2` as presence metadata only; bridge
 detection does not authorize privileged capability calls.

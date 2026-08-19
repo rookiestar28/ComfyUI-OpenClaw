@@ -12,14 +12,14 @@ export const HOST_SURFACES = Object.freeze({
 
 export const HOST_SURFACE_REFERENCES = Object.freeze({
     [HOST_SURFACES.standaloneFrontend]: Object.freeze({
-        frontendVersion: "1.49.1",
-        sourceRevision: "4b3866b838",
+        frontendVersion: "1.52.1",
+        sourceRevision: "569e65b30f",
     }),
     [HOST_SURFACES.desktop]: Object.freeze({
         desktopVersion: "0.9.4",
         coreVersion: "0.22.3",
         embeddedFrontendVersion: "1.43.18",
-        standaloneFrontendVersion: "1.49.1",
+        standaloneFrontendVersion: "1.52.1",
         frontendParity: "lagging",
         generation: "legacy_fixed_bundle",
         hostedVersionMode: "fixed",
