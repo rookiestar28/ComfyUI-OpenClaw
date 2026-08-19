@@ -5,6 +5,8 @@ The README now keeps only the most recent 3-5 update summaries and links here fo
 
 Newest entries appear first.
 
+Current release notes: [v1.1.0](v1.1.0.md).
+
 <details>
 
 <summary><strong>Current host support and startup verification refreshed</strong></summary>
