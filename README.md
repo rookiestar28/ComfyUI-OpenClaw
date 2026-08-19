@@ -104,6 +104,8 @@ Deployment profiles and hardening references:
   secret-free posture snapshot reused across startup and authorization boundaries.
 - Bootstrap lifecycle, route registration, and effective posture implementations now live in
   focused owner packages while legacy import identities remain compatible.
+- Loader-realistic startup regression coverage now verifies that the packaged entrypoint registers
+  the real route families on the first attempt without leaking retry or process state.
 - The public systemd environment template now follows `.env.example` conventions, while
   secret-bearing deployment environment files remain excluded from version control.
 
@@ -132,6 +134,8 @@ Deployment profiles and hardening references:
 
 - Added pinned incremental Ruff and Mypy enforcement that blocks new production-code debt in
   local and CI validation without requiring an unsafe repository-wide rewrite.
+- Startup loader, route-bootstrap, registration, contract, and import-fallback owners now select
+  extended adversarial validation automatically when their exact high-risk paths change.
 - Added deterministic scale baselines for large jobs history, connector summaries, and frontend
   output normalization, with exact payload and call-count budgets plus advisory timing evidence.
 - Hardened selected exception boundaries so cancellation, compatibility fallback, status mapping,
@@ -158,7 +162,10 @@ Deployment profiles and hardening references:
   authoritative summary. The connector validates the response contract, displays only
   aggregate counts and short job IDs, and uses a coarse queue-count fallback only for
   explicit host-contract/backend unavailability.
-- Published host compatibility notes now pin the current ComfyUI, standalone frontend, and Desktop reference anchors while keeping Desktop embedded-frontend lag explicit.
+- Published host compatibility notes now pin ComfyUI `3aba3dae` / `0.33.0`, standalone frontend
+  `1.52.1`, legacy Desktop, and current managed-install Comfy-Desktop as separate references.
+- Python 3.10-3.13 is validated and supported, Python 3.14 remains best effort, and versions below
+  3.10 are unsupported by the package contract.
 - Output previews keep filename-backed refs first-class, accept optional `asset_hash` / `hash` metadata when present, and leave asset-service-only identifiers as explicit fallback states.
 - LINE and WhatsApp connector media URLs now force dangerous active content such as SVG/HTML/JS/CSS/XML to download with no-sniff response headers while preserving safe image delivery.
 - Job Monitor now treats HDR `.exr` and `.hdr` image outputs as explicit source-preview fallback links instead of normal thumbnails, matching the current host expectation without bundling a HDR viewer.
@@ -230,6 +237,11 @@ Alternative install options:
 
 1. Copy/clone this repository into your ComfyUI `custom_nodes` folder
 2. Restart ComfyUI.
+
+Runtime compatibility: Python 3.10-3.13 is validated and supported. Python 3.14 is best effort,
+and versions below 3.10 are unsupported. See the
+[compatibility matrix](docs/release/compatibility_matrix.md) for the current ComfyUI, frontend,
+and Desktop reference anchors.
 
 If the UI loads but endpoints return 404, ComfyUI likely did not load the Python part of the pack (see Troubleshooting).
 

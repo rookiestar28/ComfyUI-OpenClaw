@@ -7,6 +7,23 @@ Newest entries appear first.
 
 <details>
 
+<summary><strong>Current host support and startup verification refreshed</strong></summary>
+
+- Refreshed the active references to ComfyUI `3aba3dae` / `0.33.0` and standalone frontend
+  `1.52.1`, while retaining legacy Desktop `0.9.4` as a fixed bundle and current
+  Comfy-Desktop `1.0.32-rc.1` as a managed-install host with installation-specific components.
+- Aligned the public runtime policy around validated Python 3.10-3.13 support, best-effort Python
+  3.14 compatibility, and an unsupported floor below Python 3.10.
+- Added loader-realistic regression coverage that exercises the packaged entrypoint with a ready
+  host server and verifies real route-family registration on the first startup attempt without
+  retry or process-state leakage.
+- Expanded the existing adversarial classifier to cover the exact startup loader, route-bootstrap,
+  registration, contract, and import-fallback owners without broadening unrelated path matching.
+
+</details>
+
+<details>
+
 <summary><strong>Startup, security posture, and architecture boundaries hardened</strong></summary>
 
 - Added a dependency-light production source verifier to pre-commit. It parses tracked Python
