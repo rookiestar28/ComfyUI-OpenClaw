@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import subprocess
 import unittest
 from pathlib import Path
@@ -18,10 +19,14 @@ LEGACY_HIGH_RISK_PATTERNS = {
     "services/webhook_auth.py",
     "services/safe_io.py",
 }
-BOOTSTRAP_BOUNDARIES = [
+STARTUP_OWNERS = [
+    "__init__.py",
+    "services/route_bootstrap.py",
     "services/bootstrap/registration.py",
     "services/route_bootstrap_contract.py",
+    "services/import_fallback.py",
 ]
+EXPECTED_SORTED_STARTUP_OWNERS = sorted(STARTUP_OWNERS)
 
 
 def _load_gate_module():
@@ -40,35 +45,58 @@ class AdversarialBootstrapClassificationTests(unittest.TestCase):
     def setUpClass(cls):
         cls.gate = _load_gate_module()
 
-    def test_bootstrap_route_boundary_diff_selects_extended(self):
-        changed = [
-            *BOOTSTRAP_BOUNDARIES,
-            "tests/test_route_bootstrap_contract.py",
-        ]
+    def test_each_startup_owner_diff_selects_extended(self):
+        for owner in STARTUP_OWNERS:
+            with (
+                self.subTest(owner=owner),
+                patch.object(
+                    self.gate,
+                    "_collect_changed_files",
+                    return_value=([owner], "fixture: startup owner"),
+                ),
+            ):
+                result = self.gate._resolve_effective_profile(
+                    "auto", None, None, self.gate.DEFAULT_HIGH_RISK_PATTERNS
+                )
+
+            self.assertEqual(
+                result,
+                ("extended", [owner], [owner], "fixture: startup owner"),
+            )
+
+    def test_all_startup_owners_diff_selects_extended_with_exact_matches(self):
+        changed = sorted([*STARTUP_OWNERS, "tests/test_route_bootstrap_contract.py"])
         with patch.object(
             self.gate,
             "_collect_changed_files",
-            return_value=(changed, "fixture: bootstrap boundary"),
+            return_value=(changed, "fixture: startup owners"),
         ):
             result = self.gate._resolve_effective_profile(
                 "auto", None, None, self.gate.DEFAULT_HIGH_RISK_PATTERNS
             )
 
-        self.assertEqual(result[0], "extended")
-        self.assertEqual(result[1], changed)
-        self.assertEqual(result[2], BOOTSTRAP_BOUNDARIES)
-        self.assertEqual(result[3], "fixture: bootstrap boundary")
+        self.assertEqual(
+            result,
+            (
+                "extended",
+                changed,
+                EXPECTED_SORTED_STARTUP_OWNERS,
+                "fixture: startup owners",
+            ),
+        )
 
     def test_default_inventory_preserves_legacy_and_adds_only_exact_boundaries(self):
         patterns = set(self.gate.DEFAULT_HIGH_RISK_PATTERNS)
         self.assertTrue(LEGACY_HIGH_RISK_PATTERNS.issubset(patterns))
         self.assertEqual(
             patterns - LEGACY_HIGH_RISK_PATTERNS,
-            set(BOOTSTRAP_BOUNDARIES),
+            set(STARTUP_OWNERS),
         )
+        self.assertEqual(len(patterns), len(self.gate.DEFAULT_HIGH_RISK_PATTERNS))
         self.assertNotIn("services/**", patterns)
         self.assertNotIn("services/bootstrap/**", patterns)
         self.assertNotIn("services/bootstrap/*.py", patterns)
+        self.assertNotIn("**/__init__.py", patterns)
 
     def test_legacy_high_risk_paths_still_match(self):
         candidates = [
@@ -94,8 +122,14 @@ class AdversarialBootstrapClassificationTests(unittest.TestCase):
             "services/bootstrap/posture.py",
             "services/bootstrap/registration_helper.py",
             "services/route_bootstrap_contract.py.bak",
+            "services/route_bootstrap_helper.py",
+            "services/import_fallback.py.bak",
+            "nested/services/import_fallback.py",
+            "services/__init__.py",
+            "services/bootstrap/__init__.py",
             "services/other.py",
             "tests/test_route_bootstrap_contract.py",
+            "docs/route_bootstrap.md",
         ]
         self.assertEqual(
             self.gate._filter_high_risk_files(
@@ -135,24 +169,32 @@ class AdversarialBootstrapClassificationTests(unittest.TestCase):
 
     def test_candidate_normalization_is_cross_platform_and_deterministic(self):
         candidates = [
-            r".\services\route_bootstrap_contract.py",
-            r"services\bootstrap\registration.py",
-            "services/bootstrap/registration.py",
+            r".\__init__.py",
+            r".\services\route_bootstrap.py",
+            "services/bootstrap/./registration.py",
+            r"services\route_bootstrap_contract.py",
+            "services/./import_fallback.py",
         ]
         self.assertEqual(
-            self.gate._filter_high_risk_files(candidates, BOOTSTRAP_BOUNDARIES),
-            BOOTSTRAP_BOUNDARIES,
+            self.gate._filter_high_risk_files(candidates, STARTUP_OWNERS),
+            EXPECTED_SORTED_STARTUP_OWNERS,
         )
 
     def test_malformed_paths_cannot_alias_bootstrap_boundaries(self):
-        candidates = [
-            "../services/bootstrap/registration.py",
-            "/services/bootstrap/registration.py",
-            r"C:\repo\services\bootstrap\registration.py",
-            ".../services/bootstrap/registration.py",
-        ]
+        candidates = []
+        for owner in STARTUP_OWNERS:
+            candidates.extend(
+                [
+                    f"../{owner}",
+                    f"/{owner}",
+                    rf"C:\repo\{owner}",
+                    f".../{owner}",
+                    f"{owner}.bak",
+                    f"nested/{owner}",
+                ]
+            )
         self.assertEqual(
-            self.gate._filter_high_risk_files(candidates, BOOTSTRAP_BOUNDARIES),
+            self.gate._filter_high_risk_files(candidates, STARTUP_OWNERS),
             [],
         )
         self.assertEqual(
@@ -162,6 +204,86 @@ class AdversarialBootstrapClassificationTests(unittest.TestCase):
         self.assertEqual(
             self.gate._normalize_rel_path("/services/bootstrap/registration.py"),
             "/services/bootstrap/registration.py",
+        )
+
+    def test_build_manifest_preserves_selection_and_artifact_schema(self):
+        changed_files = sorted(
+            [
+                "scripts/run_adversarial_gate.py",
+                "tests/test_adversarial_bootstrap_classification.py",
+            ]
+        )
+        fuzz_result = {
+            "suite": "r111_fuzz",
+            "passed": True,
+            "seed": 42,
+            "max_runs_per_target": 200,
+            "total_crashes": 0,
+            "crash_artifacts": [],
+        }
+        mutation_result = {
+            "suite": "r113_mutation",
+            "passed": True,
+            "score": 90.0,
+            "threshold": 20.0,
+            "total_mutants": 10,
+            "killed": 9,
+            "survived": 1,
+        }
+        manifest = self.gate.build_manifest(
+            "auto",
+            "smoke",
+            42,
+            fuzz_result,
+            mutation_result,
+            ".tmp/adversarial-extended",
+            1.25,
+            changed_files=changed_files,
+            high_risk_changed_files=[],
+            diff_source="git diff base...candidate",
+        )
+
+        self.assertEqual(
+            set(manifest),
+            {
+                "r118_version",
+                "profile_requested",
+                "profile",
+                "seed",
+                "timestamp",
+                "elapsed_sec",
+                "decision",
+                "selection",
+                "suites",
+                "artifact_dir",
+                "replay_command",
+            },
+        )
+        self.assertEqual(manifest["r118_version"], "1.0")
+        self.assertEqual(manifest["profile_requested"], "auto")
+        self.assertEqual(manifest["profile"], "smoke")
+        self.assertEqual(manifest["seed"], 42)
+        self.assertEqual(manifest["decision"], "PASS")
+        self.assertEqual(
+            manifest["selection"],
+            {
+                "diff_source": "git diff base...candidate",
+                "changed_files": changed_files,
+                "high_risk_changed_files": [],
+            },
+        )
+        self.assertEqual(
+            manifest["suites"],
+            {"r111_fuzz": fuzz_result, "r113_mutation": mutation_result},
+        )
+        self.assertEqual(manifest["elapsed_sec"], 1.25)
+        self.assertEqual(
+            manifest["artifact_dir"],
+            os.path.abspath(".tmp/adversarial-extended"),
+        )
+        self.assertIn(
+            "--profile smoke --seed 42 --artifact-dir .tmp/adversarial-extended",
+            manifest["replay_command"],
         )
 
     def test_custom_appended_pattern_remains_supported(self):

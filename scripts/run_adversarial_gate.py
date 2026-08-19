@@ -38,8 +38,11 @@ DEFAULT_HIGH_RISK_PATTERNS = [
     "services/tenant_context.py",
     "api/routes.py",
     # CRITICAL: keep route-bootstrap owners exact; broad service globs over-escalate CI.
+    "__init__.py",
+    "services/route_bootstrap.py",
     "services/bootstrap/registration.py",
     "services/route_bootstrap_contract.py",
+    "services/import_fallback.py",
     "services/security_*.py",
     "services/startup_profile_gate.py",
     "services/control_plane.py",
