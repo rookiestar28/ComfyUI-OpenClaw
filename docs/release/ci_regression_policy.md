@@ -1,8 +1,21 @@
 # CI Regression Policy
 
-All pull requests must pass the repository SOP gate before merge.
+<!-- CURRENT-TEST-GOVERNANCE:START -->
+## Current Test Governance
 
-## Mandatory Checks
+- Pure text/documentation changes and version-field-only `pyproject.toml` updates require no plan,
+  independent reviewer, test contract, Full Gate, E2E, or Hosted CI run. Behavior-bearing
+  `pyproject.toml` changes are not exempt.
+- Non-exempt implementation work must pass the repository Windows Full Gate. That local result is
+  the authoritative repository-wide acceptance evidence; push and Hosted CI are not prerequisites
+  and need not bind evidence to a pushed commit.
+- Hosted workflows, including CodeQL, are advisory diagnostics unless an active item explicitly
+  makes a separate security, release, or publication boundary part of its acceptance criteria.
+<!-- CURRENT-TEST-GOVERNANCE:END -->
+
+All non-exempt pull requests must pass the Windows repository SOP gate before merge.
+
+## Required Windows Full Gate Checks
 
 | Check | Command | Purpose |
 | --- | --- | --- |
@@ -11,12 +24,17 @@ All pull requests must pass the repository SOP gate before merge.
 | Production dependency boundary | `python scripts/verify_production_dependencies.py` | Parse tracked production imports without importing modules; block ownership, direction, cycle, and dynamic-import drift |
 | Frontend dependency audit | `npm ci` then `npm audit --audit-level=high` | Reconcile the lockfile and fail on high/critical vulnerabilities across production and development dependencies |
 | Backend dependency audit | `pip-audit -r requirements.txt` | Audit declared Python project dependencies without scanning unrelated CI runner/toolchain packages |
-| GitHub CodeQL analysis | `.github/workflows/codeql.yml` | Run repository-native static security analysis for Python, JavaScript/TypeScript, and GitHub Actions on push, pull request, and weekly schedule |
 | Coverage governance | `python scripts/verify_quality_governance.py` | Fail closed on coverage-policy, mutation-threshold, SOP-guidance, and survivor-allowlist drift |
 | Test debt governance | `python scripts/verify_test_debt_governance.py` | Fail closed on stale or under-documented skip-policy / mutation allowlist debt entries |
 | Backend unit coverage gate | `python scripts/run_backend_coverage.py --start-dir tests --pattern "test_*.py" --enforce-skip-policy tests/skip_policy.json --coverage-json .tmp/coverage/backend_unit_coverage.json` | Validate backend behavior, skip governance, and the active coverage floor from the shared local/CI artifact path |
 | Adversarial gate | `python scripts/run_adversarial_gate.py --profile auto --seed 42` | Enforce adaptive fuzz/mutation verification with smoke=>extended escalation on high-risk diffs |
 | Frontend E2E | `npm test` | Validate UI and frontend/backend integration |
+
+## Advisory Hosted Checks
+
+GitHub CodeQL in `.github/workflows/codeql.yml` may run on push, pull request, or schedule as
+supplemental security diagnostics. It is not a repository-acceptance prerequisite and is not bound
+to a pushed acceptance candidate.
 
 ## Public MAE Hard-Guarantee Suites
 
@@ -39,7 +57,7 @@ If a change intentionally modifies contract behavior:
 ## Governance Baseline
 
 - Coverage governance is part of the standard gate, not an optional reporting step.
-- Dependency-audit governance is part of CI parity:
+- Dependency-audit governance is part of the Windows Full Gate:
   - Node audit must cover production and development dependencies because build and test tooling is part of the acceptance trust boundary.
   - A separate production-only audit may be retained as a runtime-boundary readback, but it is not a substitute for the full blocking audit.
   - Python audit must stay scoped to `requirements.txt`; env-wide bare `pip-audit` is out of contract because it can fail on tool-only transient packages that are not part of the repo dependency surface.

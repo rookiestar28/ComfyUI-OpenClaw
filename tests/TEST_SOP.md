@@ -1,5 +1,24 @@
 # Test SOP
 
+<!-- CURRENT-TEST-GOVERNANCE:START -->
+## Current Change-Governance Authority
+
+This section supersedes narrower documentation exceptions, platform-selection rules, and Hosted CI
+acceptance wording elsewhere in this file.
+
+- Pure text/documentation changes and version-field-only `pyproject.toml` updates do not require
+  planning, a roadmap item, records/logs, independent review, a documentation test contract, E2E,
+  or the full repository gate. Use proportionate text/TOML/metadata checks only when useful.
+- Dependency, build, tool-configuration, entry-point, runtime-compatibility, or other
+  behavior-bearing `pyproject.toml` changes are not version-only fast-path changes.
+- For non-exempt work, a passing Windows Full Gate is the authoritative repository-wide test
+  result. Neither push nor Hosted CI is required, and acceptance evidence does not need to bind to a
+  pushed commit. Linux/WSL and Hosted CI runs are optional diagnostics unless the current item
+  explicitly requires platform-specific evidence.
+- Required item-scoped security, live-host, provider, migration, release, or publication checks
+  remain additive.
+<!-- CURRENT-TEST-GOVERNANCE:END -->
+
 ### Problem-First Test Design Rule (Mandatory)
 
 All test scripts, test harnesses, and validation flows must be designed first to reproduce real failures and catch bugs early.
@@ -832,7 +851,7 @@ A green full gate alone is not sufficient bugfix evidence unless the record also
 
 ### Documentation-only Exception
 
-If all touched files are documentation/planning text only and no code, tests, scripts, config, generated artifacts, dependency manifests, or runtime behavior changed, full test execution is optional. Once executable or runtime-affecting files change, this exception does not apply.
+If all touched files are documentation/planning text only and no code, tests, scripts, config, generated artifacts, dependency manifests other than a version-field-only `pyproject.toml` update, or runtime behavior changed, no full test execution is required. Once executable or runtime-affecting files change, this exception does not apply.
 
 ### Environment Guardrails
 

@@ -1,5 +1,17 @@
 # CodeQL and Secret Scanning Policy Reference
 
+<!-- CURRENT-TEST-GOVERNANCE:START -->
+## Current Acceptance Boundary
+
+- Pure text/documentation changes and version-field-only `pyproject.toml` updates require no plan,
+  independent reviewer, test contract, Full Gate, E2E, or Hosted CI run.
+- For non-exempt work, the Windows Full Gate is authoritative. CodeQL and secret-scanning workflows
+  are supplemental hosted security diagnostics; they are not ordinary acceptance prerequisites and
+  do not bind evidence to a pushed commit.
+- When an active security item explicitly requires closure of an existing GitHub alert, the hosted
+  rescan is item-scoped external evidence only and remains separate from repository-wide acceptance.
+<!-- CURRENT-TEST-GOVERNANCE:END -->
+
 Date: 2026-04-08
 Scope: Repository planning guidance for GitHub-native security scanning policy during and after the residual alert wave.
 
@@ -76,5 +88,6 @@ For each remaining GitHub Security family:
 - prefer code changes that make the safe boundary obvious to both humans and scanners
 - add a hot-spot comment at the fix point when regression risk is high
 - add targeted regression coverage if a local seam exists
-- verify GitHub rescans after push
+- for an item explicitly closing an existing GitHub alert, verify the hosted rescan; ordinary
+  repository acceptance does not require a push or rescan
 - dismiss only as a last resort, with recorded rationale

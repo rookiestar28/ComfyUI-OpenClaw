@@ -1,5 +1,17 @@
 # ComfyUI-OpenClaw E2E Testing SOP
 
+<!-- CURRENT-TEST-GOVERNANCE:START -->
+## Current Governance Scope
+
+A change limited to pure text/documentation files, a version-field-only `pyproject.toml` update, or
+both does not enter this E2E workflow and requires no planning, roadmap item, record/log,
+independent review, documentation test contract, browser installation, or full gate. Behavior-
+bearing metadata changes do not qualify. For non-exempt work, applicable E2E runs through the
+authoritative Windows Full Gate. Hosted CI repetitions are optional diagnostics and are not
+acceptance prerequisites or pushed-commit evidence. Explicit item-scoped live/supported-host checks
+remain separate when required.
+<!-- CURRENT-TEST-GOVERNANCE:END -->
+
 ## Problem-First Test Design Rule
 
 E2E scripts and mocked harness flows must be designed to reproduce failures and catch bugs early. The goal is not to make the harness pass; the goal is to make the harness fail when a real user-facing contract breaks.

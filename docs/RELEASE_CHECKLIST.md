@@ -1,5 +1,18 @@
 # Release Checklist (DoD)
 
+<!-- CURRENT-ACCEPTANCE-POLICY:START -->
+## Current Acceptance Boundary
+
+- Pure text/documentation changes and version-field-only `pyproject.toml` updates, when no release
+  or publication action is being performed, require no plan, independent reviewer, test contract,
+  Full Gate, E2E, or Hosted CI run.
+- For non-exempt work, including an actual release candidate, the Windows Full Gate is the
+  authoritative repository-wide result. Push and Hosted CI are not prerequisites and need not bind
+  evidence to a pushed commit.
+- Release-specific provenance, archive, registry, installation, rollback, and owner decision checks
+  below remain additive when a release is actually performed.
+<!-- CURRENT-ACCEPTANCE-POLICY:END -->
+
 This document contains the authoritative checklist for releasing **ComfyUI-OpenClaw**.
 A release candidate must pass **Gate A** to be considered for Public Release v1.
 If the deployment enables remote control or bridge features, it must also pass **Gate B**.
@@ -39,15 +52,17 @@ If the deployment enables remote control or bridge features, it must also pass *
 
 ### 3. Validation (Must Pass)
 
-Run the complete OS-specific regression gate:
+Run the authoritative Windows Full Gate:
 
 ```powershell
 # Windows
 powershell -File scripts/run_full_tests_windows.ps1
 ```
 
+Linux/WSL may be run as an optional diagnostic unless the active release item explicitly requires
+that platform:
+
 ```bash
-# Linux / WSL
 bash scripts/run_full_tests_linux.sh
 ```
 
