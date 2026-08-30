@@ -115,6 +115,7 @@
       "config.py"
     ],
     "scripts": [
+      "scripts/bootstrap_project_venv.py",
       "scripts/check_deployment_profile.py",
       "scripts/check_openapi_sync.py",
       "scripts/check_supply_chain_hardening.py",
