@@ -26,6 +26,9 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Bootstrap project-local Python
+        run: python scripts/bootstrap_project_venv.py
+
       - name: Install pre-commit (and formatters)
         run: |
           # Install black/isort explicitly so CI doesn't fail due to missing tools

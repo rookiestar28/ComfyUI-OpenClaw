@@ -85,12 +85,15 @@ Required guardrails:
 - **Python interpreter must be consistent** for all test commands.
   - Verify: `python -c "import sys; print(sys.executable)"`
   - If you use conda or venv, ensure the same interpreter runs unit tests and connector tests.
-- **Project venv recommended**: use an OS-specific local venv to avoid mixed dependencies.
-  - Linux/WSL recommended path: `.venv-wsl` (especially when Windows also uses `.venv` in the same repo)
-  - Other environments: `.venv`
+- **Project-local venv required**: all automated validation must use a repository-local
+  interpreter to avoid mixed dependencies and parent/child interpreter drift.
+  - Windows and native Linux/Hosted CI path: `.venv`
+  - WSL path: `.venv-wsl` (especially when Windows also uses `.venv` in the same repo)
   - Create: `python -m venv .venv-wsl` (WSL) or `python -m venv .venv`
   - Activate (bash): `source .venv-wsl/bin/activate` (or `.venv/bin/activate`)
   - Activate (pwsh): `.\.venv\Scripts\Activate.ps1`
+  - In GitHub Actions, `actions/setup-python` is bootstrap authority only. Every install,
+    check, and test after it must resolve through repository-local `.venv`.
   - If tests fail due to missing deps in CI parity, rerun in the project venv used by scripts and record that in the implementation record.
 - **Node version must be 18+** before E2E:
   - Verify: `node -v`
@@ -856,7 +859,7 @@ If all touched files are documentation/planning text only and no code, tests, sc
 ### Environment Guardrails
 
 - Keep the Python interpreter consistent across all commands.
-- Prefer a project-local virtual environment: `.venv` on Windows and `.venv-wsl` on WSL/Linux when the repo supports dual-OS validation.
+- Require a project-local virtual environment: `.venv` on Windows/native Linux/Hosted CI and `.venv-wsl` on WSL when the repo supports dual-OS validation.
 - Do not mix global and venv-installed `pre-commit` accidentally.
 - Node.js must be 18+ before running frontend/E2E tests.
 - On Windows, prefer repo-local `PRE_COMMIT_HOME` to avoid cache lock issues.
