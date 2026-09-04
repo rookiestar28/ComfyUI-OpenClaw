@@ -379,7 +379,14 @@ class RepositoryArchitecturePolicyTests(unittest.TestCase):
         self.assertEqual(len(analysis.owned_paths), 310)
         self.assertEqual(len(policy["accepted_cycles"]), 2)
         self.assertEqual(len(policy["dynamic_imports"]), 8)
-        self.assertEqual(len(policy["compatibility_exceptions"]), 9)
+        self.assertEqual(len(policy["compatibility_exceptions"]), 8)
+        self.assertNotIn(
+            ("services.queue_submit", "api.errors"),
+            {
+                (entry["importer"], entry["imported"])
+                for entry in policy["compatibility_exceptions"]
+            },
+        )
         self.assertEqual(len(policy["facade_contracts"]), 3)
 
     def test_policy_change_does_not_weaken_static_analysis_governance(self):
