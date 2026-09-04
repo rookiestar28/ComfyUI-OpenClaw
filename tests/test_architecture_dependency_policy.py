@@ -479,6 +479,39 @@ class ArchitecturePolicyFixture(unittest.TestCase):
         self.assertIn(("core", "core.util"), analysis.static_edges)
         self.assertEqual(analysis.findings, ())
 
+    def test_canonical_dual_import_helper_normalizes_repo_root_init_target(self):
+        self._write(
+            "__init__.py",
+            "from services.import_fallback import import_module_dual as load_module\n"
+            "load_module(__package__, '.services.queue_submit', "
+            "'services.queue_submit')\n",
+        )
+        self._write("services/__init__.py", "")
+        self._write(
+            "services/import_fallback.py",
+            "def import_module_dual(*args, **kwargs): ...\n",
+        )
+        self._write("services/queue_submit.py", "VALUE = 1\n")
+        policy = self._policy()
+        policy["tracked_roots"].extend(["__init__.py", "services"])
+        policy["domains"]["root"] = ["__init__.py"]
+        policy["domains"]["services"] = [
+            "services/__init__.py",
+            "services/import_fallback.py",
+            "services/queue_submit.py",
+        ]
+        policy["allowed_dependencies"]["root"] = ["root", "services"]
+        policy["allowed_dependencies"]["services"] = ["services"]
+
+        analysis = dependency_policy.analyze_repository(
+            self.repo_root,
+            policy,
+            tracked_files=self._tracked_files(),
+        )
+
+        self.assertIn(("__init__", "services.queue_submit"), analysis.static_edges)
+        self.assertEqual(analysis.findings, ())
+
     def test_unrelated_same_name_helper_does_not_synthesize_static_edge(self):
         self._write(
             "core/util.py",

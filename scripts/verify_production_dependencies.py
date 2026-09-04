@@ -942,12 +942,15 @@ class _SourceVisitor(ast.NodeVisitor):
         level = len(value) - len(value.lstrip("."))
         if not level:
             return value
-        # IMPORTANT: package __init__ owns its own relative-import base; dropping that
-        # component creates a false mismatch and blocks a valid governed helper edge.
-        is_package = self.path.endswith("/__init__.py") or self.path == "__init__.py"
-        package_parts = self.module.split(".")
-        if not is_package:
-            package_parts = package_parts[:-1]
+        # IMPORTANT: nested __init__ owns its package base, while repo-root __init__ uses
+        # a sentinel module name that is not a package component; confusing either case
+        # creates false mismatches and blocks valid governed helper edges.
+        if self.path == "__init__.py":
+            package_parts: list[str] = []
+        elif self.path.endswith("/__init__.py"):
+            package_parts = self.module.split(".")
+        else:
+            package_parts = self.module.split(".")[:-1]
         ascend = level - 1
         if ascend > len(package_parts):
             return None
