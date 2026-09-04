@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import symtable
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -41,29 +42,248 @@ class ScopedCall:
     scope: str
 
 
+@dataclass(frozen=True)
+class _ScopeImports:
+    builtin_modules: frozenset[str]
+    builtin_symbols: dict[str, str]
+
+
+class _ImportOriginCollector(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.origins: dict[str, set[str]] = {}
+
+    def _record(self, local_name: str, origin: str) -> None:
+        self.origins.setdefault(local_name, set()).add(origin)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            local_name = alias.asname or alias.name.split(".", 1)[0]
+            origin = "module:builtins" if alias.name == "builtins" else "other"
+            self._record(local_name, origin)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        for alias in node.names:
+            local_name = alias.asname or alias.name
+            if node.module == "builtins" and alias.name in {
+                "print",
+                "Exception",
+                "BaseException",
+            }:
+                origin = f"symbol:{alias.name}"
+            else:
+                origin = "other"
+            self._record(local_name, origin)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        return
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        return
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        return
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        return
+
+
+def _scope_imports(body: Iterable[ast.stmt]) -> _ScopeImports:
+    collector = _ImportOriginCollector()
+    for statement in body:
+        collector.visit(statement)
+    builtin_modules = {
+        name
+        for name, origins in collector.origins.items()
+        if origins == {"module:builtins"}
+    }
+    builtin_symbols = {
+        name: next(iter(origins)).removeprefix("symbol:")
+        for name, origins in collector.origins.items()
+        if len(origins) == 1 and next(iter(origins)).startswith("symbol:")
+    }
+    return _ScopeImports(frozenset(builtin_modules), builtin_symbols)
+
+
 class _BroadCatchVisitor(ast.NodeVisitor):
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, source: str, tree: ast.Module):
         self.path = path.as_posix()
         self.scope_stack: list[str] = []
         self.catches: list[BroadCatch] = []
         self.pass_only_catches: list[BroadCatch] = []
         self.print_calls: list[ScopedCall] = []
+        module_table = symtable.symtable(source, str(path), "exec")
+        self._table_stack = [module_table]
+        self._imports_stack = [_scope_imports(tree.body)]
+        self._child_tables: dict[symtable.SymbolTable, list[symtable.SymbolTable]] = {}
+
+    def _take_child_table(self, name: str, line: int) -> symtable.SymbolTable:
+        parent = self._table_stack[-1]
+        children = self._child_tables.setdefault(parent, list(parent.get_children()))
+        for index, child in enumerate(children):
+            if child.get_name() == name and child.get_lineno() == line:
+                return children.pop(index)
+        raise RuntimeError(f"missing symbol table for {name} at line {line}")
+
+    @staticmethod
+    def _has_binding(table: symtable.SymbolTable, name: str) -> bool:
+        if name not in table.get_identifiers():
+            return False
+        symbol = table.lookup(name)
+        return bool(
+            symbol.is_local()
+            and (
+                symbol.is_assigned()
+                or symbol.is_imported()
+                or symbol.is_parameter()
+                or symbol.is_namespace()
+            )
+        )
+
+    def _binding_index(self, name: str) -> int | None:
+        current = self._table_stack[-1]
+        if name not in current.get_identifiers():
+            return None
+        symbol = current.lookup(name)
+        if self._has_binding(current, name):
+            return len(self._table_stack) - 1
+        if symbol.is_free() or symbol.is_nonlocal():
+            for index in range(len(self._table_stack) - 2, -1, -1):
+                if self._has_binding(self._table_stack[index], name):
+                    return index
+            return None
+        if symbol.is_global() and self._has_binding(self._table_stack[0], name):
+            return 0
+        return None
+
+    def _canonical_import_symbol(self, name: str) -> str | None:
+        binding_index = self._binding_index(name)
+        if binding_index is None:
+            return None
+        table = self._table_stack[binding_index]
+        symbol = table.lookup(name)
+        if not symbol.is_imported() or symbol.is_assigned():
+            return None
+        return self._imports_stack[binding_index].builtin_symbols.get(name)
+
+    def _resolves_to_builtin_symbol(self, name: str, expected: str) -> bool:
+        binding_index = self._binding_index(name)
+        if binding_index is None:
+            return name == expected
+        return self._canonical_import_symbol(name) == expected
+
+    def _resolves_to_builtin_module(self, name: str) -> bool:
+        binding_index = self._binding_index(name)
+        if binding_index is None:
+            return False
+        table = self._table_stack[binding_index]
+        symbol = table.lookup(name)
+        return bool(
+            symbol.is_imported()
+            and not symbol.is_assigned()
+            and name in self._imports_stack[binding_index].builtin_modules
+        )
+
+    def _catch_type_name(self, node: ast.expr | None) -> str:
+        if node is None:
+            return "bare"
+        if isinstance(node, ast.Name):
+            for expected in ("BaseException", "Exception"):
+                if self._resolves_to_builtin_symbol(node.id, expected):
+                    return expected
+            if node.id in {"BaseException", "Exception"}:
+                return ""
+            return node.id
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.attr in {"Exception", "BaseException"}
+            and self._resolves_to_builtin_module(node.value.id)
+        ):
+            return node.attr
+        if isinstance(node, ast.Tuple):
+            names = {self._catch_type_name(item) for item in node.elts}
+            if "BaseException" in names:
+                return "BaseException"
+            if "Exception" in names:
+                return "Exception"
+        return ""
+
+    def _visit_outer_function_expressions(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda
+    ) -> None:
+        if not isinstance(node, ast.Lambda):
+            for decorator in node.decorator_list:
+                self.visit(decorator)
+            if node.returns is not None:
+                self.visit(node.returns)
+            for type_parameter in getattr(node, "type_params", ()):
+                self.visit(type_parameter)
+        arguments = node.args
+        for argument in (
+            *arguments.posonlyargs,
+            *arguments.args,
+            *arguments.kwonlyargs,
+        ):
+            if argument.annotation is not None:
+                self.visit(argument.annotation)
+        for optional_argument in (arguments.vararg, arguments.kwarg):
+            if (
+                optional_argument is not None
+                and optional_argument.annotation is not None
+            ):
+                self.visit(optional_argument.annotation)
+        for default in (*arguments.defaults, *arguments.kw_defaults):
+            if default is not None:
+                self.visit(default)
+
+    def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        self._visit_outer_function_expressions(node)
+        child = self._take_child_table(node.name, node.lineno)
+        self.scope_stack.append(node.name)
+        self._table_stack.append(child)
+        self._imports_stack.append(_scope_imports(node.body))
+        for statement in node.body:
+            self.visit(statement)
+        self._imports_stack.pop()
+        self._table_stack.pop()
+        self.scope_stack.pop()
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for base in node.bases:
+            self.visit(base)
+        for keyword in node.keywords:
+            self.visit(keyword.value)
+        for type_parameter in getattr(node, "type_params", ()):
+            self.visit(type_parameter)
+        child = self._take_child_table(node.name, node.lineno)
         self.scope_stack.append(node.name)
-        self.generic_visit(node)
+        self._table_stack.append(child)
+        self._imports_stack.append(_scope_imports(node.body))
+        for statement in node.body:
+            self.visit(statement)
+        self._imports_stack.pop()
+        self._table_stack.pop()
         self.scope_stack.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self.scope_stack.append(node.name)
-        self.generic_visit(node)
-        self.scope_stack.pop()
+        self._visit_function(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         self.visit_FunctionDef(node)
 
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        self._visit_outer_function_expressions(node)
+        child = self._take_child_table("lambda", node.lineno)
+        self._table_stack.append(child)
+        self._imports_stack.append(_ScopeImports(frozenset(), {}))
+        self.visit(node.body)
+        self._imports_stack.pop()
+        self._table_stack.pop()
+
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
-        catch_type = _catch_type_name(node.type)
+        catch_type = self._catch_type_name(node.type)
         if catch_type in {"bare", "Exception", "BaseException"}:
             catch = BroadCatch(
                 path=self.path,
@@ -81,7 +301,18 @@ class _BroadCatchVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
-        if isinstance(node.func, ast.Name) and node.func.id == "print":
+        # CRITICAL: keep lexical/import resolution here; syntax-only matching lets
+        # builtins.print bypass the ratchet and mistakes shadowed helpers for stdout.
+        is_runtime_print = (
+            isinstance(node.func, ast.Name)
+            and self._resolves_to_builtin_symbol(node.func.id, "print")
+        ) or (
+            isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.attr == "print"
+            and self._resolves_to_builtin_module(node.func.value.id)
+        )
+        if is_runtime_print:
             self.print_calls.append(
                 ScopedCall(
                     path=self.path,
@@ -92,38 +323,26 @@ class _BroadCatchVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def _catch_type_name(node: ast.expr | None) -> str:
-    if node is None:
-        return "bare"
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Tuple):
-        names = {_catch_type_name(item) for item in node.elts}
-        if "BaseException" in names:
-            return "BaseException"
-        if "Exception" in names:
-            return "Exception"
-    return ""
+def _visitor_for(path: Path) -> _BroadCatchVisitor:
+    source = path.read_text(encoding="utf-8-sig")
+    tree = ast.parse(source, filename=str(path))
+    visitor = _BroadCatchVisitor(path, source, tree)
+    visitor.visit(tree)
+    return visitor
 
 
 def iter_broad_catches(path: Path) -> Iterable[BroadCatch]:
-    tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
-    visitor = _BroadCatchVisitor(path)
-    visitor.visit(tree)
+    visitor = _visitor_for(path)
     return tuple(visitor.catches)
 
 
 def iter_pass_only_broad_catches(path: Path) -> Iterable[BroadCatch]:
-    tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
-    visitor = _BroadCatchVisitor(path)
-    visitor.visit(tree)
+    visitor = _visitor_for(path)
     return tuple(visitor.pass_only_catches)
 
 
 def iter_runtime_prints(path: Path) -> Iterable[ScopedCall]:
-    tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
-    visitor = _BroadCatchVisitor(path)
-    visitor.visit(tree)
+    visitor = _visitor_for(path)
     return tuple(visitor.print_calls)
 
 

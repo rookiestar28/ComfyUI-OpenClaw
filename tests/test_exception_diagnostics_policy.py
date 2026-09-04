@@ -6,7 +6,6 @@ import asyncio
 import builtins
 import copy
 import io
-import json
 import tempfile
 import time
 import unittest
@@ -425,6 +424,219 @@ class TestExceptionDiagnosticsPolicy(unittest.TestCase):
             drift["stdout_contract"]["allowed"][0]["expected_count"] = 2
             failures = validate_exception_boundary_policy(repo, drift)
             self.assertTrue(any("runtime print" in item for item in failures))
+
+    def test_policy_rejects_unowned_qualified_builtin_print(self):
+        from scripts.verify_exception_boundary_policy import (
+            validate_exception_boundary_policy,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "api").mkdir()
+            (repo / "selected.py").write_text("value = 1\n", encoding="utf-8")
+            (repo / "api" / "runtime.py").write_text(
+                "import builtins\n\ndef runtime():\n    builtins.print('not-owned')\n",
+                encoding="utf-8",
+            )
+
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertTrue(any("unowned runtime print" in item for item in failures))
+
+    def test_policy_ignores_lexically_shadowed_print(self):
+        from scripts.verify_exception_boundary_policy import (
+            validate_exception_boundary_policy,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "api").mkdir()
+            (repo / "selected.py").write_text("value = 1\n", encoding="utf-8")
+            (repo / "api" / "runtime.py").write_text(
+                "def runtime():\n"
+                "    def print(*args):\n"
+                "        return args\n"
+                "    print('not-stdout')\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                validate_exception_boundary_policy(repo, self._minimal_policy()), []
+            )
+
+    def test_policy_ignores_parameter_assignment_import_and_closure_shadows(self):
+        from scripts.verify_exception_boundary_policy import (
+            validate_exception_boundary_policy,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "api").mkdir()
+            (repo / "selected.py").write_text("value = 1\n", encoding="utf-8")
+            (repo / "api" / "runtime.py").write_text(
+                "def print(*args):\n    return args\n\n"
+                "print('module-shadow')\n\n"
+                "def by_parameter(print):\n    print('parameter-shadow')\n\n"
+                "def by_assignment():\n"
+                "    print = lambda *args: args\n"
+                "    print('assignment-shadow')\n\n"
+                "def by_import():\n"
+                "    import json as print\n"
+                "    print('import-shadow')\n\n"
+                "def outer():\n"
+                "    def print(*args):\n        return args\n"
+                "    def inner():\n        print('closure-shadow')\n"
+                "    return inner\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                validate_exception_boundary_policy(repo, self._minimal_policy()), []
+            )
+
+    def test_policy_recognizes_non_reassigned_builtin_import_aliases(self):
+        from scripts.verify_exception_boundary_policy import (
+            validate_exception_boundary_policy,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "api").mkdir()
+            (repo / "selected.py").write_text("value = 1\n", encoding="utf-8")
+            (repo / "api" / "runtime.py").write_text(
+                "import builtins as builtin_module\n"
+                "from builtins import print as emit\n\n"
+                "def runtime():\n"
+                "    builtin_module.print('qualified')\n"
+                "    emit('imported')\n",
+                encoding="utf-8",
+            )
+            policy = self._minimal_policy()
+            failures = validate_exception_boundary_policy(repo, policy)
+            self.assertTrue(any("unowned runtime print" in item for item in failures))
+
+            policy["stdout_contract"]["allowed"].append(
+                self._entry("api/runtime.py", "runtime", count=2)
+            )
+            self.assertEqual(validate_exception_boundary_policy(repo, policy), [])
+
+    def test_policy_ignores_reassigned_builtin_module_owner(self):
+        from scripts.verify_exception_boundary_policy import (
+            validate_exception_boundary_policy,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "api").mkdir()
+            (repo / "selected.py").write_text("value = 1\n", encoding="utf-8")
+            (repo / "api" / "runtime.py").write_text(
+                "import builtins\n\n"
+                "class Holder:\n"
+                "    def print(self, *args):\n        return args\n\n"
+                "builtins = Holder()\n"
+                "builtins.print('not-stdout')\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                validate_exception_boundary_policy(repo, self._minimal_policy()), []
+            )
+
+    def test_policy_resolves_lambda_and_comprehension_print_bindings(self):
+        from scripts.verify_exception_boundary_policy import (
+            validate_exception_boundary_policy,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "api").mkdir()
+            (repo / "selected.py").write_text("value = 1\n", encoding="utf-8")
+            source = repo / "api" / "runtime.py"
+            source.write_text(
+                "def runtime(callbacks):\n"
+                "    local = (lambda print: print('lambda-shadow'))\n"
+                "    return local, [print('comprehension-shadow') for print in callbacks]\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                validate_exception_boundary_policy(repo, self._minimal_policy()), []
+            )
+
+            source.write_text(
+                "def runtime(values):\n"
+                "    return [print(value) for value in values]\n",
+                encoding="utf-8",
+            )
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertTrue(any("unowned runtime print" in item for item in failures))
+
+            source.write_text(
+                "def runtime(values):\n"
+                "    return [(lambda: print(value)) for value in values]\n",
+                encoding="utf-8",
+            )
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertTrue(any("unowned runtime print" in item for item in failures))
+
+    def test_policy_rejects_qualified_exception_pass_only_boundary(self):
+        from scripts.verify_exception_boundary_policy import (
+            validate_exception_boundary_policy,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "api").mkdir()
+            (repo / "selected.py").write_text("value = 1\n", encoding="utf-8")
+            (repo / "api" / "runtime.py").write_text(
+                "import builtins\n\ndef degrade():\n"
+                "    try:\n        return 1\n"
+                "    except builtins.Exception:\n        pass\n",
+                encoding="utf-8",
+            )
+
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertTrue(any("unowned pass-only" in item for item in failures))
+
+    def test_selected_policy_recognizes_qualified_base_exception_tuple(self):
+        from scripts.verify_exception_boundary_policy import (
+            validate_exception_boundary_policy,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "api").mkdir()
+            (repo / "selected.py").write_text(
+                "import builtins\n\ndef guard():\n"
+                "    try:\n        return 1\n"
+                "    except (LookupError, builtins.BaseException):\n"
+                "        return None\n",
+                encoding="utf-8",
+            )
+
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertTrue(
+                any("undocumented broad catch" in item for item in failures)
+            )
+
+    def test_selected_policy_ignores_shadowed_exception_class(self):
+        from scripts.verify_exception_boundary_policy import (
+            validate_exception_boundary_policy,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "api").mkdir()
+            (repo / "selected.py").write_text(
+                "class Exception:\n    pass\n\n"
+                "def guard():\n"
+                "    try:\n        return 1\n"
+                "    except Exception:\n        return None\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                validate_exception_boundary_policy(repo, self._minimal_policy()), []
+            )
 
     def test_type_only_import_uses_type_checking_without_runtime_dependency(self):
         source = (ROOT / "connector" / "router.py").read_text(encoding="utf-8")
