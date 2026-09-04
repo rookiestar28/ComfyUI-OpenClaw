@@ -23,7 +23,9 @@
     "tests.test_r213_jobs_endpoint",
     "tests.connector.test_r214_jobs_command",
     "tests.test_s70_ssrf_pinning_regression",
-    "tests.test_r216_file_backed_text_output"
+    "tests.test_r216_file_backed_text_output",
+    "tests.connector.test_ingress_transactions",
+    "tests.test_admin_api_transactions"
   ],
   "no_skip_module_metadata": {
     "tests.test_s58_bridge_token_lifecycle": {
@@ -117,6 +119,14 @@
     "tests.test_r216_file_backed_text_output": {
       "reason": "File-backed text output coverage guards untrusted file refs, bounded retrieval, and inert rendering and must remain non-skippable.",
       "review_after": "2026-10-31"
+    },
+    "tests.connector.test_ingress_transactions": {
+      "reason": "Connector trust-boundary transactions pin real HTTP and protocol-shaped signature, replay, parsing, visibility, polling, and registry decisions.",
+      "review_after": "2026-12-31"
+    },
+    "tests.test_admin_api_transactions": {
+      "reason": "Admin trust-boundary transactions pin real aiohttp authentication and approval, schedule, bridge-worker, and rewrite lifecycles.",
+      "review_after": "2026-12-31"
     }
   }
 }

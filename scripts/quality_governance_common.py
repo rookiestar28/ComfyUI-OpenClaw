@@ -56,6 +56,17 @@ def _validate_hotspot_family(
             f"coverage policy: hotspot family {family_id} must define a non-empty paths list"
         )
 
+    minimum_percent = family.get("minimum_percent_covered")
+    if minimum_percent is not None and (
+        isinstance(minimum_percent, bool)
+        or not isinstance(minimum_percent, (int, float))
+        or not 0.0 <= float(minimum_percent) <= 100.0
+    ):
+        failures.append(
+            "coverage policy: hotspot family "
+            f"{family_id} minimum_percent_covered must be a number in [0, 100]"
+        )
+
 
 def _validate_ratchet55_readiness(family: dict[str, Any], failures: list[str]) -> None:
     family_id = family["id"]
@@ -533,12 +544,21 @@ def summarize_coverage(
         percent = (
             round((covered_lines / num_statements) * 100, 2) if num_statements else 0.0
         )
+        minimum_percent = family.get("minimum_percent_covered")
         hotspot_summary[family_id] = {
             "matched_files": matched_files,
             "missing_paths": missing_paths,
             "covered_lines": covered_lines,
             "num_statements": num_statements,
             "percent_covered": percent,
+            "minimum_percent_covered": (
+                float(minimum_percent) if minimum_percent is not None else None
+            ),
+            "floor_met": (
+                percent >= float(minimum_percent)
+                if minimum_percent is not None
+                else None
+            ),
         }
 
     next_policy_stage = next_stage(policy)

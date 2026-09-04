@@ -95,6 +95,39 @@
         "ownership_status": "targeted-regression-owned",
         "readiness_notes": "Import-safe bootstrap, effective configuration, runtime configuration, and precedence behavior have explicit regression ownership."
       }
+    },
+    {
+      "id": "connector_ingress",
+      "paths": [
+        "connector/platforms/line_webhook.py",
+        "connector/platforms/slack_webhook.py",
+        "connector/platforms/discord_gateway.py",
+        "connector/platforms/telegram_polling.py",
+        "connector/reply_visibility.py",
+        "connector/results_poller.py",
+        "connector/__main__.py"
+      ],
+      "minimum_percent_covered": 34.0,
+      "ratchet55_readiness": {
+        "targeted_regression_suite": "tests/connector/test_ingress_transactions.py",
+        "ownership_status": "transactional-trust-boundary-owned",
+        "readiness_notes": "Transport-shaped signature, replay, parsing, visibility, polling, and registry decisions have a no-skip transactional owner."
+      }
+    },
+    {
+      "id": "admin_api",
+      "paths": [
+        "api/approvals.py",
+        "api/schedules.py",
+        "api/bridge.py",
+        "api/rewrite_recipes.py"
+      ],
+      "minimum_percent_covered": 42.0,
+      "ratchet55_readiness": {
+        "targeted_regression_suite": "tests/test_admin_api_transactions.py",
+        "ownership_status": "transactional-trust-boundary-owned",
+        "readiness_notes": "Real-aiohttp approval, schedule, bridge worker, and rewrite transactions have a no-skip admin boundary owner."
+      }
     }
   ],
   "exceptions": []

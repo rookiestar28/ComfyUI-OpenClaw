@@ -84,6 +84,62 @@ class TestR156QualityGovernance(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
         self.assertIn("GOVERNANCE-PASS", result.stdout)
 
+    def test_repo_policy_declares_transactional_boundary_families(self):
+        policy = json.loads(
+            (ROOT / "tests" / "coverage_governance_policy.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        required = set(policy["required_hotspot_families"])
+        families = {family["id"]: family for family in policy["hotspot_families"]}
+
+        self.assertEqual(
+            required,
+            {"safe_io", "security_boundary", "connector_config", "config_bootstrap"},
+        )
+
+        for family_id, expected_floor in (
+            ("connector_ingress", 34.0),
+            ("admin_api", 42.0),
+        ):
+            self.assertIn(family_id, families)
+            self.assertEqual(
+                families[family_id]["minimum_percent_covered"], expected_floor
+            )
+            readiness = families[family_id]["ratchet55_readiness"]
+            self.assertEqual(
+                readiness["ownership_status"],
+                "transactional-trust-boundary-owned",
+            )
+
+    def test_invalid_family_coverage_floor_is_rejected(self):
+        invalid_values = (True, -0.01, 100.01, "42.0")
+        for invalid in invalid_values:
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as tmpdir:
+                tmp = Path(tmpdir)
+                policy = sample_policy_payload()
+                policy["hotspot_families"][0]["minimum_percent_covered"] = invalid
+                fixture = write_governance_baseline_fixture(
+                    tmp, coverage_policy_payload=policy
+                )
+
+                result = self._run_script(
+                    "--pyproject",
+                    str(fixture["pyproject"]),
+                    "--adversarial-gate",
+                    str(fixture["adversarial_gate"]),
+                    "--test-sop",
+                    str(fixture["test_sop"]),
+                    "--mutation-survivor-allowlist",
+                    str(fixture["survivor_allowlist"]),
+                    "--release-policy-doc",
+                    str(fixture["release_policy_doc"]),
+                    "--coverage-policy",
+                    str(fixture["coverage_policy"]),
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("minimum_percent_covered", result.stdout)
+
     def test_missing_coverage_policy_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)

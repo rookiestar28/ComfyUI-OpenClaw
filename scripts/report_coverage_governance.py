@@ -9,6 +9,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from quality_governance_common import (
     load_and_validate_policy,
@@ -29,13 +30,32 @@ def _render_text(summary: dict[str, object]) -> str:
         "hotspot_families:",
     ]
     for family_id, payload in hotspot_families.items():
+        floor = payload["minimum_percent_covered"]
+        floor_suffix = ""
+        if floor is not None:
+            floor_suffix = f" floor={floor} floor_met={payload['floor_met']}"
         lines.append(
             f"  - {family_id}: {payload['percent_covered']} "
-            f"({payload['covered_lines']}/{payload['num_statements']})"
+            f"({payload['covered_lines']}/{payload['num_statements']}){floor_suffix}"
         )
         if payload["missing_paths"]:
             lines.append(f"    missing={', '.join(payload['missing_paths'])}")
     return "\n".join(lines) + "\n"
+
+
+def _coverage_failures(summary: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    hotspot_families = summary["hotspot_families"]
+    for family_id, payload in hotspot_families.items():
+        for path in payload["missing_paths"]:
+            failures.append(f"hotspot family {family_id} missing coverage path: {path}")
+        floor = payload["minimum_percent_covered"]
+        if floor is not None and not payload["floor_met"]:
+            failures.append(
+                f"hotspot family {family_id} below coverage floor: "
+                f"{payload['percent_covered']} < {floor}"
+            )
+    return failures
 
 
 def main() -> int:
@@ -68,12 +88,15 @@ def main() -> int:
 
     coverage_payload = read_json(Path(args.coverage_json))
     summary = summarize_coverage(policy=policy, coverage_payload=coverage_payload)
+    coverage_failures = _coverage_failures(summary)
     if args.format == "json":
         json.dump(summary, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
     else:
         sys.stdout.write(_render_text(summary))
-    return 0
+    for failure in coverage_failures:
+        print(f"REPORT-FAIL: {failure}", file=sys.stderr)
+    return 1 if coverage_failures else 0
 
 
 if __name__ == "__main__":
