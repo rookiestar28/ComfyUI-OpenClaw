@@ -183,7 +183,9 @@ class TestConnectorMediaResponse(unittest.TestCase):
 
 class TestLINESendImage(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        self._temp_dir = tempfile.TemporaryDirectory()
         self.config = ConnectorConfig()
+        self.config.state_path = Path(self._temp_dir.name) / "state.json"
         self.config.line_channel_secret = "secret"
         self.config.line_channel_access_token = "token"
 
@@ -199,7 +201,7 @@ class TestLINESendImage(unittest.IsolatedAsyncioTestCase):
         self.server.session.post.return_value.__aenter__.return_value.status = 200
 
     def tearDown(self):
-        pass  # No temp dir to clean up in this class anymore
+        self._temp_dir.cleanup()
 
     async def test_send_image_fallback(self):
         """Should send text fallback if public_base_url is missing."""
@@ -233,6 +235,7 @@ class TestConnectorMediaRoutes(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.tmp_dir = tempfile.mkdtemp()
         self.config = ConnectorConfig()
+        self.config.state_path = Path(self.tmp_dir) / "state.json"
         self.router = MagicMock(spec=CommandRouter)
 
     def tearDown(self):

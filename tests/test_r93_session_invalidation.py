@@ -1,6 +1,9 @@
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from connector.config import ConnectorConfig
 from connector.platforms.line_webhook import LINEWebhookServer
 from connector.platforms.wechat_webhook import WeChatWebhookServer
 from connector.platforms.whatsapp_webhook import WhatsAppWebhookServer
@@ -42,10 +45,19 @@ class TestRelayResponseClassifier(unittest.TestCase):
 
 
 class TestWebhookSessionInvalidation(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self.config = ConnectorConfig(
+            state_path=Path(self._temp_dir.name) / "state.json"
+        )
+
+    def tearDown(self):
+        self._temp_dir.cleanup()
+
     async def test_whatsapp_session_invalidation(self):
         """Test WhatsApp session invalidation on 401."""
         server = WhatsAppWebhookServer(
-            config=MagicMock(), router=MagicMock(spec=CommandRouter)
+            config=self.config, router=MagicMock(spec=CommandRouter)
         )
         server.session = MagicMock()
 
@@ -72,7 +84,7 @@ class TestWebhookSessionInvalidation(unittest.IsolatedAsyncioTestCase):
     async def test_line_session_invalidation(self):
         """Test LINE session invalidation on 401."""
         server = LINEWebhookServer(
-            config=MagicMock(), router=MagicMock(spec=CommandRouter)
+            config=self.config, router=MagicMock(spec=CommandRouter)
         )
         server.session = MagicMock()
 
@@ -95,8 +107,10 @@ class TestWebhookSessionInvalidation(unittest.IsolatedAsyncioTestCase):
 
     async def test_wechat_session_invalidation(self):
         """Test WeChat session invalidation on 401 (token fetch)."""
+        self.config.wechat_app_id = "test-app"
+        self.config.wechat_app_secret = "test-secret"
         server = WeChatWebhookServer(
-            config=MagicMock(), router=MagicMock(spec=CommandRouter)
+            config=self.config, router=MagicMock(spec=CommandRouter)
         )
         server.session = MagicMock()
 

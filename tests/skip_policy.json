@@ -18,6 +18,7 @@
     "tests.test_f57_slack_socket_mode_startup",
     "tests.test_connector_installation_registry",
     "tests.test_connector_callback_contract",
+    "tests.test_workspace_isolation",
     "tests.test_s100_jobs_security_contract",
     "tests.test_r213_jobs_endpoint",
     "tests.connector.test_r214_jobs_command",
@@ -91,6 +92,10 @@
     },
     "tests.test_connector_callback_contract": {
       "reason": "Connector callback contract protects external ingress normalization and approval wiring.",
+      "review_after": "2026-10-31"
+    },
+    "tests.test_workspace_isolation": {
+      "reason": "Workspace isolation guards connector paths and full-gate artifact hygiene from silently regressing.",
       "review_after": "2026-10-31"
     },
     "tests.test_s100_jobs_security_contract": {

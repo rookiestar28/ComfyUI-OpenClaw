@@ -375,6 +375,8 @@ else
 fi
 
 echo "[pre-push] Node version: $(node -v)"
+HYGIENE_SNAPSHOT="$ROOT_DIR/.tmp/workspace-hygiene-pre-push.json"
+"$VENV_PY" scripts/check_workspace_hygiene.py snapshot --root "$ROOT_DIR" --snapshot "$HYGIENE_SNAPSHOT"
 echo "[pre-push] 0/10 supply-chain hardening check"
 "$VENV_PY" scripts/check_supply_chain_hardening.py
 echo "[pre-push] 0.25/10 frontend dependency install and audit"
@@ -420,7 +422,7 @@ echo "[pre-push] 4/9 test debt governance check"
 "$VENV_PY" scripts/verify_test_debt_governance.py
 
 echo "[pre-push] 5/9 backend unit tests"
-MOLTBOT_STATE_DIR="$ROOT_DIR/moltbot_state/_pre_push_unit" \
+MOLTBOT_STATE_DIR="$ROOT_DIR/.tmp/test-state/pre-push/unit" \
   "$VENV_PY" scripts/run_backend_coverage.py --start-dir tests --pattern "test_*.py" --enforce-skip-policy tests/skip_policy.json --coverage-json .tmp/coverage/backend_unit_coverage.json
 
 echo "[pre-push] 5.1/9 backend coverage hotspot report"
@@ -432,21 +434,22 @@ if [ -n "${OPENCLAW_IMPL_RECORD_PATH:-}" ]; then
 fi
 
 echo "[pre-push] 6/9 backend real E2E lanes (R122/R123)"
-MOLTBOT_STATE_DIR="$ROOT_DIR/moltbot_state/_pre_push_backend_e2e_real" \
+MOLTBOT_STATE_DIR="$ROOT_DIR/.tmp/test-state/pre-push/backend-e2e-real" \
   "$VENV_PY" scripts/run_unittests.py --module tests.test_r122_real_backend_lane --enforce-skip-policy tests/skip_policy.json --max-skipped 0
-MOLTBOT_STATE_DIR="$ROOT_DIR/moltbot_state/_pre_push_backend_e2e_real" \
+MOLTBOT_STATE_DIR="$ROOT_DIR/.tmp/test-state/pre-push/backend-e2e-real" \
   "$VENV_PY" scripts/run_unittests.py --module tests.test_r123_real_backend_model_list_lane --enforce-skip-policy tests/skip_policy.json --max-skipped 0
 
 echo "[pre-push] 7/9 R121 retry partition contract"
-MOLTBOT_STATE_DIR="$ROOT_DIR/moltbot_state/_pre_push_retry_partition" \
+MOLTBOT_STATE_DIR="$ROOT_DIR/.tmp/test-state/pre-push/retry-partition" \
   "$VENV_PY" scripts/run_unittests.py --module tests.test_r121_retry_partition_contract --enforce-skip-policy tests/skip_policy.json --max-skipped 0
 
 echo "[pre-push] 8/9 R118 adversarial gate (adaptive: smoke/extended)"
-MOLTBOT_STATE_DIR="$ROOT_DIR/moltbot_state/_pre_push_adversarial" \
+MOLTBOT_STATE_DIR="$ROOT_DIR/.tmp/test-state/pre-push/adversarial" \
   "$VENV_PY" scripts/run_adversarial_gate.py --profile auto --seed 42 --artifact-dir .tmp/adversarial
 
 echo "[pre-push] 9/9 npm test (Playwright)"
 npm test
 
+"$VENV_PY" scripts/check_workspace_hygiene.py check --root "$ROOT_DIR" --snapshot "$HYGIENE_SNAPSHOT"
 assert_clean_public_worktree
 echo "[pre-push] PASS"

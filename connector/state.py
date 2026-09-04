@@ -6,7 +6,10 @@ Simple JSON persistence for offsets and cancel markers.
 import json
 import logging
 import os
+from pathlib import PurePath
 from typing import Dict, List, Set
+
+from .path_validation import require_concrete_path
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +17,11 @@ STATE_FILE = "connector_state.json"
 
 
 class ConnectorState:
-    def __init__(self, path: str = None):
-        self.path = path or STATE_FILE
+    def __init__(self, path: str | PurePath | None = None):
+        validated_path = (
+            require_concrete_path(path, field_name="path") if path is not None else None
+        )
+        self.path = validated_path or STATE_FILE
         self.data: Dict = {}
         self.cancelled_prompts: Set[str] = set()
         self._load()

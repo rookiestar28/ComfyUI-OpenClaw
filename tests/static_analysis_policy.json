@@ -766,13 +766,6 @@
     {
       "tool": "mypy",
       "path": "connector/platforms/telegram_polling.py",
-      "code": "arg-type",
-      "message": "Argument \"path\" to \"ConnectorState\" has incompatible type \"str | None\"; expected \"str\"",
-      "count": 1
-    },
-    {
-      "tool": "mypy",
-      "path": "connector/platforms/telegram_polling.py",
       "code": "attr-defined",
       "message": "\"None\" has no attribute \"get\"",
       "count": 1
@@ -892,22 +885,8 @@
     {
       "tool": "mypy",
       "path": "connector/router.py",
-      "code": "arg-type",
-      "message": "Argument \"path\" to \"ConnectorState\" has incompatible type \"str | None\"; expected \"str\"",
-      "count": 1
-    },
-    {
-      "tool": "mypy",
-      "path": "connector/router.py",
       "code": "assignment",
       "message": "Incompatible default for parameter \"poller\" (default has type \"None\", parameter has type \"ResultsPoller\")",
-      "count": 1
-    },
-    {
-      "tool": "mypy",
-      "path": "connector/state.py",
-      "code": "assignment",
-      "message": "Incompatible default for parameter \"path\" (default has type \"None\", parameter has type \"str\")",
       "count": 1
     },
     {
@@ -3603,13 +3582,6 @@
       "path": "connector/state.py",
       "code": "F401",
       "message": "`typing.List` imported but unused",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "connector/state.py",
-      "code": "RUF013",
-      "message": "PEP 484 prohibits implicit `Optional`",
       "count": 1
     },
     {

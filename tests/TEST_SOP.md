@@ -243,6 +243,23 @@ Use these checks before assuming the hook runner is broken:
 
 ## Required Pre-Push Workflow (Must Run)
 
+### Workspace Artifact Hygiene
+
+The repository-managed Windows/Linux Full Gates and pre-push gate snapshot the bounded
+workspace-root denylist before validation and fail if validation creates a new
+`MagicMock/`, `error.log`, `audit.log`, `connector_state.json`, `media/`, or
+`moltbot_state/` entry. The guard reports root labels only, reads no artifact contents,
+does not delete anything, and permits artifacts already present in the pre-run snapshot.
+Gate-owned state must be routed under `.tmp/test-state/`.
+
+The equivalent standalone sequence is:
+
+```bash
+python scripts/check_workspace_hygiene.py snapshot --root . --snapshot .tmp/workspace-hygiene-manual.json
+# Run the intended validation commands.
+python scripts/check_workspace_hygiene.py check --root . --snapshot .tmp/workspace-hygiene-manual.json
+```
+
 ### Optional: One-Command Full Test Scripts (Fastest)
 
 Use these if you want a single command that runs **all required steps** (detect-secrets, pre-commit, unit tests, E2E). These scripts also handle the most common environment issues (Windows cache locks, Black cache, Node 18).
@@ -394,14 +411,14 @@ pre-commit run --all-files --show-diff-on-failure
 1) Backend unit tests (recommended; CI enforces)
 
 ```bash
-MOLTBOT_STATE_DIR="$(pwd)/moltbot_state/_local_unit" python scripts/run_unittests.py --start-dir tests --pattern "test_*.py" --enforce-skip-policy tests/skip_policy.json
+MOLTBOT_STATE_DIR="$(pwd)/.tmp/test-state/manual/unit" python scripts/run_unittests.py --start-dir tests --pattern "test_*.py" --enforce-skip-policy tests/skip_policy.json
 ```
 
 1) Backend real E2E lane (low-mock; recommended CI parity spot-check)
 
 ```bash
-MOLTBOT_STATE_DIR="$(pwd)/moltbot_state/_local_backend_e2e_real" python scripts/run_unittests.py --module tests.test_r122_real_backend_lane --enforce-skip-policy tests/skip_policy.json --max-skipped 0
-MOLTBOT_STATE_DIR="$(pwd)/moltbot_state/_local_backend_e2e_real" python scripts/run_unittests.py --module tests.test_r123_real_backend_model_list_lane --enforce-skip-policy tests/skip_policy.json --max-skipped 0
+MOLTBOT_STATE_DIR="$(pwd)/.tmp/test-state/manual/backend-e2e-real" python scripts/run_unittests.py --module tests.test_r122_real_backend_lane --enforce-skip-policy tests/skip_policy.json --max-skipped 0
+MOLTBOT_STATE_DIR="$(pwd)/.tmp/test-state/manual/backend-e2e-real" python scripts/run_unittests.py --module tests.test_r123_real_backend_model_list_lane --enforce-skip-policy tests/skip_policy.json --max-skipped 0
 ```
 
 1) Frontend E2E (Playwright; CI enforces)

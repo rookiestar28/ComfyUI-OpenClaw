@@ -5,8 +5,10 @@ Tests for WhatsApp Webhook Server (F36).
 import hashlib
 import hmac
 import json
+import tempfile
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from connector.config import ConnectorConfig
@@ -16,7 +18,9 @@ from connector.platforms.whatsapp_webhook import WhatsAppWebhookServer
 
 class TestWhatsAppWebhook(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        self._temp_dir = tempfile.TemporaryDirectory()
         self.config = ConnectorConfig()
+        self.config.state_path = Path(self._temp_dir.name) / "state.json"
         self.config.whatsapp_access_token = "dummy_access"
         self.config.whatsapp_verify_token = "dummy_verify"
         self.config.whatsapp_app_secret = "secret123"
@@ -26,6 +30,9 @@ class TestWhatsAppWebhook(unittest.IsolatedAsyncioTestCase):
         self.router.handle = AsyncMock()
 
         self.server = WhatsAppWebhookServer(self.config, self.router)
+
+    def tearDown(self):
+        self._temp_dir.cleanup()
 
     def _sign(self, body):
         secret = b"secret123"

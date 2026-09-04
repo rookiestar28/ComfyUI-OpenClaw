@@ -282,6 +282,11 @@ else {
 
 Write-Host "[tests] Node version: $(node -v)"
 
+$hygieneSnapshot = Join-Path $root ".tmp\workspace-hygiene-full.json"
+Invoke-Checked "workspace hygiene snapshot" {
+  & $venvPython scripts\check_workspace_hygiene.py snapshot --root $root --snapshot $hygieneSnapshot
+}
+
 Write-Host "[tests] 0/11 supply-chain hardening check"
 Invoke-Checked "supply-chain hardening check" {
   & $venvPython scripts\check_supply_chain_hardening.py
@@ -322,7 +327,7 @@ Invoke-Checked "test debt governance check" {
 }
 
 Write-Host "[tests] 5/10 backend unit tests"
-$env:MOLTBOT_STATE_DIR = "$root\moltbot_state\_local_unit"
+$env:MOLTBOT_STATE_DIR = "$root\.tmp\test-state\full\unit"
 Invoke-Checked "backend unit tests" {
   & $venvPython scripts\run_backend_coverage.py --start-dir tests --pattern "test_*.py" --enforce-skip-policy tests\skip_policy.json --coverage-json .tmp\coverage\backend_unit_coverage.json
 }
@@ -341,7 +346,7 @@ if ($env:OPENCLAW_IMPL_RECORD_PATH) {
 }
 
 Write-Host "[tests] 6/10 backend real E2E lanes (R122/R123)"
-$env:MOLTBOT_STATE_DIR = "$root\moltbot_state\_local_backend_e2e_real"
+$env:MOLTBOT_STATE_DIR = "$root\.tmp\test-state\full\backend-e2e-real"
 Invoke-Checked "backend real E2E lane R122" {
   & $venvPython scripts\run_unittests.py --module tests.test_r122_real_backend_lane --enforce-skip-policy tests\skip_policy.json --max-skipped 0
 }
@@ -365,7 +370,7 @@ Invoke-Checked "Slack integration gates" {
 }
 
 Write-Host "[tests] 9/10 R118 adversarial gate (adaptive: smoke/extended)"
-$env:MOLTBOT_STATE_DIR = "$root\moltbot_state\_local_adversarial"
+$env:MOLTBOT_STATE_DIR = "$root\.tmp\test-state\full\adversarial"
 Invoke-Checked "R118 adversarial adaptive" {
   & $venvPython scripts\run_adversarial_gate.py --profile auto --seed 42 --artifact-dir .tmp\adversarial
 }
@@ -377,5 +382,8 @@ $env:OPENCLAW_PLAYWRIGHT_BROWSERS = "chromium"
 # not assume a warmed local browser cache when running on fresh Windows hosts.
 Invoke-Checked "frontend E2E" { npm test }
 
+Invoke-Checked "workspace hygiene check" {
+  & $venvPython scripts\check_workspace_hygiene.py check --root $root --snapshot $hygieneSnapshot
+}
 Assert-CleanPublicWorktree
 Write-Host "[tests] PASS"

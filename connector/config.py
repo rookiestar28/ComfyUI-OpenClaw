@@ -8,6 +8,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import PurePath
 from typing import Dict, List, Optional, Set
 
 logger = logging.getLogger("ComfyUI-OpenClaw.connector.config")
@@ -311,7 +312,7 @@ class ConnectorConfig:
 
     # Global
     debug: bool = False
-    state_path: Optional[str] = None
+    state_path: Optional[str | PurePath] = None
 
     def __repr__(self):
         """R117: redact secret/token/key fields in logs and debug output."""

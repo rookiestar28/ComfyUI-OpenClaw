@@ -13,24 +13,38 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from .config import ConnectorConfig
+from .path_validation import PathInput, require_concrete_path
 
 logger = logging.getLogger(__name__)
 
 
 class MediaStore:
-    def __init__(self, config: ConnectorConfig, storage_path: Optional[Path] = None):
+    def __init__(
+        self, config: ConnectorConfig, storage_path: Optional[PathInput] = None
+    ):
         self.config = config
         # Secret for signing tokens.
         # Uses admin token if available (persistence), else random (reset on restart).
         self._secret = (config.admin_token or secrets.token_hex(32)).encode("utf-8")
 
         # Resolve media directory
-        if storage_path:
-            self.media_dir = storage_path
+        validated_storage_path = (
+            require_concrete_path(storage_path, field_name="storage_path")
+            if storage_path is not None
+            else None
+        )
+        if validated_storage_path:
+            self.media_dir = Path(validated_storage_path)
         else:
             # Default to sibling of state_path, or ./media
-            if self.config.state_path:
-                state_p = Path(self.config.state_path)
+            raw_state_path = self.config.state_path
+            validated_state_path = (
+                require_concrete_path(raw_state_path, field_name="state_path")
+                if raw_state_path is not None
+                else None
+            )
+            if validated_state_path:
+                state_p = Path(validated_state_path)
                 # If state_path looks like a file (has suffix), use parent. Else use it as dir.
                 base = state_p.parent if state_p.suffix else state_p
             else:

@@ -212,6 +212,9 @@ fi
 
 echo "[tests] Node version: $(node -v)"
 
+HYGIENE_SNAPSHOT="$ROOT_DIR/.tmp/workspace-hygiene-full.json"
+"$VENV_PY" scripts/check_workspace_hygiene.py snapshot --root "$ROOT_DIR" --snapshot "$HYGIENE_SNAPSHOT"
+
 echo "[tests] 0/11 supply-chain hardening check"
 "$VENV_PY" scripts/check_supply_chain_hardening.py
 
@@ -249,7 +252,8 @@ echo "[tests] 4/10 test debt governance check"
 "$VENV_PY" scripts/verify_test_debt_governance.py
 
 echo "[tests] 5/10 backend unit tests"
-MOLTBOT_STATE_DIR="$ROOT_DIR/moltbot_state/_local_unit" "$VENV_PY" scripts/run_unittests.py --start-dir tests --pattern "test_*.py" --enforce-skip-policy tests/skip_policy.json
+export MOLTBOT_STATE_DIR="$ROOT_DIR/.tmp/test-state/full/default"
+MOLTBOT_STATE_DIR="$ROOT_DIR/.tmp/test-state/full/unit" "$VENV_PY" scripts/run_unittests.py --start-dir tests --pattern "test_*.py" --enforce-skip-policy tests/skip_policy.json
 
 if [ -n "${OPENCLAW_IMPL_RECORD_PATH:-}" ]; then
   echo "[tests] 5.5/10 implementation record lint (strict)"
@@ -258,9 +262,9 @@ if [ -n "${OPENCLAW_IMPL_RECORD_PATH:-}" ]; then
 fi
 
 echo "[tests] 6/10 backend real E2E lanes (R122/R123)"
-MOLTBOT_STATE_DIR="$ROOT_DIR/moltbot_state/_local_backend_e2e_real" \
+MOLTBOT_STATE_DIR="$ROOT_DIR/.tmp/test-state/full/backend-e2e-real" \
   "$VENV_PY" scripts/run_unittests.py --module tests.test_r122_real_backend_lane --enforce-skip-policy tests/skip_policy.json --max-skipped 0
-MOLTBOT_STATE_DIR="$ROOT_DIR/moltbot_state/_local_backend_e2e_real" \
+MOLTBOT_STATE_DIR="$ROOT_DIR/.tmp/test-state/full/backend-e2e-real" \
   "$VENV_PY" scripts/run_unittests.py --module tests.test_r123_real_backend_model_list_lane --enforce-skip-policy tests/skip_policy.json --max-skipped 0
 
 echo "[tests] 7/10 R121 retry partition contract"
@@ -275,7 +279,7 @@ echo "[tests] 8/10 Slack integration gates (R124/R125/R117/F57)"
 "$VENV_PY" scripts/run_unittests.py --module tests.test_f57_slack_socket_mode_startup --enforce-skip-policy tests/skip_policy.json --max-skipped 0
 
 echo "[tests] 9/10 R118 adversarial gate (adaptive: smoke/extended)"
-MOLTBOT_STATE_DIR="$ROOT_DIR/moltbot_state/_local_adversarial" \
+MOLTBOT_STATE_DIR="$ROOT_DIR/.tmp/test-state/full/adversarial" \
   "$VENV_PY" scripts/run_adversarial_gate.py --profile auto --seed 42 --artifact-dir .tmp/adversarial
 
 echo "[tests] 10/10 frontend E2E"
@@ -283,5 +287,6 @@ echo "[tests] 10/10 frontend E2E"
 # not assume a warmed local browser cache when running on fresh WSL/Linux hosts.
 OPENCLAW_PLAYWRIGHT_INSTALL=1 OPENCLAW_PLAYWRIGHT_BROWSERS=chromium npm test
 
+"$VENV_PY" scripts/check_workspace_hygiene.py check --root "$ROOT_DIR" --snapshot "$HYGIENE_SNAPSHOT"
 assert_clean_public_worktree
 echo "[tests] PASS"

@@ -180,10 +180,7 @@ class TestR68IntegrationFlow(AioHTTPTestCase):
             )
 
             # 5. Assertions
-            if resp.status != 200:
-                with open("error.log", "w") as f:
-                    f.write(await resp.text())
-            self.assertEqual(resp.status, 200)
+            self.assertEqual(resp.status, 200, await resp.text())
             data = await resp.json()
 
             self.assertTrue(data["ok"])
