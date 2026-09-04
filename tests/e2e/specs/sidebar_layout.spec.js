@@ -120,6 +120,8 @@ test.describe('OpenClaw sidebar layout ownership', () => {
       await frame();
       const restored = styles();
       const restoredWidth = panel.getBoundingClientRect().width;
+      const restoredMarker = mount.getAttribute('data-openclaw-host-surface');
+      const restoredMountClass = mount.getAttribute('class');
 
       panel.style.width = '720px';
       panel.style.flexBasis = '720px';
@@ -152,6 +154,8 @@ test.describe('OpenClaw sidebar layout ownership', () => {
         afterCycles,
         nextOwnerPresent: mount.firstElementChild?.id === 'mock-next-sidebar-owner',
         restored,
+        restoredMarker,
+        restoredMountClass,
         restoredWidth,
       };
     });
@@ -163,6 +167,8 @@ test.describe('OpenClaw sidebar layout ownership', () => {
       mount: { flexBasis: '', minWidth: '', width: '' },
     });
     expect(evidence.restoredWidth).toBe(340);
+    expect(evidence.restoredMarker).toBeNull();
+    expect(evidence.restoredMountClass).toBeNull();
     expect(evidence.aboveFloorWidth).toBe(720);
     expect(evidence.aboveFloor.panel.width).toBe('720px');
     expect(evidence.aboveFloor.panel.flexBasis).toBe('720px');
@@ -181,6 +187,8 @@ test.describe('OpenClaw sidebar layout ownership', () => {
       content.style.cssText = 'min-width: 7px; width: 42%';
       const mount = document.createElement('div');
       mount.style.minWidth = '3px';
+      mount.className = 'host-error-mount';
+      mount.setAttribute('data-host-owner', 'error-preserve');
       content.appendChild(mount);
       panel.appendChild(content);
       document.body.appendChild(panel);
@@ -190,7 +198,7 @@ test.describe('OpenClaw sidebar layout ownership', () => {
         throw new Error('bounded layout test failure');
       };
       try {
-        openclawUI.mount(mount);
+        openclawUI.mount(mount, { hostSurfaceOptions: { win: {} } });
       } finally {
         openclawUI._render = originalRender;
       }
@@ -201,6 +209,9 @@ test.describe('OpenClaw sidebar layout ownership', () => {
           width: content.style.width,
         },
         fallback: mount.querySelector('.openclaw-error-boundary')?.textContent,
+        hostOwner: mount.getAttribute('data-host-owner'),
+        marker: mount.getAttribute('data-openclaw-host-surface'),
+        mountClass: mount.className,
         mountMinWidth: mount.style.minWidth,
         panel: {
           flexBasis: panel.style.flexBasis,
@@ -213,6 +224,142 @@ test.describe('OpenClaw sidebar layout ownership', () => {
     expect(result.panel).toEqual({ flexBasis: '43%', minWidth: '11px', width: '43%' });
     expect(result.content).toEqual({ minWidth: '7px', width: '42%' });
     expect(result.mountMinWidth).toBe('3px');
+    expect(result.marker).toBeNull();
+    expect(result.mountClass).toBe('host-error-mount');
+    expect(result.hostOwner).toBe('error-preserve');
     expect(result.fallback).toContain('Something went wrong');
+  });
+
+  test('releases shared-mount ownership when the next custom extension renders without destroy', async ({ page }, testInfo) => {
+    const before = await page.evaluate(async () => {
+      const panel = document.querySelector('.side-bar-panel');
+      const content = document.querySelector('.sidebar-content-container');
+      const mount = document.querySelector('#sidebar-tab-comfyui-openclaw');
+      const tab = window.__openclawMockSidebarTab;
+      const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+
+      tab.destroy();
+      panel.style.cssText = 'min-width: 12px; width: 45%; flex-basis: 45%';
+      content.style.cssText = 'min-width: 8px; width: 44%';
+      mount.style.cssText = 'height: 100vh; min-width: 4px';
+      mount.className = 'shared-host-mount';
+      mount.setAttribute('data-host-owner', 'preserve-me');
+      for (const name of [...mount.getAttributeNames()]) {
+        if (name.startsWith('data-openclaw-')) mount.removeAttribute(name);
+      }
+
+      tab.render();
+      await frame();
+      return {
+        className: mount.className,
+        marker: mount.getAttribute('data-openclaw-host-surface'),
+        rootExclusive: mount.children.length === 1
+          && mount.firstElementChild?.classList.contains('openclaw-sidebar-container'),
+        shellInsideRoot: ['.openclaw-header', '.openclaw-tabs', '.openclaw-content']
+          .every((selector) => mount.firstElementChild?.querySelector(selector)),
+        panelWidth: panel.style.width,
+      };
+    });
+    await captureSidebarEvidence(page, testInfo, 'r257-sidebar-before-no-destroy-switch');
+
+    const after = await page.evaluate(async () => {
+      const panel = document.querySelector('.side-bar-panel');
+      const content = document.querySelector('.sidebar-content-container');
+      const mount = document.querySelector('#sidebar-tab-comfyui-openclaw');
+      const foreign = document.createElement('section');
+      foreign.id = 'foreign-custom-sidebar-owner';
+      foreign.textContent = 'Foreign extension remains intact';
+      window.__r257ForeignNode = foreign;
+
+      // Mirrors current ExtensionSlot prop reuse: incoming render receives the same mount
+      // and the outgoing OpenClaw destroy callback is not invoked first.
+      mount.replaceChildren(foreign);
+      await Promise.resolve();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+
+      return {
+        className: mount.className,
+        content: {
+          flexBasis: content.style.flexBasis,
+          minWidth: content.style.minWidth,
+          width: content.style.width,
+        },
+        foreignIdentityPreserved: mount.firstElementChild === window.__r257ForeignNode,
+        foreignText: foreign.textContent,
+        hostOwner: mount.getAttribute('data-host-owner'),
+        marker: mount.getAttribute('data-openclaw-host-surface'),
+        mount: {
+          flexBasis: mount.style.flexBasis,
+          minWidth: mount.style.minWidth,
+          width: mount.style.width,
+        },
+        panel: {
+          flexBasis: panel.style.flexBasis,
+          minWidth: panel.style.minWidth,
+          width: panel.style.width,
+        },
+      };
+    });
+    await captureSidebarEvidence(page, testInfo, 'r257-sidebar-after-no-destroy-switch');
+
+    console.log(`R257_SHARED_MOUNT_BEFORE=${JSON.stringify(before)}`);
+    console.log(`R257_SHARED_MOUNT_AFTER=${JSON.stringify(after)}`);
+    expect(after.marker).toBeNull();
+    expect(after.className).toBe('shared-host-mount');
+    expect(after.panel).toEqual({ flexBasis: '45%', minWidth: '12px', width: '45%' });
+    expect(after.content).toEqual({ flexBasis: '', minWidth: '8px', width: '44%' });
+    expect(after.mount).toEqual({ flexBasis: '', minWidth: '4px', width: '' });
+    expect(after.hostOwner).toBe('preserve-me');
+    expect(after.foreignIdentityPreserved).toBe(true);
+    expect(after.foreignText).toBe('Foreign extension remains intact');
+
+    expect(before.className).toBe('shared-host-mount');
+    expect(before.marker).toBe('standalone_frontend');
+    expect(before.panelWidth).toBe('560px');
+    expect(before.rootExclusive).toBe(true);
+    expect(before.shellInsideRoot).toBe(true);
+
+    const repeated = await page.evaluate(async () => {
+      const panel = document.querySelector('.side-bar-panel');
+      const content = document.querySelector('.sidebar-content-container');
+      const mount = document.querySelector('#sidebar-tab-comfyui-openclaw');
+      const tab = window.__openclawMockSidebarTab;
+      const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+      const results = [];
+
+      for (let cycle = 0; cycle < 10; cycle += 1) {
+        tab.render();
+        await frame();
+        const foreign = document.createElement('section');
+        foreign.dataset.cycle = String(cycle);
+        foreign.textContent = `foreign-${cycle}`;
+        mount.replaceChildren(foreign);
+        await Promise.resolve();
+        await frame();
+        results.push({
+          className: mount.className,
+          contentWidth: content.style.width,
+          foreignIdentityPreserved: mount.firstElementChild === foreign,
+          marker: mount.getAttribute('data-openclaw-host-surface'),
+          mountMinWidth: mount.style.minWidth,
+          panelFlexBasis: panel.style.flexBasis,
+          panelWidth: panel.style.width,
+        });
+      }
+      return results;
+    });
+
+    expect(repeated).toHaveLength(10);
+    for (const cycle of repeated) {
+      expect(cycle).toEqual({
+        className: 'shared-host-mount',
+        contentWidth: '44%',
+        foreignIdentityPreserved: true,
+        marker: null,
+        mountMinWidth: '4px',
+        panelFlexBasis: '45%',
+        panelWidth: '45%',
+      });
+    }
   });
 });

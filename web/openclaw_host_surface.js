@@ -173,6 +173,22 @@ export function getHostSurfaceCapabilities(options = {}) {
     };
 }
 
+export const OPENCLAW_HOST_SURFACE_ATTRIBUTE_NAMES = Object.freeze([
+    "data-openclaw-host-surface",
+    "data-openclaw-desktop-host",
+    "data-openclaw-reference-frontend",
+    "data-openclaw-current-desktop-version",
+    "data-openclaw-current-desktop-generation",
+    "data-openclaw-current-desktop-hosted-version-mode",
+    "data-openclaw-desktop-generation",
+    "data-openclaw-desktop-bridge-kind",
+    "data-openclaw-desktop-hosted-version-mode",
+    "data-openclaw-desktop-version",
+    "data-openclaw-desktop-core-version",
+    "data-openclaw-desktop-embedded-frontend",
+    "data-openclaw-desktop-frontend-parity",
+]);
+
 export function stampHostSurfaceMetadata(container, options = {}) {
     const capabilities = getHostSurfaceCapabilities(options);
     if (container?.dataset) {
@@ -214,4 +230,47 @@ export function stampHostSurfaceMetadata(container, options = {}) {
             : "";
     }
     return capabilities;
+}
+
+export function acquireHostSurfaceMetadata(container, options = {}) {
+    const originals = new Map();
+    if (
+        container &&
+        typeof container.hasAttribute === "function" &&
+        typeof container.getAttribute === "function"
+    ) {
+        for (const name of OPENCLAW_HOST_SURFACE_ATTRIBUTE_NAMES) {
+            originals.set(name, {
+                present: container.hasAttribute(name),
+                value: container.getAttribute(name),
+            });
+        }
+    }
+
+    // CRITICAL: capture every owned attribute before the first stamp. Capturing after
+    // mutation makes no-destroy cleanup preserve OpenClaw markers on the next extension.
+    const capabilities = stampHostSurfaceMetadata(container, options);
+    let disposed = false;
+
+    return {
+        capabilities,
+        dispose() {
+            if (disposed) return;
+            disposed = true;
+            if (
+                !container ||
+                typeof container.setAttribute !== "function" ||
+                typeof container.removeAttribute !== "function"
+            ) {
+                return;
+            }
+            for (const [name, original] of originals) {
+                if (original.present) {
+                    container.setAttribute(name, original.value ?? "");
+                } else {
+                    container.removeAttribute(name);
+                }
+            }
+        },
+    };
 }

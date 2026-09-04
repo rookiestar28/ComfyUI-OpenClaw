@@ -13,7 +13,9 @@ import { OpenClawActions } from "./openclaw_actions.js";
 import { QueueMonitor } from "./openclaw_queue_monitor.js";
 import { OpenClawNotificationCenter } from "./openclaw_notification_center.js";
 import { OpenClawBannerManager } from "./openclaw_banner_manager.js";
+import { acquireHostSurfaceMetadata } from "./openclaw_host_surface.js";
 import { acquireOpenClawSidebarLayout } from "./openclaw_sidebar_layout.js";
+import { watchOpenClawSidebarOwnership } from "./openclaw_sidebar_ownership.js";
 
 export class OpenClawUI {
     constructor() {
@@ -23,7 +25,8 @@ export class OpenClawUI {
             panel: null,
             content: null,
         };
-        this.sidebarLayoutDisposer = null;
+        this.hostContainer = null;
+        this.sidebarOwnershipDisposer = null;
         this.notificationCenter = new OpenClawNotificationCenter({
             onAction: (action) => this.handleAction(action),
         });
@@ -35,30 +38,71 @@ export class OpenClawUI {
     /**
      * Mount the UI into a provided container (sidebar render target).
      */
-    mount(container) {
+    mount(container, { hostSurfaceOptions = null } = {}) {
         this.unmount();
-        this.container = container;
-        const disposeLayout = acquireOpenClawSidebarLayout(container);
-        this.sidebarLayoutDisposer = disposeLayout;
+        let metadataLease = null;
+        let disposeLayout = null;
+        try {
+            metadataLease = hostSurfaceOptions
+                ? acquireHostSurfaceMetadata(container, hostSurfaceOptions)
+                : null;
+            disposeLayout = acquireOpenClawSidebarLayout(container);
+        } catch (error) {
+            metadataLease?.dispose();
+            throw error;
+        }
+
+        this.hostContainer = container;
+        let disconnectObserver = () => {};
+        let root = null;
+        let disposed = false;
+        const disposeOwnership = () => {
+            if (disposed) return;
+            disposed = true;
+            // CRITICAL: stop ownership observation before exact restoration. Reversing
+            // this order lets a stale callback leak or overwrite cross-extension state.
+            disconnectObserver();
+            if (this.sidebarOwnershipDisposer === disposeOwnership) {
+                this.sidebarOwnershipDisposer = null;
+                if (this.hostContainer === container) this.hostContainer = null;
+                if (this.container === root) this.container = null;
+            }
+            metadataLease?.dispose();
+            disposeLayout?.();
+        };
+        this.sidebarOwnershipDisposer = disposeOwnership;
+
         this.boundary.run(container, () => {
             try {
-                this._render(container);
+                root = this._render(container);
+                if (!root || root.parentNode !== container) {
+                    throw new Error("OpenClaw render did not return its direct owned root");
+                }
+                this.container = root;
+                disconnectObserver = watchOpenClawSidebarOwnership(
+                    container,
+                    root,
+                    () => this._releaseSidebarOwnership(disposeOwnership)
+                );
             } catch (error) {
-                this._releaseSidebarLayout(disposeLayout);
+                this._releaseSidebarOwnership(disposeOwnership);
                 throw error;
             }
         });
     }
 
-    _releaseSidebarLayout(expectedDisposer = null) {
-        if (expectedDisposer && this.sidebarLayoutDisposer !== expectedDisposer) return;
-        const disposeLayout = this.sidebarLayoutDisposer;
-        this.sidebarLayoutDisposer = null;
-        disposeLayout?.();
+    _releaseSidebarOwnership(expectedDisposer = null) {
+        if (
+            expectedDisposer &&
+            this.sidebarOwnershipDisposer !== expectedDisposer
+        ) return;
+        const disposeOwnership = this.sidebarOwnershipDisposer;
+        disposeOwnership?.();
     }
 
     unmount() {
-        this._releaseSidebarLayout();
+        this._releaseSidebarOwnership();
+        this.hostContainer = null;
         this.container = null;
     }
 
@@ -105,8 +149,12 @@ export class OpenClawUI {
     }
 
     _render(container) {
-        container.innerHTML = "";
-        container.className = "openclaw-sidebar-container";
+        container.replaceChildren();
+        const root = document.createElement("div");
+        // IMPORTANT: the ComfyUI mount is host-owned and may be reused by another custom
+        // sidebar. Keep OpenClaw classes on this exact child root so mount state cannot leak.
+        root.className = "openclaw-sidebar-container";
+        container.appendChild(root);
 
         const header = document.createElement("div");
         header.className = "openclaw-header";
@@ -186,24 +234,25 @@ export class OpenClawUI {
         header.appendChild(statusDot);
         header.appendChild(title);
         header.appendChild(badges);
-        container.appendChild(header);
-        container.appendChild(this.notificationCenter.buildPanel());
+        root.appendChild(header);
+        root.appendChild(this.notificationCenter.buildPanel());
 
         const tabBar = document.createElement("div");
         tabBar.className = "openclaw-tabs";
         this.tabBar = tabBar;
-        container.appendChild(tabBar);
+        root.appendChild(tabBar);
 
         const contentArea = document.createElement("div");
         contentArea.className = "openclaw-content";
         this.contentArea = contentArea;
-        container.appendChild(contentArea);
+        root.appendChild(contentArea);
 
         tabManager.init(tabBar, contentArea);
-        normalizeLegacyClassNames(container);
-        applyLegacyClassAliases(container);
-        this.bannerManager.bind(container, (action) => this.handleAction(action));
+        normalizeLegacyClassNames(root);
+        applyLegacyClassAliases(root);
+        this.bannerManager.bind(root, (action) => this.handleAction(action));
         this.notificationCenter.render();
+        return root;
     }
 
     toggleNotifications() {

@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
     HOST_SURFACES,
     HOST_SURFACE_REFERENCES,
+    OPENCLAW_HOST_SURFACE_ATTRIBUTE_NAMES,
+    acquireHostSurfaceMetadata,
     getHostSurfaceCapabilities,
     resolveHostSurface,
     stampHostSurfaceMetadata,
@@ -339,5 +341,33 @@ describe("openclaw_host_surface", () => {
         expect(container.dataset.openclawDesktopCoreVersion).toBe("");
         expect(container.dataset.openclawDesktopEmbeddedFrontend).toBe("");
         expect(container.dataset.openclawDesktopFrontendParity).toBe("");
+    });
+
+    it("restores absent and pre-existing owned metadata exactly and remains idempotent", () => {
+        const container = document.createElement("div");
+        container.setAttribute("data-openclaw-host-surface", "host-owned-value");
+        container.setAttribute("data-unrelated-owner", "preserve-me");
+
+        const lease = acquireHostSurfaceMetadata(container, { win: {} });
+        expect(lease.capabilities.hostSurface).toBe(HOST_SURFACES.standaloneFrontend);
+        expect(container.getAttribute("data-openclaw-host-surface")).toBe(
+            "standalone_frontend"
+        );
+        expect(
+            OPENCLAW_HOST_SURFACE_ATTRIBUTE_NAMES.every((name) =>
+                container.hasAttribute(name)
+            )
+        ).toBe(true);
+
+        lease.dispose();
+        lease.dispose();
+
+        expect(container.getAttribute("data-openclaw-host-surface")).toBe(
+            "host-owned-value"
+        );
+        for (const name of OPENCLAW_HOST_SURFACE_ATTRIBUTE_NAMES.slice(1)) {
+            expect(container.hasAttribute(name)).toBe(false);
+        }
+        expect(container.getAttribute("data-unrelated-owner")).toBe("preserve-me");
     });
 });
