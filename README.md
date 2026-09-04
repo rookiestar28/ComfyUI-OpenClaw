@@ -164,8 +164,9 @@ Deployment profiles and hardening references:
   explicit host-contract/backend unavailability.
 - Published host compatibility notes now pin ComfyUI `3aba3dae` / `0.33.0`, standalone frontend
   `1.52.1`, legacy Desktop, and current managed-install Comfy-Desktop as separate references.
-- Python 3.10-3.13 is validated and supported, Python 3.14 remains best effort, and versions below
-  3.10 are unsupported by the package contract.
+- Python 3.13 is the current locally validated baseline. Python 3.10-3.12 remain compatibility
+  targets pending current exact-version evidence, Python 3.14 remains best effort, and versions
+  below 3.10 are unsupported by the package contract.
 - Output previews keep filename-backed refs first-class, accept optional `asset_hash` / `hash` metadata when present, and leave asset-service-only identifiers as explicit fallback states.
 - LINE and WhatsApp connector media URLs now force dangerous active content such as SVG/HTML/JS/CSS/XML to download with no-sniff response headers while preserving safe image delivery.
 - Job Monitor now treats HDR `.exr` and `.hdr` image outputs as explicit source-preview fallback links instead of normal thumbnails, matching the current host expectation without bundling a HDR viewer.
@@ -238,7 +239,8 @@ Alternative install options:
 1. Copy/clone this repository into your ComfyUI `custom_nodes` folder
 2. Restart ComfyUI.
 
-Runtime compatibility: Python 3.10-3.13 is validated and supported. Python 3.14 is best effort,
+Runtime compatibility: Python 3.13 is the current locally validated baseline. Python 3.10-3.12
+remain compatibility targets pending current exact-version evidence. Python 3.14 is best effort,
 and versions below 3.10 are unsupported. See the
 [compatibility matrix](docs/release/compatibility_matrix.md) for the current ComfyUI, frontend,
 and Desktop reference anchors.

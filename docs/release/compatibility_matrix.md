@@ -49,7 +49,7 @@ This document tracks the current reference anchors and validated environments fo
 | **ComfyUI Frontend** | `1.52.1` reference anchor (`569e65b30f`; `v1.52.1-3-g569e65b30f`) | Minor drift around the anchor | Sidebar extension contract remains compatible; prefer the current sidebar store API with deprecated facade fallback |
 | **Legacy Desktop** | `0.9.4 (core 0.22.3 / frontend 1.43.18)` reference anchor | Legacy fixed bundle may lag standalone frontend | Preserve the recorded fixed-bundle contract for existing parity coverage |
 | **Current Comfy-Desktop** | `1.0.32-rc.1` reference anchor (`85e28b7a`; `v1.0.32-rc.1-3-g85e28b7`) | Hosted component versions vary by installation | Treat the managed-install generation separately; do not infer fixed core/frontend versions from the application release |
-| **Python** | 3.10, 3.11, 3.12, 3.13 | 3.14 | Below 3.10 is unsupported by package policy; 3.14 remains best effort and unvalidated |
+| **Python** | 3.13 | 3.10-3.12 compatibility targets; 3.14 best effort | Current executed baseline is the local Windows Full Gate on Python 3.13; scheduled/manual exact-version artifacts are required before promoting other targets; 3.10 requires reassessment on 2026-10-31; below 3.10 is unsupported |
 | **Torch** | 2.1.2+ | 1.13+ | CUDA 11.8/12.1 verified |
 
 ## Host-Surface Notes

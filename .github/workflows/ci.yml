@@ -13,10 +13,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
 
   import-smoke:
     name: Import Smoke Test (ComfyUI loader)
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -27,6 +32,10 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-quality.txt
       - name: Bootstrap project-local Python
         run: python scripts/bootstrap_project_venv.py
       - uses: actions/setup-node@v5
@@ -45,13 +54,14 @@ jobs:
           python scripts/preflight_check.py --strict
       - name: Import smoke test
         env:
-          MOLTBOT_STATE_DIR: ${{ github.workspace }}/moltbot_state/_ci_smoke
+          OPENCLAW_STATE_DIR: ${{ github.workspace }}/openclaw_state/_ci_smoke
         run: |
           python scripts/run_unittests.py --module tests.test_comfyui_loader_import
 
 
   frontend-e2e:
     name: Frontend E2E (Playwright)
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -62,11 +72,17 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-quality.txt
       - name: Bootstrap project-local Python
         run: python scripts/bootstrap_project_venv.py
       - uses: actions/setup-node@v5
         with:
           node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
       - name: Supply-chain hardening check
         run: |
           python scripts/check_supply_chain_hardening.py
@@ -90,12 +106,17 @@ jobs:
 
 
   unit-tests:
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-quality.txt
       - name: Bootstrap project-local Python
         run: python scripts/bootstrap_project_venv.py
       - uses: actions/setup-node@v5
@@ -122,7 +143,7 @@ jobs:
           python scripts/verify_static_analysis_policy.py
       - name: Run MAE hard-guarantee suites
         env:
-          MOLTBOT_STATE_DIR: ${{ github.workspace }}/moltbot_state/_ci_mae
+          OPENCLAW_STATE_DIR: ${{ github.workspace }}/openclaw_state/_ci_mae
         run: |
           # CRITICAL: keep these as explicit CI gates so public MAE route-plane
           # classification/regression drift cannot silently bypass full discovery.
@@ -132,7 +153,7 @@ jobs:
       - name: Run unit tests
 
         env:
-          MOLTBOT_STATE_DIR: ${{ github.workspace }}/moltbot_state/_ci_unit
+          OPENCLAW_STATE_DIR: ${{ github.workspace }}/openclaw_state/_ci_unit
         run: |
           python scripts/run_backend_coverage.py --start-dir tests --pattern "test_*.py" --enforce-skip-policy tests/skip_policy.json --coverage-json .tmp/coverage/backend_unit_coverage.json
       - name: Coverage hotspot report
@@ -141,12 +162,17 @@ jobs:
 
   backend-e2e-real:
     name: Backend E2E (real-backend lane, low-mock)
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-quality.txt
       - name: Bootstrap project-local Python
         run: python scripts/bootstrap_project_venv.py
       - uses: actions/setup-node@v5
@@ -165,7 +191,7 @@ jobs:
           python scripts/preflight_check.py --strict
       - name: Run real-backend lane
         env:
-          MOLTBOT_STATE_DIR: ${{ github.workspace }}/moltbot_state/_ci_backend_e2e_real
+          OPENCLAW_STATE_DIR: ${{ github.workspace }}/openclaw_state/_ci_backend_e2e_real
         run: |
           # CRITICAL: this lane must stay low-mock and exercise real aiohttp request flow.
           python scripts/run_unittests.py --module tests.test_r122_real_backend_lane --enforce-skip-policy tests/skip_policy.json --max-skipped 0
@@ -174,6 +200,7 @@ jobs:
 
   contract-tests:
     name: Contract Tests (R52)
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -184,6 +211,10 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-quality.txt
       - name: Bootstrap project-local Python
         run: python scripts/bootstrap_project_venv.py
       - uses: actions/setup-node@v5
@@ -206,15 +237,22 @@ jobs:
 
   security-audit:
     name: Security Audit (S23)
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
       - uses: actions/setup-python@v6
         with:
           python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-quality.txt
       - name: Bootstrap project-local Python
         run: python scripts/bootstrap_project_venv.py
       - name: Supply-chain hardening check
@@ -224,7 +262,9 @@ jobs:
         run: |
           # Development tooling is part of the build/test trust boundary.
           npm ci
-          npm audit --audit-level=high
+          # IMPORTANT: keep registry retries/time bounded and fail closed; removing these
+          # bounds can hang a run, while `continue-on-error` would hide a failed audit.
+          npm audit --audit-level=high --fetch-retries=2 --fetch-timeout=120000
       - name: Install backend deps
         run: |
           python -m pip install --upgrade pip
@@ -240,6 +280,7 @@ jobs:
 
   adversarial-smoke:
     name: Adversarial Gate (adaptive)
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -248,6 +289,10 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-quality.txt
       - name: Bootstrap project-local Python
         run: python scripts/bootstrap_project_venv.py
       - name: Supply-chain hardening check
@@ -263,7 +308,7 @@ jobs:
           python scripts/preflight_check.py --strict
       - name: R118 adversarial adaptive (auto profile)
         env:
-          MOLTBOT_STATE_DIR: ${{ github.workspace }}/moltbot_state/_ci_adversarial
+          OPENCLAW_STATE_DIR: ${{ github.workspace }}/openclaw_state/_ci_adversarial
           OPENCLAW_DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           OPENCLAW_DIFF_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
@@ -278,6 +323,7 @@ jobs:
 
   adversarial-extended:
     name: Adversarial Gate (extended, nightly/manual)
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     steps:
@@ -285,6 +331,10 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-quality.txt
       - name: Bootstrap project-local Python
         run: python scripts/bootstrap_project_venv.py
       - name: Supply-chain hardening check
@@ -300,7 +350,7 @@ jobs:
           python scripts/preflight_check.py --strict
       - name: R118 adversarial extended
         env:
-          MOLTBOT_STATE_DIR: ${{ github.workspace }}/moltbot_state/_ci_adversarial_ext
+          OPENCLAW_STATE_DIR: ${{ github.workspace }}/openclaw_state/_ci_adversarial_ext
         run: |
           python scripts/run_adversarial_gate.py --profile extended --artifact-dir .tmp/adversarial-extended
       - name: Upload adversarial artifacts
@@ -310,3 +360,53 @@ jobs:
           name: adversarial-extended-manifest
           path: .tmp/adversarial-extended/
           retention-days: 90
+
+  python-compatibility:
+    name: Python Compatibility (${{ matrix.python-version }})
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-quality.txt
+      - name: Bootstrap project-local Python
+        run: python scripts/bootstrap_project_venv.py
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+      - name: Supply-chain hardening check
+        run: python scripts/check_supply_chain_hardening.py
+      - name: Install compatibility test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-quality.txt
+          python -m pip install numpy pillow aiohttp "coverage[toml]"
+      - name: R120 preflight
+        run: python scripts/preflight_check.py --strict
+      - name: Run exact-version backend suite
+        env:
+          OPENCLAW_STATE_DIR: ${{ github.workspace }}/openclaw_state/_ci_python_${{ matrix.python-version }}
+        run: |
+          python scripts/run_unittests.py --start-dir tests --pattern "test_*.py" --enforce-skip-policy tests/skip_policy.json
+      - name: Emit successful exact-version evidence
+        run: |
+          python scripts/python_compatibility_evidence.py emit --expected-version "${{ matrix.python-version }}" --commit "${{ github.sha }}" --output ".tmp/python-compatibility/python-${{ matrix.python-version }}.json"
+      - name: Upload successful exact-version evidence
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: python-compatibility-${{ matrix.python-version }}
+          path: .tmp/python-compatibility/python-${{ matrix.python-version }}.json
+          retention-days: 30

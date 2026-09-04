@@ -134,6 +134,7 @@
       "scripts/precommit_black_single.py",
       "scripts/precommit_block_sensitive_files.py",
       "scripts/preflight_check.py",
+      "scripts/python_compatibility_evidence.py",
       "scripts/quality_governance_common.py",
       "scripts/regenerate_openapi_if_needed.py",
       "scripts/registry_publish_guard.py",

@@ -97,8 +97,15 @@ class TestR90CompatMatrixGovernance(unittest.TestCase):
         test_sop = (REPO_ROOT / "tests" / "TEST_SOP.md").read_text(encoding="utf-8")
 
         self.assertIn('requires-python = ">=3.10"', pyproject)
-        self.assertIn("| **Python** | 3.10, 3.11, 3.12, 3.13 | 3.14 |", matrix)
-        self.assertIn("- **Python**: 3.10, 3.11, 3.12, and 3.13.", support)
+        self.assertIn("| **Python** | 3.13 |", matrix)
+        self.assertIn("Current executed baseline is", matrix)
+        self.assertIn(
+            "- **Python**: 3.13 (current local Windows Full Gate baseline).",
+            support,
+        )
+        self.assertIn(
+            "- **Compatibility targets**: Python 3.10, 3.11, and 3.12", support
+        )
         self.assertIn("- **Python**: 3.14.", support)
         self.assertIn("- **Python**: < 3.10.", support)
         self.assertIn("Python 3.10+", test_sop)

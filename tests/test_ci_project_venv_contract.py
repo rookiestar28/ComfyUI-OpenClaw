@@ -13,7 +13,7 @@ TEST_SOP = ROOT / "tests" / "TEST_SOP.md"
 R240_TEST = ROOT / "tests" / "test_r240_loader_ready_route_integration.py"
 
 SCOPED_WORKFLOWS = {
-    "ci.yml": 8,
+    "ci.yml": 9,
     "pre-commit.yml": 1,
     "secret-scan.yml": 1,
 }

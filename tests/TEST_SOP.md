@@ -74,7 +74,7 @@ Required guardrails:
 
 ## Prerequisites
 
-- Python 3.10+ (CI uses 3.10/3.11)
+- Python 3.10+ package floor (the current local Windows acceptance baseline uses 3.13)
 - Node.js 18+ (CI uses 20)
 - `pre-commit` installed: `python -m pip install pre-commit`
 - Backend test deps available in the same interpreter (`numpy`, `pillow`, `aiohttp`)
@@ -125,6 +125,20 @@ Before running tests or deploying, validation of the build environment is requir
   - Optional: Use `--strict` to fail on warnings.
 
 Failed preflight checks must be resolved before proceeding with full test suites.
+
+## Hosted Python Compatibility Evidence
+
+- Hosted CI runs a scheduled/manual Python 3.10-3.13 matrix on Ubuntu; it is not added to
+  pull-request or push cost.
+- Each matrix lane emits evidence only after the exact interpreter and complete backend
+  unit discovery pass. Workflow presence or a cancelled/failed lane is not evidence.
+- Evidence is current for 14 days and remains scoped to its exact Python version and
+  commit. Public support wording must stay narrower when current evidence is absent.
+- Python 3.10 has a separate upstream-maintenance reassessment boundary on 2026-10-31.
+  A pre-boundary successful result must not be reused as current evidence on or after that
+  date without an explicit support-policy decision.
+- Hosted evidence is supplemental. The Windows Full Gate remains repository acceptance
+  authority unless an item-specific finalized plan explicitly requires more.
 
 ## CodeQL Policy
 
@@ -411,14 +425,14 @@ pre-commit run --all-files --show-diff-on-failure
 1) Backend unit tests (recommended; CI enforces)
 
 ```bash
-MOLTBOT_STATE_DIR="$(pwd)/.tmp/test-state/manual/unit" python scripts/run_unittests.py --start-dir tests --pattern "test_*.py" --enforce-skip-policy tests/skip_policy.json
+OPENCLAW_STATE_DIR="$(pwd)/.tmp/test-state/manual/unit" python scripts/run_unittests.py --start-dir tests --pattern "test_*.py" --enforce-skip-policy tests/skip_policy.json
 ```
 
 1) Backend real E2E lane (low-mock; recommended CI parity spot-check)
 
 ```bash
-MOLTBOT_STATE_DIR="$(pwd)/.tmp/test-state/manual/backend-e2e-real" python scripts/run_unittests.py --module tests.test_r122_real_backend_lane --enforce-skip-policy tests/skip_policy.json --max-skipped 0
-MOLTBOT_STATE_DIR="$(pwd)/.tmp/test-state/manual/backend-e2e-real" python scripts/run_unittests.py --module tests.test_r123_real_backend_model_list_lane --enforce-skip-policy tests/skip_policy.json --max-skipped 0
+OPENCLAW_STATE_DIR="$(pwd)/.tmp/test-state/manual/backend-e2e-real" python scripts/run_unittests.py --module tests.test_r122_real_backend_lane --enforce-skip-policy tests/skip_policy.json --max-skipped 0
+OPENCLAW_STATE_DIR="$(pwd)/.tmp/test-state/manual/backend-e2e-real" python scripts/run_unittests.py --module tests.test_r123_real_backend_model_list_lane --enforce-skip-policy tests/skip_policy.json --max-skipped 0
 ```
 
 1) Frontend E2E (Playwright; CI enforces)

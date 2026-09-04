@@ -7,7 +7,7 @@
 **Definition**: Validated by CI/CD or core maintainers. Critical bugs block releases.
 
 - **Environment**: Linux (Ubuntu 22.04), Windows 11.
-- **Python**: 3.10, 3.11, 3.12, and 3.13.
+- **Python**: 3.13 (current local Windows Full Gate baseline).
 - **ComfyUI host**: current compatibility-matrix reference anchor and close neighbors.
 - **Frontend host**: current standalone frontend reference anchor for the sidebar extension contract.
 
@@ -16,6 +16,8 @@
 **Definition**: Should work, but not actively validated. Bugs fixed as resources allow.
 
 - **Environment**: macOS, older Windows versions.
+- **Compatibility targets**: Python 3.10, 3.11, and 3.12, promoted to validated
+  support only with current successful exact-version evidence.
 - **Python**: 3.14.
 - **ComfyUI**: nightly builds and farther-from-anchor upstream drift.
 - **Desktop host**: legacy fixed-bundle variants outside the recorded legacy anchor and current managed-install variants whose installed host components fall outside their own supported anchors.
@@ -39,6 +41,9 @@
 - Legacy Desktop is a fixed bundle and must be evaluated against its recorded core/frontend versions.
 - Current Comfy-Desktop is a managed-install generation; hosted ComfyUI and frontend versions are installation-specific and must not be inferred from the application version.
 - Upstream reference refreshes should update the matrix anchors before being treated as the new default support baseline.
+- The scheduled/manual Python matrix emits exact-version evidence only after its backend
+  suite passes. Evidence is current for 14 days; Python 3.10 additionally requires an
+  explicit support reassessment on 2026-10-31. Workflow presence alone is not validation.
 
 ## Reporting Issues
 
