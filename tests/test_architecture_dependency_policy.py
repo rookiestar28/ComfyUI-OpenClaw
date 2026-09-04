@@ -386,7 +386,9 @@ class ArchitecturePolicyFixture(unittest.TestCase):
             "load_attrs(__package__, '..app.main', 'app.main', "
             "absolute_module='app.main', attr_names=('VALUE',))\n"
             "load_attrs(__package__, '..app.main', "
-            "**{'absolute_module': 'app.main', 'attr_names': ('VALUE',)})\n",
+            "**{'absolute_module': 'app.main', 'attr_names': ('VALUE',)})\n"
+            "star_args = ('..app.main', 'app.main', ('VALUE',))\n"
+            "load_attrs(__package__, *star_args)\n",
         )
         policy = self._policy()
         policy["tracked_roots"].append("services")
@@ -404,7 +406,7 @@ class ArchitecturePolicyFixture(unittest.TestCase):
             for finding in findings
             if finding.rule_id == "DUAL_IMPORT_HELPER_TARGET_INVALID"
         ]
-        self.assertEqual(len(invalid), 2)
+        self.assertEqual(len(invalid), 3)
         self.assertIn(
             "DYNAMIC_UNREGISTERED_EXPRESSION",
             {finding.rule_id for finding in findings},
@@ -447,6 +449,35 @@ class ArchitecturePolicyFixture(unittest.TestCase):
         policy["allowed_dependencies"]["core"].append("services")
 
         self.assertIn("DUAL_IMPORT_HELPER_TARGET_MISMATCH", self._codes(policy))
+
+    def test_canonical_dual_import_helper_normalizes_package_init_relative_target(self):
+        self._write("services/__init__.py", "")
+        self._write(
+            "services/import_fallback.py",
+            "def import_module_dual(*args, **kwargs): ...\n",
+        )
+        self._write(
+            "core/__init__.py",
+            "from services.import_fallback import import_module_dual as load_module\n"
+            "load_module(__package__, '.util', 'core.util')\n",
+        )
+        policy = self._policy()
+        policy["tracked_roots"].append("services")
+        policy["domains"]["services"] = [
+            "services/__init__.py",
+            "services/import_fallback.py",
+        ]
+        policy["allowed_dependencies"]["services"] = ["services"]
+        policy["allowed_dependencies"]["core"].append("services")
+
+        analysis = dependency_policy.analyze_repository(
+            self.repo_root,
+            policy,
+            tracked_files=self._tracked_files(),
+        )
+
+        self.assertIn(("core", "core.util"), analysis.static_edges)
+        self.assertEqual(analysis.findings, ())
 
     def test_unrelated_same_name_helper_does_not_synthesize_static_edge(self):
         self._write(

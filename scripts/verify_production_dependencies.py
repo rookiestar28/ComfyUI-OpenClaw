@@ -942,7 +942,12 @@ class _SourceVisitor(ast.NodeVisitor):
         level = len(value) - len(value.lstrip("."))
         if not level:
             return value
-        package_parts = self.module.split(".")[:-1]
+        # IMPORTANT: package __init__ owns its own relative-import base; dropping that
+        # component creates a false mismatch and blocks a valid governed helper edge.
+        is_package = self.path.endswith("/__init__.py") or self.path == "__init__.py"
+        package_parts = self.module.split(".")
+        if not is_package:
+            package_parts = package_parts[:-1]
         ascend = level - 1
         if ascend > len(package_parts):
             return None
