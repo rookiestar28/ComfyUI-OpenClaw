@@ -10,46 +10,50 @@ Submits prompt workflows to ComfyUI execution queue with execution budgets.
 import json
 import logging
 import uuid
-from typing import Any, Dict, Optional
+from collections.abc import Callable
+from typing import Any, Dict, Optional, cast
 
-try:
-    from api.errors import APIError, ErrorCode, create_error_response
-except ImportError:
-    # Fallback if api module not found (e.g. some test environments)
-    # Define minimal mocks to avoid crash
-    class ErrorCode:
-        DEPENDENCY_UNAVAILABLE = "dependency_unavailable"
-        QUEUE_SUBMIT_FAILED = "queue_submit_failed"
-        INTERNAL_ERROR = "internal_error"
+if __package__ and "." in __package__:
+    from .import_fallback import import_attrs_dual
+else:
+    from services.import_fallback import import_attrs_dual
 
-    class APIError(Exception):
-        def __init__(self, message, code="internal_error", status=500, detail=None):
-            super().__init__(message)
-            self.code = code
-            self.status = status
-            self.detail = detail or {}
+# IMPORTANT: resolve exactly one namespace. Retrying top-level imports after a
+# packaged failure can bind another custom node's API error types.
+_api_error_symbol, _error_code_symbol = import_attrs_dual(
+    __package__,
+    "..api.errors",
+    "api.errors",
+    ("APIError", "ErrorCode"),
+)
+APIError = cast(Any, _api_error_symbol)
+ErrorCode = cast(Any, _error_code_symbol)
 
 
 logger = logging.getLogger("ComfyUI-OpenClaw.services.queue")
-try:
-    from .structured_logging import (
-        configure_logger_for_structured_output,
-        emit_structured_log,
-    )
-except ImportError:
-    from services.structured_logging import (  # type: ignore
-        configure_logger_for_structured_output,
-        emit_structured_log,
-    )
+configure_logger_for_structured_output, emit_structured_log = cast(
+    tuple[Callable[..., Any], Callable[..., Any]],
+    import_attrs_dual(
+        __package__,
+        ".structured_logging",
+        "services.structured_logging",
+        ("configure_logger_for_structured_output", "emit_structured_log"),
+    ),
+)
 
 configure_logger_for_structured_output(logger)
 
 import os
 
-try:
-    from .tenant_context import get_current_tenant_id
-except ImportError:
-    from services.tenant_context import get_current_tenant_id  # type: ignore
+(get_current_tenant_id,) = cast(
+    tuple[Callable[[], str]],
+    import_attrs_dual(
+        __package__,
+        ".tenant_context",
+        "services.tenant_context",
+        ("get_current_tenant_id",),
+    ),
+)
 
 # ComfyUI internal server URL fallback
 COMFYUI_URL = (
@@ -112,15 +116,15 @@ async def submit_prompt(
             "tenant_id": tenant_id or get_current_tenant_id(),
         },
     )
-    # NOTE: Must try relative import first. In ComfyUI runtime, `services` is not a top-level module.
-    # Keeping this order prevents "No module named 'services.execution_budgets'" during queue submit.
-    try:
-        from .execution_budgets import check_render_size, get_limiter
-    except ImportError:
-        from services.execution_budgets import (  # type: ignore
-            check_render_size,
-            get_limiter,
-        )
+    check_render_size, get_limiter = cast(
+        tuple[Callable[..., Any], Callable[[], Any]],
+        import_attrs_dual(
+            __package__,
+            ".execution_budgets",
+            "services.execution_budgets",
+            ("check_render_size", "get_limiter"),
+        ),
+    )
 
     # R33: Check render size budget
     check_render_size(prompt_workflow, trace_id=trace_id)

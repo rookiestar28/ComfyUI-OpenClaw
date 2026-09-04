@@ -32,6 +32,7 @@ _TOP_LEVEL_KEYS = {
     "facade_contracts",
     "accepted_cycles",
     "dynamic_imports",
+    "import_fallback_contract",
 }
 _REVIEW_KEYS = {
     "owner",
@@ -64,8 +65,36 @@ _DYNAMIC_KEYS = {
     "rationale",
     "review_condition",
 }
+_IMPORT_FALLBACK_CONTRACT_KEYS = {
+    "production_roots",
+    "repository_roots",
+    "finalized_candidate_count",
+    "finalized_site_count",
+    "finalized_repository_site_count",
+    "finalized_alternate_site_count",
+    "expected_live_candidate_count",
+    "inventory",
+}
+_IMPORT_FALLBACK_ENTRY_KEYS = {
+    "path",
+    "classification",
+    "baseline_site_count",
+    "site_count",
+    "repository_site_count",
+    "alternate_site_count",
+    "owner",
+    "rationale",
+    "review_condition",
+}
+_IMPORT_FALLBACK_CLASSIFICATIONS = {
+    "migration_required",
+    "mixed_migration_required",
+    "approved_alternate_dependency",
+    "migrated",
+}
 _METADATA_KEYS = ("owner", "rationale", "review_condition")
 _DOMAIN_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
+_MODULE_HEAD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 @dataclass(frozen=True, order=True)
@@ -114,6 +143,35 @@ class DynamicImport:
 
 
 @dataclass(frozen=True)
+class ImportFallbackEntry:
+    path: str
+    classification: str
+    baseline_site_count: int
+    site_count: int
+    repository_site_count: int
+    alternate_site_count: int
+
+
+@dataclass(frozen=True)
+class ImportFallbackContract:
+    production_roots: tuple[str, ...]
+    repository_roots: frozenset[str]
+    finalized_candidate_count: int
+    finalized_site_count: int
+    finalized_repository_site_count: int
+    finalized_alternate_site_count: int
+    expected_live_candidate_count: int
+    inventory: Mapping[str, ImportFallbackEntry]
+
+
+@dataclass(frozen=True, order=True)
+class ImportFallbackSite:
+    path: str
+    category: str
+    line: int
+
+
+@dataclass(frozen=True)
 class Analysis:
     owned_paths: tuple[str, ...]
     static_edges: tuple[tuple[str, str], ...]
@@ -134,6 +192,7 @@ class _PolicyContext:
     facade_contracts: set[tuple[str, str]]
     accepted_cycles: set[frozenset[str]]
     dynamic_imports: dict[tuple[str, str, str, str, str], Mapping[str, Any]]
+    import_fallback_contract: ImportFallbackContract | None
 
 
 def _finding(
@@ -201,6 +260,230 @@ def _validate_review_metadata(
         for key in _METADATA_KEYS
     ):
         findings.append(_finding("POLICY_REVIEW_METADATA", subject=path))
+
+
+def _nonnegative_policy_count(
+    value: Any,
+    *,
+    subject: str,
+    findings: list[Finding],
+) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        findings.append(_finding("IMPORT_FALLBACK_POLICY_INVALID", subject=subject))
+        return 0
+    return value
+
+
+def _validate_import_fallback_contract(
+    value: Any,
+    *,
+    valid_roots: Sequence[str],
+    owned_paths: set[str],
+    findings: list[Finding],
+) -> ImportFallbackContract | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        findings.append(_finding("IMPORT_FALLBACK_POLICY_INVALID"))
+        return None
+    for key in sorted(set(value) - _IMPORT_FALLBACK_CONTRACT_KEYS):
+        findings.append(
+            _finding("POLICY_UNKNOWN_KEY", subject=f"import_fallback_contract.{key}")
+        )
+
+    production_value = value.get("production_roots")
+    production_roots: list[str] = []
+    if not isinstance(production_value, list) or not production_value:
+        findings.append(
+            _finding(
+                "IMPORT_FALLBACK_POLICY_INVALID",
+                subject="import_fallback_contract.production_roots",
+            )
+        )
+    else:
+        for index, root in enumerate(production_value):
+            subject = f"import_fallback_contract.production_roots[{index}]"
+            if (
+                not isinstance(root, str)
+                or root not in valid_roots
+                or root in production_roots
+            ):
+                findings.append(
+                    _finding("IMPORT_FALLBACK_POLICY_INVALID", subject=subject)
+                )
+                continue
+            production_roots.append(root)
+
+    repository_value = value.get("repository_roots")
+    repository_roots: set[str] = set()
+    if not isinstance(repository_value, list) or not repository_value:
+        findings.append(
+            _finding(
+                "IMPORT_FALLBACK_POLICY_INVALID",
+                subject="import_fallback_contract.repository_roots",
+            )
+        )
+    else:
+        for index, root in enumerate(repository_value):
+            subject = f"import_fallback_contract.repository_roots[{index}]"
+            if (
+                not isinstance(root, str)
+                or not _MODULE_HEAD_RE.fullmatch(root)
+                or root in repository_roots
+            ):
+                findings.append(
+                    _finding("IMPORT_FALLBACK_POLICY_INVALID", subject=subject)
+                )
+                continue
+            repository_roots.add(root)
+
+    count_names = (
+        "finalized_candidate_count",
+        "finalized_site_count",
+        "finalized_repository_site_count",
+        "finalized_alternate_site_count",
+        "expected_live_candidate_count",
+    )
+    counts = {
+        name: _nonnegative_policy_count(
+            value.get(name),
+            subject=f"import_fallback_contract.{name}",
+            findings=findings,
+        )
+        for name in count_names
+    }
+
+    inventory_value = value.get("inventory")
+    if not isinstance(inventory_value, list):
+        findings.append(
+            _finding(
+                "IMPORT_FALLBACK_POLICY_INVALID",
+                subject="import_fallback_contract.inventory",
+            )
+        )
+        inventory_value = []
+    inventory: dict[str, ImportFallbackEntry] = {}
+    for index, raw_entry in enumerate(inventory_value):
+        subject = f"import_fallback_contract.inventory[{index}]"
+        if not isinstance(raw_entry, Mapping):
+            findings.append(_finding("IMPORT_FALLBACK_POLICY_INVALID", subject=subject))
+            continue
+        for key in sorted(set(raw_entry) - _IMPORT_FALLBACK_ENTRY_KEYS):
+            findings.append(_finding("POLICY_UNKNOWN_KEY", subject=f"{subject}.{key}"))
+        _validate_review_metadata(raw_entry, path=subject, findings=findings)
+        path_value = raw_entry.get("path")
+        if not _safe_relative_path(path_value):
+            findings.append(_finding("PATH_UNSAFE", subject=subject))
+            continue
+        path = str(path_value)
+        if path in inventory:
+            findings.append(_finding("IMPORT_FALLBACK_DUPLICATE", path=path))
+            continue
+        if path not in owned_paths:
+            findings.append(_finding("IMPORT_FALLBACK_PATH_UNOWNED", path=path))
+        if not any(_within_root(path, root) for root in production_roots):
+            findings.append(_finding("IMPORT_FALLBACK_PATH_OUTSIDE", path=path))
+        classification = str(raw_entry.get("classification", ""))
+        if classification not in _IMPORT_FALLBACK_CLASSIFICATIONS:
+            findings.append(_finding("IMPORT_FALLBACK_POLICY_INVALID", path=path))
+        baseline_count = _nonnegative_policy_count(
+            raw_entry.get("baseline_site_count"),
+            subject=f"{subject}.baseline_site_count",
+            findings=findings,
+        )
+        site_count = _nonnegative_policy_count(
+            raw_entry.get("site_count"),
+            subject=f"{subject}.site_count",
+            findings=findings,
+        )
+        repository_count = _nonnegative_policy_count(
+            raw_entry.get("repository_site_count"),
+            subject=f"{subject}.repository_site_count",
+            findings=findings,
+        )
+        alternate_count = _nonnegative_policy_count(
+            raw_entry.get("alternate_site_count"),
+            subject=f"{subject}.alternate_site_count",
+            findings=findings,
+        )
+        if site_count != repository_count + alternate_count:
+            findings.append(_finding("IMPORT_FALLBACK_POLICY_INVALID", path=path))
+        if baseline_count < site_count:
+            findings.append(_finding("IMPORT_FALLBACK_POLICY_INVALID", path=path))
+        if classification == "migrated":
+            if site_count != 0 or baseline_count <= 0:
+                findings.append(_finding("IMPORT_FALLBACK_POLICY_INVALID", path=path))
+        elif baseline_count != site_count:
+            findings.append(_finding("IMPORT_FALLBACK_POLICY_INVALID", path=path))
+        if classification == "migration_required" and repository_count <= 0:
+            findings.append(_finding("IMPORT_FALLBACK_POLICY_INVALID", path=path))
+        if classification == "mixed_migration_required" and (
+            repository_count <= 0 or alternate_count <= 0
+        ):
+            findings.append(_finding("IMPORT_FALLBACK_POLICY_INVALID", path=path))
+        if classification == "approved_alternate_dependency" and (
+            repository_count != 0 or alternate_count <= 0
+        ):
+            findings.append(_finding("IMPORT_FALLBACK_POLICY_INVALID", path=path))
+        inventory[path] = ImportFallbackEntry(
+            path=path,
+            classification=classification,
+            baseline_site_count=baseline_count,
+            site_count=site_count,
+            repository_site_count=repository_count,
+            alternate_site_count=alternate_count,
+        )
+
+    baseline_sites = sum(entry.baseline_site_count for entry in inventory.values())
+    live_paths = sum(entry.site_count > 0 for entry in inventory.values())
+    baseline_repository_sites = sum(
+        entry.repository_site_count
+        + (
+            entry.baseline_site_count - entry.site_count
+            if entry.classification == "migrated"
+            else 0
+        )
+        for entry in inventory.values()
+    )
+    baseline_alternate_sites = sum(
+        entry.alternate_site_count for entry in inventory.values()
+    )
+    expected_totals = {
+        "finalized_candidate_count": len(inventory),
+        "finalized_site_count": baseline_sites,
+        "finalized_repository_site_count": baseline_repository_sites,
+        "finalized_alternate_site_count": baseline_alternate_sites,
+        "expected_live_candidate_count": live_paths,
+    }
+    for name, expected in expected_totals.items():
+        if counts[name] != expected:
+            findings.append(
+                _finding(
+                    "IMPORT_FALLBACK_INVENTORY_COUNT",
+                    subject=f"{name}:{counts[name]}:{expected}",
+                )
+            )
+    if counts["finalized_site_count"] != (
+        counts["finalized_repository_site_count"]
+        + counts["finalized_alternate_site_count"]
+    ):
+        findings.append(
+            _finding(
+                "IMPORT_FALLBACK_INVENTORY_COUNT",
+                subject="finalized_site_category_sum",
+            )
+        )
+
+    return ImportFallbackContract(
+        production_roots=tuple(production_roots),
+        repository_roots=frozenset(repository_roots),
+        finalized_candidate_count=counts["finalized_candidate_count"],
+        finalized_site_count=counts["finalized_site_count"],
+        finalized_repository_site_count=counts["finalized_repository_site_count"],
+        finalized_alternate_site_count=counts["finalized_alternate_site_count"],
+        expected_live_candidate_count=counts["expected_live_candidate_count"],
+        inventory=inventory,
+    )
 
 
 def _validate_policy(
@@ -484,6 +767,13 @@ def _validate_policy(
             findings.append(_finding("DYNAMIC_DUPLICATE", path=dynamic_path))
         dynamic_imports[identity] = entry
 
+    import_fallback_contract = _validate_import_fallback_contract(
+        policy.get("import_fallback_contract"),
+        valid_roots=valid_roots,
+        owned_paths=owned_paths,
+        findings=findings,
+    )
+
     context = _PolicyContext(
         tracked_files=discovered,
         owned_paths=owned_paths,
@@ -495,6 +785,7 @@ def _validate_policy(
         facade_contracts=facade_contracts,
         accepted_cycles=accepted_cycles,
         dynamic_imports=dynamic_imports,
+        import_fallback_contract=import_fallback_contract,
     )
     return context, findings
 
@@ -650,6 +941,130 @@ class _SourceVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
+def _exception_type_names(node: ast.expr | None) -> set[str]:
+    if node is None:
+        return set()
+    if isinstance(node, ast.Name):
+        return {node.id}
+    if isinstance(node, ast.Attribute):
+        return {node.attr}
+    if isinstance(node, ast.Tuple):
+        names: set[str] = set()
+        for element in node.elts:
+            names.update(_exception_type_names(element))
+        return names
+    return set()
+
+
+def _recovery_import_heads(statements: Sequence[ast.stmt]) -> tuple[set[str], bool]:
+    heads: set[str] = set()
+    has_relative = False
+    for statement in statements:
+        for node in ast.walk(statement):
+            if isinstance(node, ast.Import):
+                heads.update(alias.name.split(".", 1)[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                if node.level:
+                    has_relative = True
+                elif node.module:
+                    heads.add(node.module.split(".", 1)[0])
+                else:
+                    heads.update(alias.name.split(".", 1)[0] for alias in node.names)
+    return heads, has_relative
+
+
+def _observe_import_fallback_sites(
+    path: str,
+    tree: ast.AST,
+    repository_roots: frozenset[str],
+) -> tuple[ImportFallbackSite, ...]:
+    sites: list[ImportFallbackSite] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Try):
+            continue
+        for handler in node.handlers:
+            if not _exception_type_names(handler.type).intersection(
+                {"ImportError", "ModuleNotFoundError"}
+            ):
+                continue
+            heads, has_relative = _recovery_import_heads(handler.body)
+            if not heads and not has_relative:
+                continue
+            category = (
+                "repository" if heads.intersection(repository_roots) else "alternate"
+            )
+            sites.append(
+                ImportFallbackSite(
+                    path=path,
+                    category=category,
+                    line=handler.lineno,
+                )
+            )
+    return tuple(sites)
+
+
+def _validate_live_import_fallbacks(
+    contract: ImportFallbackContract,
+    sites: Sequence[ImportFallbackSite],
+) -> list[Finding]:
+    findings: list[Finding] = []
+    observed: dict[str, list[ImportFallbackSite]] = defaultdict(list)
+    for site in sites:
+        observed[site.path].append(site)
+
+    for path in sorted(set(observed) - set(contract.inventory)):
+        findings.append(_finding("IMPORT_FALLBACK_UNCLASSIFIED", path=path))
+
+    for path, entry in sorted(contract.inventory.items()):
+        path_sites = observed.get(path, [])
+        repository_count = sum(site.category == "repository" for site in path_sites)
+        alternate_count = sum(site.category == "alternate" for site in path_sites)
+        site_count = len(path_sites)
+        if entry.classification == "migrated" and site_count:
+            findings.append(_finding("IMPORT_FALLBACK_REGRESSION", path=path))
+            continue
+        if (
+            site_count != entry.site_count
+            or repository_count != entry.repository_site_count
+            or alternate_count != entry.alternate_site_count
+        ):
+            findings.append(
+                _finding(
+                    "IMPORT_FALLBACK_COUNT_DRIFT",
+                    path=path,
+                    subject=(
+                        f"{entry.site_count}:{entry.repository_site_count}:"
+                        f"{entry.alternate_site_count}->{site_count}:"
+                        f"{repository_count}:{alternate_count}"
+                    ),
+                )
+            )
+        if (
+            (
+                entry.classification == "approved_alternate_dependency"
+                and repository_count
+            )
+            or (entry.classification == "migration_required" and not repository_count)
+            or (
+                entry.classification == "mixed_migration_required"
+                and (not repository_count or not alternate_count)
+            )
+        ):
+            findings.append(_finding("IMPORT_FALLBACK_CLASSIFICATION", path=path))
+
+    live_candidate_count = sum(bool(path_sites) for path_sites in observed.values())
+    if live_candidate_count != contract.expected_live_candidate_count:
+        findings.append(
+            _finding(
+                "IMPORT_FALLBACK_LIVE_COUNT",
+                subject=(
+                    f"{contract.expected_live_candidate_count}->{live_candidate_count}"
+                ),
+            )
+        )
+    return findings
+
+
 def _strongly_connected_components(
     modules: Iterable[str],
     edges: Iterable[tuple[str, str]],
@@ -707,6 +1122,7 @@ def analyze_repository(
     context, findings = _validate_policy(repo_root, policy, tracked_files)
     edges: set[tuple[str, str]] = set()
     dynamic_imports: list[DynamicImport] = []
+    import_fallback_sites: list[ImportFallbackSite] = []
     for path in sorted(context.owned_paths):
         source_path = repo_root / path
         if not source_path.is_file() or path not in context.path_modules:
@@ -729,6 +1145,17 @@ def analyze_repository(
         visitor.visit(tree)
         edges.update(visitor.edges)
         dynamic_imports.extend(visitor.dynamic_imports)
+        contract = context.import_fallback_contract
+        if contract and any(
+            _within_root(path, root) for root in contract.production_roots
+        ):
+            import_fallback_sites.extend(
+                _observe_import_fallback_sites(
+                    path,
+                    tree,
+                    contract.repository_roots,
+                )
+            )
 
     for importer, imported in sorted(edges):
         importer_path = context.module_paths.get(importer, ".")
@@ -826,6 +1253,14 @@ def analyze_repository(
                     subject=f"{scope}:{callee}",
                 )
             )
+
+    if context.import_fallback_contract is not None:
+        findings.extend(
+            _validate_live_import_fallbacks(
+                context.import_fallback_contract,
+                import_fallback_sites,
+            )
+        )
 
     return Analysis(
         owned_paths=tuple(sorted(context.owned_paths)),

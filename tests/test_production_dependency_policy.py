@@ -81,6 +81,59 @@ def metadata(reason: str = "temporary compatibility debt") -> dict[str, str]:
     }
 
 
+def import_fallback_entry(
+    path: str,
+    classification: str,
+    *,
+    site_count: int,
+    repository_site_count: int,
+    alternate_site_count: int,
+    baseline_site_count: int | None = None,
+) -> dict:
+    return {
+        "path": path,
+        "classification": classification,
+        "baseline_site_count": (
+            site_count if baseline_site_count is None else baseline_site_count
+        ),
+        "site_count": site_count,
+        "repository_site_count": repository_site_count,
+        "alternate_site_count": alternate_site_count,
+        **metadata("reviewed import fallback fixture"),
+    }
+
+
+def configure_import_fallback_contract(
+    policy: dict,
+    inventory: list[dict],
+    *,
+    expected_live_candidate_count: int,
+) -> None:
+    finalized_site_count = sum(entry["baseline_site_count"] for entry in inventory)
+    finalized_alternate_site_count = sum(
+        entry["alternate_site_count"] for entry in inventory
+    )
+    finalized_repository_site_count = sum(
+        entry["repository_site_count"]
+        + (
+            entry["baseline_site_count"] - entry["site_count"]
+            if entry["classification"] == "migrated"
+            else 0
+        )
+        for entry in inventory
+    )
+    policy["import_fallback_contract"] = {
+        "production_roots": ["alpha", "beta"],
+        "repository_roots": ["alpha", "beta"],
+        "finalized_candidate_count": len(inventory),
+        "finalized_site_count": finalized_site_count,
+        "finalized_repository_site_count": finalized_repository_site_count,
+        "finalized_alternate_site_count": finalized_alternate_site_count,
+        "expected_live_candidate_count": expected_live_candidate_count,
+        "inventory": inventory,
+    }
+
+
 class TestProductionDependencyPolicy(unittest.TestCase):
     def _base_files(self) -> dict[str, str]:
         return {
@@ -133,6 +186,153 @@ raise RuntimeError("production modules must never be imported by the verifier")
         findings = self._evaluate(files, configure=own_dual)
 
         self.assertEqual(findings, [])
+
+    def test_import_fallback_contract_accepts_exact_repository_site(self):
+        files = self._base_files()
+        files[
+            "alpha/dual.py"
+        ] = """
+try:
+    from . import helper
+except ImportError:
+    from alpha import helper
+"""
+
+        def exact(policy):
+            policy["domains"]["alpha"].append("alpha/dual.py")
+            configure_import_fallback_contract(
+                policy,
+                [
+                    import_fallback_entry(
+                        "alpha/dual.py",
+                        "migration_required",
+                        site_count=1,
+                        repository_site_count=1,
+                        alternate_site_count=0,
+                    )
+                ],
+                expected_live_candidate_count=1,
+            )
+
+        self.assertEqual(self._evaluate(files, configure=exact), [])
+
+    def test_import_fallback_contract_rejects_unclassified_site(self):
+        files = self._base_files()
+        files[
+            "alpha/dual.py"
+        ] = """
+try:
+    from . import helper
+except ImportError:
+    from alpha import helper
+"""
+
+        def unclassified(policy):
+            policy["domains"]["alpha"].append("alpha/dual.py")
+            configure_import_fallback_contract(
+                policy, [], expected_live_candidate_count=1
+            )
+
+        findings = self._evaluate(files, configure=unclassified)
+        self.assertIn(
+            "IMPORT_FALLBACK_UNCLASSIFIED",
+            {finding.rule_id for finding in findings},
+        )
+
+    def test_import_fallback_contract_rejects_count_and_category_drift(self):
+        files = self._base_files()
+        files[
+            "alpha/dual.py"
+        ] = """
+try:
+    import fast_optional
+except ModuleNotFoundError:
+    import slow_optional
+"""
+
+        def drifted(policy):
+            policy["domains"]["alpha"].append("alpha/dual.py")
+            configure_import_fallback_contract(
+                policy,
+                [
+                    import_fallback_entry(
+                        "alpha/dual.py",
+                        "migration_required",
+                        site_count=2,
+                        repository_site_count=0,
+                        alternate_site_count=2,
+                    )
+                ],
+                expected_live_candidate_count=1,
+            )
+
+        findings = self._evaluate(files, configure=drifted)
+        codes = {finding.rule_id for finding in findings}
+        self.assertIn("IMPORT_FALLBACK_COUNT_DRIFT", codes)
+        self.assertIn("IMPORT_FALLBACK_CLASSIFICATION", codes)
+
+    def test_import_fallback_contract_rejects_migrated_path_regression(self):
+        files = self._base_files()
+        files[
+            "alpha/dual.py"
+        ] = """
+try:
+    from . import helper
+except ImportError:
+    from alpha import helper
+"""
+
+        def regressed(policy):
+            policy["domains"]["alpha"].append("alpha/dual.py")
+            configure_import_fallback_contract(
+                policy,
+                [
+                    import_fallback_entry(
+                        "alpha/dual.py",
+                        "migrated",
+                        site_count=0,
+                        repository_site_count=0,
+                        alternate_site_count=0,
+                        baseline_site_count=1,
+                    )
+                ],
+                expected_live_candidate_count=0,
+            )
+
+        findings = self._evaluate(files, configure=regressed)
+        self.assertIn(
+            "IMPORT_FALLBACK_REGRESSION",
+            {finding.rule_id for finding in findings},
+        )
+
+    def test_import_fallback_contract_accepts_approved_alternate_dependency(self):
+        files = self._base_files()
+        files[
+            "alpha/optional.py"
+        ] = """
+try:
+    import fast_optional
+except ImportError:
+    import slow_optional
+"""
+
+        def approved(policy):
+            policy["domains"]["alpha"].append("alpha/optional.py")
+            configure_import_fallback_contract(
+                policy,
+                [
+                    import_fallback_entry(
+                        "alpha/optional.py",
+                        "approved_alternate_dependency",
+                        site_count=1,
+                        repository_site_count=0,
+                        alternate_site_count=1,
+                    )
+                ],
+                expected_live_candidate_count=1,
+            )
+
+        self.assertEqual(self._evaluate(files, configure=approved), [])
 
     def test_missing_submodule_does_not_collapse_to_an_owned_parent_package(self):
         files = self._base_files()
@@ -397,6 +597,21 @@ class TestRepositoryProductionDependencyPolicy(unittest.TestCase):
         )
         self.assertEqual(len(policy["accepted_cycles"]), 2)
         self.assertEqual(len(policy["dynamic_imports"]), 8)
+        import_contract = policy["import_fallback_contract"]
+        self.assertEqual(import_contract["finalized_candidate_count"], 60)
+        self.assertEqual(import_contract["finalized_site_count"], 117)
+        self.assertEqual(import_contract["finalized_repository_site_count"], 111)
+        self.assertEqual(import_contract["finalized_alternate_site_count"], 6)
+        self.assertEqual(import_contract["expected_live_candidate_count"], 58)
+        self.assertEqual(len(import_contract["inventory"]), 60)
+        self.assertEqual(
+            {
+                entry["path"]
+                for entry in import_contract["inventory"]
+                if entry["classification"] == "migrated"
+            },
+            {"api/route_orchestration.py", "services/queue_submit.py"},
+        )
 
     def test_precommit_invokes_the_dependency_verifier(self):
         content = (self.repo_root / ".pre-commit-config.yaml").read_text(

@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from functools import wraps
 from typing import Any
 
+if __package__ and "." in __package__:
+    from ..services.import_fallback import import_attrs_dual
+else:
+    from services.import_fallback import import_attrs_dual
+
 
 @dataclass(frozen=True)
 class RouteRegistrationDependencies:
@@ -136,43 +141,51 @@ def _is_openclaw_managed_path(path: str) -> bool:
 
 
 def _register_bridge(server: Any) -> None:
-    try:
-        try:
-            from ..api.bridge import register_bridge_routes
-            from ..services.modules import ModuleCapability, is_module_enabled
-        except (ImportError, ValueError):
-            from api.bridge import register_bridge_routes
-            from services.modules import ModuleCapability, is_module_enabled
-        if hasattr(server, "app") and is_module_enabled(ModuleCapability.BRIDGE):
-            register_bridge_routes(server.app)
-            print("[OpenClaw] Bridge routes registered")
-        elif not is_module_enabled(ModuleCapability.BRIDGE):
-            print("[OpenClaw] Bridge module disabled; skipping route registration")
-    except ImportError:
-        pass
+    # IMPORTANT: do not retry top-level after a packaged import fails; that can
+    # bind another custom node's module or silently omit repository-owned routes.
+    (register_bridge_routes,) = import_attrs_dual(
+        __package__,
+        "..api.bridge",
+        "api.bridge",
+        ("register_bridge_routes",),
+    )
+    module_capability, is_module_enabled = import_attrs_dual(
+        __package__,
+        "..services.modules",
+        "services.modules",
+        ("ModuleCapability", "is_module_enabled"),
+    )
+    if hasattr(server, "app") and is_module_enabled(module_capability.BRIDGE):
+        register_bridge_routes(server.app)
+        print("[OpenClaw] Bridge routes registered")
+    elif not is_module_enabled(module_capability.BRIDGE):
+        print("[OpenClaw] Bridge module disabled; skipping route registration")
 
 
 def _register_packs(
     server: Any, prefixes: tuple[str, ...], deps: RouteRegistrationDependencies
 ) -> None:
-    try:
-        try:
-            from ..api.packs import PacksHandlers
-        except (ImportError, ValueError):
-            from api.packs import PacksHandlers
-        try:
-            from ..config import DATA_DIR
-        except (ImportError, ValueError):
-            from config import DATA_DIR
-        packs = PacksHandlers(DATA_DIR)
-        for prefix in prefixes:
-            deps.register_route_family(
-                server,
-                deps.register_dual_route,
-                deps.build_pack_route_specs(prefix, packs),
-            )
-    except ImportError:
-        pass
+    # IMPORTANT: package import failures are real startup defects. Falling back
+    # here can register foreign pack handlers or hide the entire route family.
+    (packs_handlers,) = import_attrs_dual(
+        __package__,
+        "..api.packs",
+        "api.packs",
+        ("PacksHandlers",),
+    )
+    (data_dir,) = import_attrs_dual(
+        __package__,
+        "..config",
+        "config",
+        ("DATA_DIR",),
+    )
+    packs = packs_handlers(data_dir)
+    for prefix in prefixes:
+        deps.register_route_family(
+            server,
+            deps.register_dual_route,
+            deps.build_pack_route_specs(prefix, packs),
+        )
 
 
 def register_route_families(server: Any, deps: RouteRegistrationDependencies) -> None:

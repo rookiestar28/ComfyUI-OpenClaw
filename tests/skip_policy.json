@@ -25,7 +25,8 @@
     "tests.test_s70_ssrf_pinning_regression",
     "tests.test_r216_file_backed_text_output",
     "tests.connector.test_ingress_transactions",
-    "tests.test_admin_api_transactions"
+    "tests.test_admin_api_transactions",
+    "tests.test_import_resolution_contract"
   ],
   "no_skip_module_metadata": {
     "tests.test_s58_bridge_token_lifecycle": {
@@ -126,6 +127,10 @@
     },
     "tests.test_admin_api_transactions": {
       "reason": "Admin trust-boundary transactions pin real aiohttp authentication and approval, schedule, bridge-worker, and rewrite lifecycles.",
+      "review_after": "2026-12-31"
+    },
+    "tests.test_import_resolution_contract": {
+      "reason": "Import-resolution regressions protect canonical error identity and prevent same-name top-level modules from replacing repository-owned package imports.",
       "review_after": "2026-12-31"
     }
   }

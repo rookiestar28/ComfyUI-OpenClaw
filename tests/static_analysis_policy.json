@@ -1591,27 +1591,6 @@
     },
     {
       "tool": "mypy",
-      "path": "services/queue_submit.py",
-      "code": "no-redef",
-      "message": "Name \"APIError\" already defined (possibly by an import)",
-      "count": 1
-    },
-    {
-      "tool": "mypy",
-      "path": "services/queue_submit.py",
-      "code": "no-redef",
-      "message": "Name \"ErrorCode\" already defined (possibly by an import)",
-      "count": 1
-    },
-    {
-      "tool": "mypy",
-      "path": "services/queue_submit.py",
-      "code": "unused-ignore",
-      "message": "Unused \"type: ignore\" comment",
-      "count": 3
-    },
-    {
-      "tool": "mypy",
       "path": "services/rate_limit.py",
       "code": "unused-ignore",
       "message": "Unused \"type: ignore\" comment",
@@ -7852,13 +7831,6 @@
       "path": "services/queue_submit.py",
       "code": "E722",
       "message": "Do not use bare `except`",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "services/queue_submit.py",
-      "code": "F401",
-      "message": "`api.errors.create_error_response` imported but unused; consider using `importlib.util.find_spec` to test for availability",
       "count": 1
     },
     {
