@@ -1,6 +1,31 @@
 export function createMockComfyUIApp() {
   const settingsStore = new Map();
 
+  const registerSidebarTab = (tabDefinition) => {
+    const root = document.getElementById('mock-sidebar-tabs');
+    const panel = document.createElement('div');
+    panel.className = 'side-bar-panel p-splitterpanel';
+    panel.dataset.mockInitialWidth = '340';
+
+    const content = document.createElement('div');
+    content.className = 'sidebar-content-container';
+
+    const host = document.createElement('div');
+    host.id = `sidebar-tab-${tabDefinition.id}`;
+    host.style.height = '100vh';
+
+    content.appendChild(host);
+    panel.appendChild(content);
+    root.replaceChildren(panel);
+
+    window.__openclawMockSidebarTab = {
+      definition: tabDefinition,
+      destroy: () => tabDefinition.destroy?.(),
+      render: () => tabDefinition.render(host),
+    };
+    tabDefinition.render(host);
+  };
+
   const app = {
     ui: {
       settings: {
@@ -14,14 +39,8 @@ export function createMockComfyUIApp() {
     },
 
     extensionManager: {
-      registerSidebarTab: ({ id, title, render }) => {
-        const root = document.getElementById('mock-sidebar-tabs');
-        const host = document.createElement('div');
-        host.id = `sidebar-tab-${id}`;
-        host.style.height = '100vh';
-        root.replaceChildren(host);
-        render(host);
-      },
+      sidebarTab: { registerSidebarTab },
+      registerSidebarTab,
     },
 
     registerExtension: ({ name, setup }) => {

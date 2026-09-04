@@ -8,8 +8,10 @@
     body { margin:0; padding:0; background:#1e1e1e; color:#fff; font-family:system-ui,-apple-system,sans-serif; }
     #test-status { position:fixed; top:10px; right:10px; padding:8px 12px; background:#2d2d2d; border-radius:6px; font-size:12px; z-index:10000; }
     #test-status.ready { background:#0f4c0f; }
-    #mock-sidebar-tabs { width: 340px; height: 100vh; border-right: 1px solid #444; float:left; background:#161616; }
-    #comfy-root { margin-left: 340px; height: 100vh; }
+    #mock-sidebar-tabs { width: 900px; height: 100vh; border-right: 1px solid #444; float:left; background:#161616; display:flex; }
+    #mock-sidebar-tabs > .side-bar-panel { box-sizing:border-box; width:340px; min-width:0 !important; flex:0 0 340px; overflow:hidden; }
+    #mock-sidebar-tabs .sidebar-content-container { box-sizing:border-box; width:340px; min-width:0 !important; overflow-x:hidden; }
+    #comfy-root { margin-left: 900px; height: 100vh; }
   </style>
 </head>
 <body>

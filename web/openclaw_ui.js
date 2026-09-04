@@ -13,6 +13,7 @@ import { OpenClawActions } from "./openclaw_actions.js";
 import { QueueMonitor } from "./openclaw_queue_monitor.js";
 import { OpenClawNotificationCenter } from "./openclaw_notification_center.js";
 import { OpenClawBannerManager } from "./openclaw_banner_manager.js";
+import { acquireOpenClawSidebarLayout } from "./openclaw_sidebar_layout.js";
 
 export class OpenClawUI {
     constructor() {
@@ -22,6 +23,7 @@ export class OpenClawUI {
             panel: null,
             content: null,
         };
+        this.sidebarLayoutDisposer = null;
         this.notificationCenter = new OpenClawNotificationCenter({
             onAction: (action) => this.handleAction(action),
         });
@@ -34,40 +36,30 @@ export class OpenClawUI {
      * Mount the UI into a provided container (sidebar render target).
      */
     mount(container) {
+        this.unmount();
         this.container = container;
-        // CRITICAL: Must run before render to prevent first-paint clipping in Splitter sidebar host.
-        this._enforceSidebarMinWidth(container);
-        this.boundary.run(container, () => this._render(container));
+        const disposeLayout = acquireOpenClawSidebarLayout(container);
+        this.sidebarLayoutDisposer = disposeLayout;
+        this.boundary.run(container, () => {
+            try {
+                this._render(container);
+            } catch (error) {
+                this._releaseSidebarLayout(disposeLayout);
+                throw error;
+            }
+        });
     }
 
-    _enforceSidebarMinWidth(container) {
-        // IMPORTANT: Keep this value aligned with CSS .openclaw-sidebar-container min-width.
-        const minWidthPx = 560;
+    _releaseSidebarLayout(expectedDisposer = null) {
+        if (expectedDisposer && this.sidebarLayoutDisposer !== expectedDisposer) return;
+        const disposeLayout = this.sidebarLayoutDisposer;
+        this.sidebarLayoutDisposer = null;
+        disposeLayout?.();
+    }
 
-        const applyMinWidth = () => {
-            // CRITICAL: Sidebar width is controlled by ComfyUI SplitterPanel (.side-bar-panel),
-            // not by our inner root container. If we only set inner min-width, content gets clipped.
-            const sidePanel = container.closest(".side-bar-panel");
-            const splitterPanel = sidePanel || container.closest(".p-splitterpanel");
-            if (splitterPanel) {
-                splitterPanel.style.minWidth = `${minWidthPx}px`;
-            }
-
-            const sidebarContent = container.closest(".sidebar-content-container");
-            if (sidebarContent) {
-                sidebarContent.style.minWidth = `${minWidthPx}px`;
-            }
-
-            container.style.minWidth = `${minWidthPx}px`;
-        };
-
-        // Run once now, then again after mount/paint to handle late-attached sidebar wrappers.
-        applyMinWidth();
-        if (typeof requestAnimationFrame === "function") {
-            requestAnimationFrame(applyMinWidth);
-        } else {
-            setTimeout(applyMinWidth, 0);
-        }
+    unmount() {
+        this._releaseSidebarLayout();
+        this.container = null;
     }
 
     /**
@@ -84,6 +76,7 @@ export class OpenClawUI {
             close.title = "Close";
             close.addEventListener("click", () => {
                 panel.classList.remove("visible");
+                this.unmount();
             });
 
             const content = document.createElement("div");
@@ -103,6 +96,7 @@ export class OpenClawUI {
 
         if (isVisible) {
             panel.classList.remove("visible");
+            this.unmount();
             return;
         }
 

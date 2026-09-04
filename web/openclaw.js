@@ -214,10 +214,12 @@ app.registerExtension({
                         stampHostSurfaceMetadata(container, { app, win: window });
                         openclawUI.mount(container);
                     } catch (renderError) {
+                        openclawUI.unmount();
                         console.error("[OpenClaw] UI Mount Error:", renderError);
                         container.innerHTML = `<div style="padding:10px; color:red">UI Crash: ${renderError.message}</div>`;
                     }
                 },
+                destroy: () => openclawUI.unmount(),
             });
             if (!registration.ok) {
                 throw registration.error;

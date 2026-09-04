@@ -11,6 +11,7 @@
     --moltbot-space-md: 12px;
     --moltbot-space-lg: 16px;
     --moltbot-space-xl: 24px;
+    --moltbot-sidebar-min-width: var(--openclaw-sidebar-min-width, 560px);
 
     /* Typography */
     --moltbot-font-xs: 11px;
@@ -37,7 +38,7 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    min-width: 560px; /* Keep sidebar readable: header tabs + Parameter Lab controls */
+    min-width: var(--moltbot-sidebar-min-width); /* Keep sidebar readable: header tabs + Parameter Lab controls */
     min-height: 0; /* allow children to shrink for overflow handling */
     background: var(--moltbot-color-bg);
     color: var(--moltbot-color-fg);
@@ -45,9 +46,11 @@
     font-size: var(--moltbot-font-md);
 }
 
-/* CRITICAL: Keep this rule + !important; SplitterPanel inline sizing can override inner container min-width. */
-.side-bar-panel:has(.moltbot-sidebar-container) {
-    min-width: 560px !important;
+/* Scoped fallback for supported host wrappers; JavaScript owns reversible actual allocation. */
+.side-bar-panel:has(.moltbot-sidebar-container),
+.p-splitterpanel:has(.moltbot-sidebar-container),
+.sidebar-content-container:has(.moltbot-sidebar-container) {
+    min-width: var(--moltbot-sidebar-min-width) !important;
 }
 
 .moltbot-header {
@@ -158,6 +161,7 @@
 }
 
 .moltbot-tab {
+    box-sizing: border-box;
     display: inline-flex;
     align-items: center;
     gap: 6px;
