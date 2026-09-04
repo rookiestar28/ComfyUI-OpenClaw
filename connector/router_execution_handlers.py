@@ -142,9 +142,12 @@ class RouterExecutionMixin:
                     if item.get("id") == template_id:
                         self._template_meta_cache[template_id] = item
                         return item
-        except Exception as e:
+        except Exception as exc:
             if self.config.debug:
-                logger.info(f"DEBUG template meta fetch failed: {e}")
+                logger.info(
+                    "connector.template_metadata_failed (error_type=%s)",
+                    type(exc).__name__,
+                )
         return {}
 
     async def _handle_interrupt(

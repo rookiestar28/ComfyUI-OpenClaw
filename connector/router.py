@@ -3,6 +3,8 @@ Connector Router (F29 Remediation).
 Dispatches parsed commands to handlers with AST argument parsing.
 """
 
+from typing import TYPE_CHECKING
+
 from .config import ConnectorConfig
 from .contract import CommandRequest as CommandRequest
 from .contract import CommandResponse as CommandResponse
@@ -14,7 +16,7 @@ from .router_dispatch import RouterDispatchMixin
 from .router_execution_handlers import RouterExecutionMixin
 from .state import ConnectorState
 
-if False:  # Type hinting only
+if TYPE_CHECKING:
     from .results_poller import ResultsPoller
 
 from .command_firewall import CommandFirewall

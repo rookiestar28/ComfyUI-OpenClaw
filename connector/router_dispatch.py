@@ -159,9 +159,11 @@ class RouterDispatchMixin:
         # Execute
         try:
             return await handler(context.request, list(context.args))
-        except Exception as e:
-            logger.exception(f"Command execution error {cmd}: {e}")
-            return CommandResponse(text=f"[Internal Error] {e!s}")
+        except Exception as exc:
+            # CRITICAL: this is an external connector boundary. Never restore raw
+            # exception/traceback text here; it leaks backend or prompt details.
+            logger.error("connector.command_failed (error_type=%s)", type(exc).__name__)
+            return CommandResponse(text="[Internal Error]")
 
     def _is_admin(self, user_id: str) -> bool:
         return str(user_id) in self.config.admin_users

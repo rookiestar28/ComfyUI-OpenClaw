@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import wraps
@@ -11,6 +12,8 @@ if __package__ and "." in __package__:
     from ..services.import_fallback import import_attrs_dual
 else:
     from services.import_fallback import import_attrs_dual
+
+logger = logging.getLogger("ComfyUI-OpenClaw")
 
 
 @dataclass(frozen=True)
@@ -39,9 +42,7 @@ def register_dual_route(
     """Register PromptServer and direct aliases with one legacy wrapper."""
 
     if not callable(handler):
-        print(
-            f"[OpenClaw] Warning: Skipping route {method} {path} because handler is missing (None)."
-        )
+        logger.warning("route.handler_missing (method=%s, target=%s)", method, path)
         return
     actual_handler = handler
     if path.startswith("/moltbot"):
@@ -51,11 +52,14 @@ def register_dual_route(
             try:
                 if metrics:
                     metrics.inc("legacy_api_hits")
-            except Exception:
-                pass
-            print(
-                f"[OpenClaw] DEPRECATION WARNING: Legacy route accessed: {request.path}. Please migrate to /openclaw/* equivalents."
-            )
+            except Exception as exc:
+                # IMPORTANT: legacy telemetry is best-effort, but never echo the
+                # exception; it may contain request or backend state.
+                logger.warning(
+                    "route.legacy_metric_failed (error_type=%s)",
+                    type(exc).__name__,
+                )
+            logger.warning("route.legacy_accessed (canonical_prefix=/openclaw)")
             response = await handler(request)
             if legacy_headers_builder:
                 headers = legacy_headers_builder(getattr(request, "path", path))
@@ -85,8 +89,14 @@ def register_dual_route(
             except RuntimeError:
                 pass
             except Exception as exc:
-                print(
-                    f"[OpenClaw] Warning: Failed to register fallback route {target}: {exc}"
+                # IMPORTANT: optional direct-alias degradation may continue only with
+                # content-free diagnostics; str(exc) can disclose host/private state.
+                logger.warning(
+                    "route.direct_alias_failed "
+                    "(method=%s, target=%s, error_type=%s)",
+                    method,
+                    target,
+                    type(exc).__name__,
                 )
 
 
@@ -107,7 +117,7 @@ def run_mae_startup_gate(server: Any, resolve_profile: Callable[[], str]) -> Non
                 validate_mae_posture,
             )
     except Exception as exc:
-        print(f"[OpenClaw] Warning: S60 MAE gate unavailable: {exc}")
+        logger.warning("startup.mae_unavailable (error_type=%s)", type(exc).__name__)
         return
     profile = resolve_profile()
     manifest = generate_manifest(server.app)
@@ -122,7 +132,11 @@ def run_mae_startup_gate(server: Any, resolve_profile: Callable[[], str]) -> Non
     )
     if profile in {"public", "hardened"}:
         raise RuntimeError(message)
-    print(f"[OpenClaw] Warning: {message}")
+    logger.warning(
+        "startup.mae_posture_degraded (profile=%s, violation_count=%s)",
+        profile,
+        len(violations),
+    )
 
 
 def _is_openclaw_managed_path(path: str) -> bool:
@@ -157,9 +171,9 @@ def _register_bridge(server: Any) -> None:
     )
     if hasattr(server, "app") and is_module_enabled(module_capability.BRIDGE):
         register_bridge_routes(server.app)
-        print("[OpenClaw] Bridge routes registered")
+        logger.info("startup.bridge_registered")
     elif not is_module_enabled(module_capability.BRIDGE):
-        print("[OpenClaw] Bridge module disabled; skipping route registration")
+        logger.info("startup.bridge_disabled")
 
 
 def _register_packs(

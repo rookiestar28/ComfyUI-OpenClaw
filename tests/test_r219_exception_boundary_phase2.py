@@ -22,15 +22,15 @@ ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = ROOT / "tests" / "exception_boundary_policy.json"
 
 
-class TestPolicyV2(unittest.TestCase):
-    def test_repository_policy_v2_is_complete_and_has_no_open_followups(self):
+class TestPolicyV3(unittest.TestCase):
+    def test_repository_policy_v3_is_complete_and_has_no_open_followups(self):
         from scripts.verify_exception_boundary_policy import (
             load_policy,
             validate_exception_boundary_policy,
         )
 
         policy = load_policy(POLICY_PATH)
-        self.assertEqual(policy["version"], 2)
+        self.assertEqual(policy["version"], 3)
         self.assertEqual(
             set(policy["selected_modules"]),
             {
@@ -108,12 +108,13 @@ class TestPolicyV2(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
+            (repo / "api").mkdir()
             (repo / "selected.py").write_text(
                 "def governed():\n    try:\n        return 1\n    except Exception:\n        return 0\n",
                 encoding="utf-8",
             )
             selected_policy = {
-                "version": 2,
+                "version": 3,
                 "selected_modules": {
                     "selected.py": {
                         "coverage": "selected_scopes",
@@ -121,6 +122,11 @@ class TestPolicyV2(unittest.TestCase):
                         "selected_scopes": ["governed"],
                     }
                 },
+                "pass_only_contract": {
+                    "roots": ["api"],
+                    "grandfathered": [],
+                },
+                "stdout_contract": {"roots": ["api"], "allowed": []},
             }
             failures = validate_exception_boundary_policy(repo, selected_policy)
         self.assertTrue(any("undocumented broad catch" in item for item in failures))

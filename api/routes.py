@@ -7,6 +7,7 @@ Registers /openclaw/* endpoints (and legacy /moltbot/*) against ComfyUI PromptSe
 # Do not move this import or insert code above it, or ComfyUI route registration will fail.
 from __future__ import annotations
 
+import logging
 import os
 from typing import cast
 
@@ -14,6 +15,8 @@ if __package__ and "." in __package__:
     from ..services.import_fallback import import_attrs_dual
 else:
     from services.import_fallback import import_attrs_dual  # type: ignore
+
+logger = logging.getLogger("ComfyUI-OpenClaw")
 
 # IMPORTANT: route-family helpers must stay one-way imported from here.
 # Do not make api.route_registrars import api.routes back, or bootstrap can
@@ -665,7 +668,7 @@ def register_routes(server) -> None:
         # startup gate failure.
         raise
 
-    print("[OpenClaw] Registering routes (Shim Alignment R26)...")
+    logger.info("startup.route_registration_begin")
     core_handlers = {
         "remote_admin_page_handler": remote_admin_page_handler,
         "health_handler": health_handler,

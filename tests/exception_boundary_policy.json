@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "selected_modules": {
     "api/route_handlers.py": {
       "coverage": "all_broad_catches",
@@ -277,5 +277,242 @@
         }
       ]
     }
+  },
+  "pass_only_contract": {
+    "roots": [
+      "api",
+      "services",
+      "connector",
+      "nodes"
+    ],
+    "grandfathered": [
+      {
+        "path": "api/approvals.py",
+        "scope": "ApprovalHandlers.approve_request",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "api/approvals.py",
+        "scope": "ApprovalHandlers.reject_request",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "api/bridge.py",
+        "scope": "BridgeHandlers.submit_handler",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "api/packs.py",
+        "scope": "CleanupFileResponse.prepare",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "api/webhook_submit.py",
+        "scope": "webhook_submit_handler",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/audit.py",
+        "scope": "_get_audit_chain_key",
+        "expected_count": 3,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/audit_pipeline.py",
+        "scope": "LocalFileAuditSink._ensure_parent_dir",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/callback_delivery.py",
+        "scope": "_watch_and_deliver",
+        "expected_count": 6,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/failover.py",
+        "scope": "FailoverState._save",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/idempotency_store.py",
+        "scope": "IdempotencyStore._cleanup",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/idempotency_store.py",
+        "scope": "IdempotencyStore.clear",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/idempotency_store.py",
+        "scope": "IdempotencyStore.reset_singleton",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/llm_client.py",
+        "scope": "LLMClient.complete",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/model_manager.py",
+        "scope": "_safe_unlink",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/model_manager_transfer.py",
+        "scope": "_install_staged_file_bounded",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/safe_io.py",
+        "scope": "_open_outbound_response",
+        "expected_count": 2,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/safe_io.py",
+        "scope": "safe_fetch",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/safe_io.py",
+        "scope": "safe_request_json",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/safe_io.py",
+        "scope": "safe_request_text_stream",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/secrets_encryption.py",
+        "scope": "_load_or_create_key",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/security_doctor_endpoint_checks.py",
+        "scope": "check_ssrf_posture",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/security_doctor_runtime_checks.py",
+        "scope": "check_state_dir_permissions",
+        "expected_count": 2,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/transform_runner.py",
+        "scope": "TransformProcessRunner.execute_transform",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/packs/pack_registry.py",
+        "scope": "PackRegistry.list_packs",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/scheduler/history.py",
+        "scope": "RunHistory._save",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/scheduler/runner.py",
+        "scope": "resolve_scheduler_execution_mode",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/sidecar/bridge_client.py",
+        "scope": "BridgeClient.report_status",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "connector/platforms/slack_installation_manager.py",
+        "scope": "SlackInstallationManager.exchange_code",
+        "expected_count": 1,
+        "reason": "Existing deferred boundary; behavior migration requires separately finalized scope.",
+        "review_after": "2027-01-11"
+      }
+    ]
+  },
+  "stdout_contract": {
+    "roots": [
+      "api",
+      "services",
+      "connector",
+      "nodes"
+    ],
+    "allowed": [
+      {
+        "path": "services/operator_doctor.py",
+        "scope": "main",
+        "expected_count": 2,
+        "reason": "Operator Doctor owns explicit human and JSON CLI stdout output.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/security_doctor_runner.py",
+        "scope": "main",
+        "expected_count": 2,
+        "reason": "Security Doctor owns explicit human and JSON CLI stdout output.",
+        "review_after": "2027-01-11"
+      },
+      {
+        "path": "services/transform_worker.py",
+        "scope": "main",
+        "expected_count": 3,
+        "reason": "Transform worker stdout is its machine-readable JSON protocol.",
+        "review_after": "2027-01-11"
+      }
+    ]
   }
 }

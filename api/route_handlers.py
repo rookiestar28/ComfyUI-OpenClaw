@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger("ComfyUI-OpenClaw")
 
 
 @dataclass(frozen=True)
@@ -160,8 +163,8 @@ async def health_response(request: Any, deps: RouteHandlerDependencies) -> Any:
         from ..services.job_events import get_job_event_store
 
         job_stats = get_job_event_store().stats()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("health.job_stats_degraded (error_type=%s)", type(exc).__name__)
 
     control_plane_info = {}
     runtime_profile = "minimal"
@@ -174,8 +177,12 @@ async def health_response(request: Any, deps: RouteHandlerDependencies) -> Any:
             from services.runtime_profile import get_runtime_profile
         control_plane_info = _get_control_plane_info()
         runtime_profile = get_runtime_profile().value
-    except Exception:
-        pass
+    except Exception as exc:
+        # IMPORTANT: health remains partially available, but exception content must
+        # never cross this public boundary through logs or the response.
+        logger.warning(
+            "health.control_plane_degraded (error_type=%s)", type(exc).__name__
+        )
 
     return deps.web.json_response(
         {
