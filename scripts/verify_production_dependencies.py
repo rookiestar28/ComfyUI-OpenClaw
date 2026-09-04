@@ -94,6 +94,12 @@ _IMPORT_FALLBACK_CLASSIFICATIONS = {
 }
 _CANONICAL_DUAL_IMPORT_HELPER_MODULE = "services.import_fallback"
 _CANONICAL_DUAL_IMPORT_HELPERS = frozenset({"import_attrs_dual", "import_module_dual"})
+_DYNAMIC_IMPORT_CALLEES = frozenset(
+    {"__import__", "importlib.import_module", "import_module"}
+) | frozenset(
+    f"{_CANONICAL_DUAL_IMPORT_HELPER_MODULE}.{helper}"
+    for helper in _CANONICAL_DUAL_IMPORT_HELPERS
+)
 _METADATA_KEYS = ("owner", "rationale", "review_condition")
 _DOMAIN_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 _MODULE_HEAD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -759,8 +765,7 @@ def _validate_policy(
         )
         if (
             not identity[1]
-            or identity[2]
-            not in {"__import__", "importlib.import_module", "import_module"}
+            or identity[2] not in _DYNAMIC_IMPORT_CALLEES
             or target_kind not in {"literal", "expression"}
             or not identity[4]
         ):
@@ -836,7 +841,8 @@ class _SourceVisitor(ast.NodeVisitor):
         self.builtin_import_aliases: set[str] = {"__import__"}
         self.importlib_aliases: set[str] = {"importlib"}
         self.import_module_aliases: set[str] = set()
-        self.dual_import_helper_aliases: set[str] = set()
+        self.dual_import_helper_aliases: dict[str, str] = {}
+        self.findings: list[Finding] = []
 
     def _add_edge(self, imported: str) -> None:
         # IMPORTANT: require an exact owned module. Falling back to the nearest
@@ -860,7 +866,9 @@ class _SourceVisitor(ast.NodeVisitor):
             # matching a same-name local function would fabricate architecture edges.
             for alias in node.names:
                 if alias.name in _CANONICAL_DUAL_IMPORT_HELPERS:
-                    self.dual_import_helper_aliases.add(alias.asname or alias.name)
+                    self.dual_import_helper_aliases[alias.asname or alias.name] = (
+                        alias.name
+                    )
         if node.level == 0 and node.module == "importlib":
             for alias in node.names:
                 if alias.name == "import_module":
@@ -897,18 +905,131 @@ class _SourceVisitor(ast.NodeVisitor):
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self._visit_scoped(node)
 
+    @staticmethod
+    def _bound_helper_argument(
+        node: ast.Call,
+        *,
+        position: int,
+        keyword: str,
+    ) -> tuple[ast.expr | None, bool]:
+        # IMPORTANT: a starred positional or keyword unpack can bind the target twice;
+        # guessing through it would let a canonical helper hide an architecture edge.
+        if any(isinstance(argument, ast.Starred) for argument in node.args) or any(
+            item.arg is None for item in node.keywords
+        ):
+            return None, False
+        positional = node.args[position] if len(node.args) > position else None
+        keyword_values = [item.value for item in node.keywords if item.arg == keyword]
+        if len(keyword_values) > 1 or (positional is not None and keyword_values):
+            return None, False
+        if positional is not None:
+            return positional, True
+        if keyword_values:
+            return keyword_values[0], True
+        return None, False
+
+    @staticmethod
+    def _string_literal(node: ast.expr | None) -> str | None:
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and node.value
+        ):
+            return node.value
+        return None
+
+    def _normalized_relative_helper_target(self, value: str) -> str | None:
+        level = len(value) - len(value.lstrip("."))
+        if not level:
+            return value
+        package_parts = self.module.split(".")[:-1]
+        ascend = level - 1
+        if ascend > len(package_parts):
+            return None
+        prefix = package_parts[:-ascend] if ascend else package_parts
+        suffix = value[level:].split(".") if value[level:] else []
+        return ".".join([*prefix, *suffix])
+
+    def _record_dual_import_helper(self, node: ast.Call, helper_name: str) -> None:
+        relative_node, relative_valid = self._bound_helper_argument(
+            node,
+            position=1,
+            keyword="relative_module",
+        )
+        absolute_node, absolute_valid = self._bound_helper_argument(
+            node,
+            position=2,
+            keyword="absolute_module",
+        )
+        if not relative_valid or not absolute_valid:
+            self.findings.append(
+                _finding(
+                    "DUAL_IMPORT_HELPER_TARGET_INVALID",
+                    path=self.path,
+                    line=node.lineno,
+                    subject=helper_name,
+                )
+            )
+            return
+
+        absolute_module = self._string_literal(absolute_node)
+        if absolute_module is None:
+            if isinstance(absolute_node, ast.Constant):
+                self.findings.append(
+                    _finding(
+                        "DUAL_IMPORT_HELPER_TARGET_INVALID",
+                        path=self.path,
+                        line=node.lineno,
+                        subject=helper_name,
+                    )
+                )
+                return
+            target = (
+                absolute_node.id
+                if isinstance(absolute_node, ast.Name)
+                else f"<{type(absolute_node).__name__}>"
+            )
+            self.dynamic_imports.append(
+                DynamicImport(
+                    path=self.path,
+                    scope=".".join(self.scope) or "<module>",
+                    callee=f"{_CANONICAL_DUAL_IMPORT_HELPER_MODULE}.{helper_name}",
+                    target_kind="expression",
+                    target=target,
+                    line=node.lineno,
+                )
+            )
+            return
+
+        relative_module = self._string_literal(relative_node)
+        if relative_module is None:
+            self.findings.append(
+                _finding(
+                    "DUAL_IMPORT_HELPER_TARGET_INVALID",
+                    path=self.path,
+                    line=node.lineno,
+                    subject=helper_name,
+                )
+            )
+            return
+        normalized_relative = self._normalized_relative_helper_target(relative_module)
+        if normalized_relative != absolute_module:
+            self.findings.append(
+                _finding(
+                    "DUAL_IMPORT_HELPER_TARGET_MISMATCH",
+                    path=self.path,
+                    line=node.lineno,
+                    subject=f"{relative_module}->{absolute_module}",
+                )
+            )
+        self._add_edge(absolute_module)
+
     def visit_Call(self, node: ast.Call) -> None:
         callee = ""
         if isinstance(node.func, ast.Name):
-            if (
-                node.func.id in self.dual_import_helper_aliases
-                and len(node.args) >= 3
-                and isinstance(node.args[2], ast.Constant)
-                and isinstance(node.args[2].value, str)
-            ):
-                # The helper's third argument is the canonical repository module used
-                # in standalone mode and names the same owned module as its relative peer.
-                self._add_edge(node.args[2].value)
+            helper_name = self.dual_import_helper_aliases.get(node.func.id)
+            if helper_name:
+                self._record_dual_import_helper(node, helper_name)
             if node.func.id in self.builtin_import_aliases:
                 callee = "__import__"
             elif node.func.id in self.import_module_aliases:
@@ -1163,6 +1284,7 @@ def analyze_repository(
         visitor.visit(tree)
         edges.update(visitor.edges)
         dynamic_imports.extend(visitor.dynamic_imports)
+        findings.extend(visitor.findings)
         contract = context.import_fallback_contract
         if contract and any(
             _within_root(path, root) for root in contract.production_roots

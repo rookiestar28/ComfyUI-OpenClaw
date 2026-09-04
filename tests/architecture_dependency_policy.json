@@ -1229,6 +1229,16 @@
       "review_condition": "Remove or update when the dynamic loading boundary changes."
     },
     {
+      "path": "services/route_bootstrap_contract.py",
+      "scope": "load_route_bootstrap_contract",
+      "callee": "services.import_fallback.import_attrs_dual",
+      "target_kind": "expression",
+      "target": "<Attribute>",
+      "owner": "architecture-maintainers",
+      "rationale": "Declarative route bootstrap specs select an exact reviewed repository module per contract row.",
+      "review_condition": "Remove or update when route bootstrap imports stop using the canonical dual-import helper."
+    },
+    {
       "path": "services/jobs_read_model.py",
       "scope": "_resolve_get_all_jobs",
       "callee": "importlib.import_module",

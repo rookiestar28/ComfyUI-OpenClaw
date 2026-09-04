@@ -320,6 +320,134 @@ class ArchitecturePolicyFixture(unittest.TestCase):
         )
         self.assertIn("DEP_STALE_EXCEPTION", self._codes(policy))
 
+    def test_canonical_dual_import_helper_keyword_literal_is_a_governed_static_edge(
+        self,
+    ):
+        self._write("services/__init__.py", "")
+        self._write(
+            "services/import_fallback.py",
+            "def import_attrs_dual(*args, **kwargs): ...\n",
+        )
+        self._write("app/main.py", "VALUE = 1\n")
+        self._write(
+            "core/util.py",
+            "from services.import_fallback import import_attrs_dual as load_attrs\n"
+            "(VALUE,) = load_attrs(\n"
+            "    package_name=__package__,\n"
+            "    relative_module='..app.main',\n"
+            "    absolute_module='app.main',\n"
+            "    attr_names=('VALUE',),\n"
+            ")\n",
+        )
+        policy = self._policy()
+        policy["tracked_roots"].append("services")
+        policy["domains"]["services"] = [
+            "services/__init__.py",
+            "services/import_fallback.py",
+        ]
+        policy["allowed_dependencies"]["services"] = ["services"]
+        policy["allowed_dependencies"]["core"].append("services")
+
+        analysis = dependency_policy.analyze_repository(
+            self.repo_root,
+            policy,
+            tracked_files=self._tracked_files(),
+        )
+
+        self.assertIn(("core.util", "app.main"), analysis.static_edges)
+        self.assertIn(
+            "DEP_FORBIDDEN_DIRECTION",
+            {finding.rule_id for finding in analysis.findings},
+        )
+
+        policy["compatibility_exceptions"] = [
+            {
+                "importer": "core.util",
+                "imported": "app.main",
+                **self._review_metadata(),
+            }
+        ]
+        self.assertEqual(self._verify(policy), ())
+
+    def test_canonical_dual_import_helper_governs_nonliteral_and_rejects_ambiguous(
+        self,
+    ):
+        self._write("services/__init__.py", "")
+        self._write(
+            "services/import_fallback.py",
+            "def import_attrs_dual(*args, **kwargs): ...\n",
+        )
+        self._write("app/main.py", "VALUE = 1\n")
+        self._write(
+            "core/util.py",
+            "from services.import_fallback import import_attrs_dual as load_attrs\n"
+            "target = 'app.main'\n"
+            "load_attrs(__package__, '..app.main', target, ('VALUE',))\n"
+            "load_attrs(__package__, '..app.main', 'app.main', "
+            "absolute_module='app.main', attr_names=('VALUE',))\n"
+            "load_attrs(__package__, '..app.main', "
+            "**{'absolute_module': 'app.main', 'attr_names': ('VALUE',)})\n",
+        )
+        policy = self._policy()
+        policy["tracked_roots"].append("services")
+        policy["domains"]["services"] = [
+            "services/__init__.py",
+            "services/import_fallback.py",
+        ]
+        policy["allowed_dependencies"]["services"] = ["services"]
+        policy["allowed_dependencies"]["core"].append("services")
+
+        findings = self._verify(policy)
+
+        invalid = [
+            finding
+            for finding in findings
+            if finding.rule_id == "DUAL_IMPORT_HELPER_TARGET_INVALID"
+        ]
+        self.assertEqual(len(invalid), 2)
+        self.assertIn(
+            "DYNAMIC_UNREGISTERED_EXPRESSION",
+            {finding.rule_id for finding in findings},
+        )
+
+        policy["dynamic_imports"] = [
+            {
+                "path": "core/util.py",
+                "scope": "<module>",
+                "callee": "services.import_fallback.import_attrs_dual",
+                "target_kind": "expression",
+                "target": "target",
+                **self._review_metadata(),
+            }
+        ]
+        self.assertEqual(
+            {finding.rule_id for finding in self._verify(policy)},
+            {"DUAL_IMPORT_HELPER_TARGET_INVALID"},
+        )
+
+    def test_canonical_dual_import_helper_rejects_mismatched_literal_targets(self):
+        self._write("services/__init__.py", "")
+        self._write(
+            "services/import_fallback.py",
+            "def import_module_dual(*args, **kwargs): ...\n",
+        )
+        self._write("app/main.py", "VALUE = 1\n")
+        self._write(
+            "core/util.py",
+            "from services.import_fallback import import_module_dual as load_module\n"
+            "load_module(__package__, '..core.util', 'app.main')\n",
+        )
+        policy = self._policy()
+        policy["tracked_roots"].append("services")
+        policy["domains"]["services"] = [
+            "services/__init__.py",
+            "services/import_fallback.py",
+        ]
+        policy["allowed_dependencies"]["services"] = ["services"]
+        policy["allowed_dependencies"]["core"].append("services")
+
+        self.assertIn("DUAL_IMPORT_HELPER_TARGET_MISMATCH", self._codes(policy))
+
     def test_unrelated_same_name_helper_does_not_synthesize_static_edge(self):
         self._write(
             "core/util.py",
@@ -437,7 +565,7 @@ class RepositoryArchitecturePolicyTests(unittest.TestCase):
         self.assertIn("scripts/bootstrap_project_venv.py", analysis.owned_paths)
         self.assertEqual(len(analysis.owned_paths), 310)
         self.assertEqual(len(policy["accepted_cycles"]), 2)
-        self.assertEqual(len(policy["dynamic_imports"]), 8)
+        self.assertEqual(len(policy["dynamic_imports"]), 9)
         self.assertEqual(len(policy["compatibility_exceptions"]), 9)
         self.assertIn(
             ("services.queue_submit", "api.errors"),

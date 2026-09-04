@@ -596,7 +596,7 @@ class TestRepositoryProductionDependencyPolicy(unittest.TestCase):
             ],
         )
         self.assertEqual(len(policy["accepted_cycles"]), 2)
-        self.assertEqual(len(policy["dynamic_imports"]), 8)
+        self.assertEqual(len(policy["dynamic_imports"]), 9)
         import_contract = policy["import_fallback_contract"]
         self.assertEqual(import_contract["finalized_candidate_count"], 60)
         self.assertEqual(import_contract["finalized_site_count"], 117)
