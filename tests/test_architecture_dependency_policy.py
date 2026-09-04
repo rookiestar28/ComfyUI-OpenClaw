@@ -278,6 +278,65 @@ class ArchitecturePolicyFixture(unittest.TestCase):
         self.assertEqual(analysis.static_edges, (("app.main", "core.util"),))
         self.assertEqual(analysis.findings, ())
 
+    def test_canonical_dual_import_helper_literal_is_a_governed_static_edge(self):
+        self._write("services/__init__.py", "")
+        self._write(
+            "services/import_fallback.py", "def import_attrs_dual(*args): ...\n"
+        )
+        self._write("app/main.py", "VALUE = 1\n")
+        self._write(
+            "core/util.py",
+            "from services.import_fallback import import_attrs_dual as load_attrs\n"
+            "(VALUE,) = load_attrs(__package__, '..app.main', 'app.main', ('VALUE',))\n",
+        )
+        policy = self._policy()
+        policy["tracked_roots"].append("services")
+        policy["domains"]["services"] = [
+            "services/__init__.py",
+            "services/import_fallback.py",
+        ]
+        policy["allowed_dependencies"]["services"] = ["services"]
+        policy["allowed_dependencies"]["core"].append("services")
+        policy["compatibility_exceptions"] = [
+            {
+                "importer": "core.util",
+                "imported": "app.main",
+                **self._review_metadata(),
+            }
+        ]
+
+        analysis = dependency_policy.analyze_repository(
+            self.repo_root,
+            policy,
+            tracked_files=self._tracked_files(),
+        )
+
+        self.assertIn(("core.util", "app.main"), analysis.static_edges)
+        self.assertEqual(analysis.findings, ())
+
+        self._write(
+            "core/util.py",
+            "from services.import_fallback import import_attrs_dual as load_attrs\n",
+        )
+        self.assertIn("DEP_STALE_EXCEPTION", self._codes(policy))
+
+    def test_unrelated_same_name_helper_does_not_synthesize_static_edge(self):
+        self._write(
+            "core/util.py",
+            "def import_attrs_dual(*args): ...\n"
+            "(VALUE,) = import_attrs_dual("
+            "__package__, '..app.main', 'app.main', ('VALUE',))\n",
+        )
+
+        analysis = dependency_policy.analyze_repository(
+            self.repo_root,
+            self._policy(),
+            tracked_files=self._tracked_files(),
+        )
+
+        self.assertNotIn(("core.util", "app.main"), analysis.static_edges)
+        self.assertEqual(analysis.findings, ())
+
     def test_unowned_new_tracked_module_fails(self):
         self._write("core/new_module.py", "VALUE = 2\n")
 
@@ -379,8 +438,8 @@ class RepositoryArchitecturePolicyTests(unittest.TestCase):
         self.assertEqual(len(analysis.owned_paths), 310)
         self.assertEqual(len(policy["accepted_cycles"]), 2)
         self.assertEqual(len(policy["dynamic_imports"]), 8)
-        self.assertEqual(len(policy["compatibility_exceptions"]), 8)
-        self.assertNotIn(
+        self.assertEqual(len(policy["compatibility_exceptions"]), 9)
+        self.assertIn(
             ("services.queue_submit", "api.errors"),
             {
                 (entry["importer"], entry["imported"])

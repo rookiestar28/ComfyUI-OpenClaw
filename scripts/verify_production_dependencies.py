@@ -92,6 +92,8 @@ _IMPORT_FALLBACK_CLASSIFICATIONS = {
     "approved_alternate_dependency",
     "migrated",
 }
+_CANONICAL_DUAL_IMPORT_HELPER_MODULE = "services.import_fallback"
+_CANONICAL_DUAL_IMPORT_HELPERS = frozenset({"import_attrs_dual", "import_module_dual"})
 _METADATA_KEYS = ("owner", "rationale", "review_condition")
 _DOMAIN_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 _MODULE_HEAD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -834,6 +836,7 @@ class _SourceVisitor(ast.NodeVisitor):
         self.builtin_import_aliases: set[str] = {"__import__"}
         self.importlib_aliases: set[str] = {"importlib"}
         self.import_module_aliases: set[str] = set()
+        self.dual_import_helper_aliases: set[str] = set()
 
     def _add_edge(self, imported: str) -> None:
         # IMPORTANT: require an exact owned module. Falling back to the nearest
@@ -852,6 +855,12 @@ class _SourceVisitor(ast.NodeVisitor):
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         base = _resolve_relative_import(self.module, self.path, node)
+        if base == _CANONICAL_DUAL_IMPORT_HELPER_MODULE:
+            # IMPORTANT: trust helper targets only through proven canonical imports;
+            # matching a same-name local function would fabricate architecture edges.
+            for alias in node.names:
+                if alias.name in _CANONICAL_DUAL_IMPORT_HELPERS:
+                    self.dual_import_helper_aliases.add(alias.asname or alias.name)
         if node.level == 0 and node.module == "importlib":
             for alias in node.names:
                 if alias.name == "import_module":
@@ -891,6 +900,15 @@ class _SourceVisitor(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> None:
         callee = ""
         if isinstance(node.func, ast.Name):
+            if (
+                node.func.id in self.dual_import_helper_aliases
+                and len(node.args) >= 3
+                and isinstance(node.args[2], ast.Constant)
+                and isinstance(node.args[2].value, str)
+            ):
+                # The helper's third argument is the canonical repository module used
+                # in standalone mode and names the same owned module as its relative peer.
+                self._add_edge(node.args[2].value)
             if node.func.id in self.builtin_import_aliases:
                 callee = "__import__"
             elif node.func.id in self.import_module_aliases:

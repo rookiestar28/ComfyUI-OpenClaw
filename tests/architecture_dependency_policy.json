@@ -390,6 +390,13 @@
       "review_condition": "Remove when the importer no longer requires the higher-level domain."
     },
     {
+      "importer": "services.queue_submit",
+      "imported": "api.errors",
+      "owner": "architecture-maintainers",
+      "rationale": "Existing boundary retained for compatibility while domain ownership is reduced.",
+      "review_condition": "Remove when the importer no longer requires the higher-level domain."
+    },
+    {
       "importer": "services.connector_callback_contract",
       "imported": "connector.config",
       "owner": "architecture-maintainers",
