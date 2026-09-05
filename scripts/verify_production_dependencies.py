@@ -2005,6 +2005,81 @@ def _resolved_static_subscript_selector(
 _UNKNOWN_STATIC_SELECTOR = object()
 
 
+def _static_dict_unknown_selector_candidates(
+    node: ast.AST,
+    index: _EnvironmentScopeIndex | None,
+    scope_id: int,
+    use: ast.AST | None,
+    resolving: frozenset[tuple[int, str]],
+    shadowed_keys: set[object],
+) -> tuple[ast.expr, ...] | None:
+    if isinstance(node, ast.Name) and index is not None and use is not None:
+        guard = (scope_id, node.id)
+        if guard in resolving:
+            return None
+        sources = _environment_binding_source_expressions_at(
+            index, scope_id, node.id, use
+        )
+        if not sources:
+            return None
+        possible: list[ast.expr] = []
+        branch_keys: list[set[object]] = []
+        for source in sources:
+            source_scope = index.node_scopes.get(id(source), scope_id)
+            source_keys = set(shadowed_keys)
+            nested = _static_dict_unknown_selector_candidates(
+                source,
+                index,
+                source_scope,
+                source,
+                resolving | {guard},
+                source_keys,
+            )
+            if nested is None:
+                return None
+            possible.extend(nested)
+            branch_keys.append(source_keys)
+        if branch_keys:
+            # Only keys overwritten in every possible binding source can suppress an earlier
+            # outer value. Treating alternative mappings as sequential drops a live branch.
+            shadowed_keys.update(set.intersection(*branch_keys))
+        return tuple(possible)
+    if not isinstance(node, ast.Dict):
+        return None
+    possible = []
+    unresolved_override = False
+    for key, value in reversed(tuple(zip(node.keys, node.values, strict=True))):
+        if key is None:
+            nested = _static_dict_unknown_selector_candidates(
+                value, index, scope_id, value, resolving, shadowed_keys
+            )
+            if nested is None:
+                unresolved_override = True
+            else:
+                possible.extend(nested)
+            continue
+        key_scope = index.node_scopes.get(id(key), scope_id) if index else scope_id
+        is_static, key_value = (
+            _resolved_static_literal_key(key, index, key_scope, key)
+            if index is not None
+            else _static_literal_key(key)
+        )
+        if not is_static:
+            possible.append(value)
+            unresolved_override = True
+            continue
+        # CRITICAL: an unknown selector does not erase Python's duplicate-key last-wins rule.
+        # Suppress only definitely shadowed keys; unresolved keys remain possible or a dynamic
+        # key can hide a governed reader, while retaining every duplicate invents dead readers.
+        if key_value in shadowed_keys:
+            continue
+        shadowed_keys.add(key_value)
+        possible.append(value)
+    if possible:
+        return tuple(possible)
+    return None if unresolved_override else ()
+
+
 def _static_dict_value_candidates(
     node: ast.AST,
     selector: object,
@@ -2013,6 +2088,10 @@ def _static_dict_value_candidates(
     use: ast.AST | None = None,
     resolving: frozenset[tuple[int, str]] = frozenset(),
 ) -> tuple[ast.expr, ...] | None:
+    if selector is _UNKNOWN_STATIC_SELECTOR:
+        return _static_dict_unknown_selector_candidates(
+            node, index, scope_id, use, resolving, set()
+        )
     if isinstance(node, ast.Name) and index is not None and use is not None:
         guard = (scope_id, node.id)
         if guard in resolving:
@@ -2066,9 +2145,6 @@ def _static_dict_value_candidates(
             # proven `PATH` key invents a reader while branch/rebind ambiguity can still hide one.
             possible.append(value)
             unresolved_override = True
-            continue
-        if selector is _UNKNOWN_STATIC_SELECTOR:
-            possible.append(value)
             continue
         if key_value == selector:
             possible.append(value)
@@ -3513,48 +3589,171 @@ def _loop_target_value_bindings(
     ]
 
 
-def _statement_sequence_guarantees_exit(statements: Sequence[ast.stmt]) -> bool:
-    return any(
-        _statement_guarantees_sequence_exit(statement) for statement in statements
-    )
+def _statement_sequence_guarantees_exit(
+    statements: Sequence[ast.stmt],
+    index: _EnvironmentScopeIndex | None = None,
+    *,
+    loop_controls_exit_sequence: bool = True,
+) -> bool:
+    for statement in statements:
+        if _statement_guarantees_sequence_exit(
+            statement,
+            index,
+            loop_controls_exit_sequence=loop_controls_exit_sequence,
+        ):
+            return True
+        if not loop_controls_exit_sequence and _statement_may_exit_current_loop(
+            statement
+        ):
+            # A break/continue path can bypass a later return. It exits the loop-body sequence,
+            # but only return/raise can prove an exact finite loop never reaches its successor.
+            return False
+    return False
 
 
-def _statement_guarantees_sequence_exit(statement: ast.stmt) -> bool:
-    if isinstance(statement, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
+def _statement_may_exit_current_loop(statement: ast.stmt) -> bool:
+    if isinstance(statement, (ast.Break, ast.Continue)):
         return True
     if isinstance(statement, ast.If):
         if isinstance(statement.test, ast.Constant):
             selected = (
                 statement.body if bool(statement.test.value) else statement.orelse
             )
-            return _statement_sequence_guarantees_exit(selected)
-        return bool(statement.body and statement.orelse) and all(
-            _statement_sequence_guarantees_exit(branch)
+            return any(_statement_may_exit_current_loop(part) for part in selected)
+        return any(
+            _statement_may_exit_current_loop(part)
             for branch in (statement.body, statement.orelse)
+            for part in branch
+        )
+    if isinstance(statement, ast.Match):
+        return any(
+            _statement_may_exit_current_loop(part)
+            for case in statement.cases
+            for part in case.body
         )
     if isinstance(statement, ast.Try) or type(statement).__name__ == "TryStar":
         try_statement: Any = statement
+        return any(
+            _statement_may_exit_current_loop(part)
+            for branch in (
+                try_statement.body,
+                try_statement.orelse,
+                try_statement.finalbody,
+                *(handler.body for handler in try_statement.handlers),
+            )
+            for part in branch
+        )
+    # Loop-local controls nested inside another loop are consumed by that loop.
+    return False
+
+
+def _statement_guarantees_sequence_exit(
+    statement: ast.stmt,
+    index: _EnvironmentScopeIndex | None = None,
+    *,
+    loop_controls_exit_sequence: bool = True,
+) -> bool:
+    if isinstance(statement, (ast.Return, ast.Raise)):
+        return True
+    if isinstance(statement, (ast.Break, ast.Continue)):
+        return loop_controls_exit_sequence
+    if isinstance(statement, ast.If):
+        if isinstance(statement.test, ast.Constant):
+            selected = (
+                statement.body if bool(statement.test.value) else statement.orelse
+            )
+            return _statement_sequence_guarantees_exit(
+                selected,
+                index,
+                loop_controls_exit_sequence=loop_controls_exit_sequence,
+            )
+        return bool(statement.body and statement.orelse) and all(
+            _statement_sequence_guarantees_exit(
+                branch,
+                index,
+                loop_controls_exit_sequence=loop_controls_exit_sequence,
+            )
+            for branch in (statement.body, statement.orelse)
+        )
+    if isinstance(statement, (ast.For, ast.AsyncFor)):
+        iterable_elements = (
+            _resolved_static_iterable_elements(
+                statement.iter,
+                index,
+                index.node_scopes.get(id(statement.iter), 0),
+                statement.iter,
+            )
+            if index is not None
+            else _static_iterable_elements(statement.iter)
+        )
+        return bool(iterable_elements) and _statement_sequence_guarantees_exit(
+            statement.body,
+            index,
+            loop_controls_exit_sequence=False,
+        )
+    if isinstance(statement, ast.While):
+        return (
+            isinstance(statement.test, ast.Constant)
+            and bool(statement.test.value)
+            and _statement_sequence_guarantees_exit(
+                statement.body,
+                index,
+                loop_controls_exit_sequence=False,
+            )
+        )
+    if isinstance(statement, ast.Match):
+        for case in statement.cases:
+            if isinstance(case.guard, ast.Constant) and not bool(case.guard.value):
+                continue
+            if not _statement_sequence_guarantees_exit(
+                case.body,
+                index,
+                loop_controls_exit_sequence=loop_controls_exit_sequence,
+            ):
+                return False
+            guard_is_unconditional = case.guard is None or (
+                isinstance(case.guard, ast.Constant) and bool(case.guard.value)
+            )
+            if guard_is_unconditional and _pattern_is_irrefutable(case.pattern):
+                return True
+        return False
+    if isinstance(statement, ast.Try) or type(statement).__name__ == "TryStar":
+        try_statement: Any = statement
         if try_statement.finalbody and _statement_sequence_guarantees_exit(
-            try_statement.finalbody
+            try_statement.finalbody,
+            index,
+            loop_controls_exit_sequence=loop_controls_exit_sequence,
         ):
             return True
         body_or_else_exits = _statement_sequence_guarantees_exit(
-            try_statement.body
+            try_statement.body,
+            index,
+            loop_controls_exit_sequence=loop_controls_exit_sequence,
         ) or (
             bool(try_statement.orelse)
-            and _statement_sequence_guarantees_exit(try_statement.orelse)
+            and _statement_sequence_guarantees_exit(
+                try_statement.orelse,
+                index,
+                loop_controls_exit_sequence=loop_controls_exit_sequence,
+            )
         )
         if not try_statement.handlers:
             return body_or_else_exits
         return body_or_else_exits and all(
-            _statement_sequence_guarantees_exit(handler.body)
+            _statement_sequence_guarantees_exit(
+                handler.body,
+                index,
+                loop_controls_exit_sequence=loop_controls_exit_sequence,
+            )
             for handler in try_statement.handlers
         )
     return False
 
 
 def _node_is_statically_unreachable(
-    node: ast.AST, parents: Mapping[int, ast.AST]
+    node: ast.AST,
+    parents: Mapping[int, ast.AST],
+    index: _EnvironmentScopeIndex | None = None,
 ) -> bool:
     current = node
     while (parent := parents.get(id(current))) is not None:
@@ -3562,11 +3761,11 @@ def _node_is_statically_unreachable(
             if not isinstance(field_value, list) or current not in field_value:
                 continue
             current_index = field_value.index(current)
-            if _statement_sequence_guarantees_exit(field_value[:current_index]):
+            if _statement_sequence_guarantees_exit(field_value[:current_index], index):
                 # CRITICAL: ast.walk includes statements after direct and compound unconditional
-                # exits. Summarize only proven all-path exits; treating unknown branches or caught
-                # raises as terminating hides live readers, while ignoring `if True`/try-finally
-                # exits invents deterministic execution entries.
+                # exits. Summarize only proven all-path exits; unknown/empty loops, break paths,
+                # guarded matches, and caught raises stay live, while exact nonempty loops and
+                # exhaustive matches that return cannot invent deterministic execution entries.
                 return True
         if isinstance(parent, (ast.If, ast.IfExp)) and isinstance(
             parent.test, ast.Constant
@@ -4010,7 +4209,7 @@ def _execution_scope_is_reached_from(
         reached = False
         for candidate in ast.walk(tree):
             if not isinstance(candidate, ast.Call) or _node_is_statically_unreachable(
-                candidate, parents
+                candidate, parents, index
             ):
                 continue
             candidate_scope = index.node_scopes.get(id(candidate), parent_scope)
@@ -4059,7 +4258,7 @@ def _execution_scope_is_reached_from(
         for candidate in ast.walk(tree):
             candidate_scope = index.node_scopes.get(id(candidate), parent_scope)
             sites = _generator_consumption_sites(candidate, index, candidate_scope)
-            if not sites or _node_is_statically_unreachable(candidate, parents):
+            if not sites or _node_is_statically_unreachable(candidate, parents, index):
                 continue
             execution_scope = _eager_execution_scope(index, candidate_scope)
             if execution_scope == scope_id or not _execution_scope_is_reached_from(
@@ -4165,7 +4364,7 @@ def _walrus_comprehension_activation(
         for candidate in ast.walk(tree):
             candidate_scope = index.node_scopes.get(id(candidate), target_scope)
             sites = _generator_consumption_sites(candidate, index, candidate_scope)
-            if not sites or _node_is_statically_unreachable(candidate, parents):
+            if not sites or _node_is_statically_unreachable(candidate, parents, index):
                 continue
             execution_scope = _eager_execution_scope(index, candidate_scope)
             if not _execution_scope_is_reached_from(
