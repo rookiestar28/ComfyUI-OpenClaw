@@ -1690,13 +1690,6 @@
     {
       "tool": "mypy",
       "path": "services/runtime_config.py",
-      "code": "attr-defined",
-      "message": "\"Callable[[str], str | None]\" has no attribute \"_warned_legacy\"",
-      "count": 1
-    },
-    {
-      "tool": "mypy",
-      "path": "services/runtime_config.py",
       "code": "unused-ignore",
       "message": "Unused \"type: ignore\" comment",
       "count": 8

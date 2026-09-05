@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tokenize
 from collections import defaultdict
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path, PurePosixPath
@@ -97,6 +97,7 @@ _ENV_ALIAS_CONTRACT_KEYS = {
     "production_roots",
     "central_owner",
     "supported_legacy_keys",
+    "supported_dynamic_legacy_keys",
     "rejected_legacy_keys",
     "direct_read_exceptions",
 }
@@ -192,6 +193,7 @@ class EnvironmentAliasContract:
     production_roots: tuple[str, ...]
     central_owner: str
     supported_legacy_keys: frozenset[str]
+    supported_dynamic_legacy_keys: frozenset[str]
     rejected_legacy_keys: frozenset[str]
     direct_read_exceptions: frozenset[str]
 
@@ -577,8 +579,11 @@ def _validate_environment_alias_contract(
         return frozenset(accepted)
 
     supported = legacy_key_set("supported_legacy_keys", required=True)
+    supported_dynamic = legacy_key_set("supported_dynamic_legacy_keys", required=False)
     rejected = legacy_key_set("rejected_legacy_keys", required=False)
     for key in sorted(supported & rejected):
+        findings.append(_finding("ENV_ALIAS_KEY_CONFLICT", subject=key))
+    for key in sorted(supported_dynamic & (supported | rejected)):
         findings.append(_finding("ENV_ALIAS_KEY_CONFLICT", subject=key))
 
     exception_entries = raw_contract.get("direct_read_exceptions", [])
@@ -609,6 +614,7 @@ def _validate_environment_alias_contract(
         production_roots=tuple(roots),
         central_owner=central_owner,
         supported_legacy_keys=supported,
+        supported_dynamic_legacy_keys=supported_dynamic,
         rejected_legacy_keys=rejected,
         direct_read_exceptions=frozenset(exceptions),
     )
@@ -1384,41 +1390,228 @@ def _strongly_connected_components(
     return tuple(sorted(components))
 
 
-def _is_os_environ(node: ast.AST) -> bool:
-    return (
-        isinstance(node, ast.Attribute)
-        and node.attr == "environ"
-        and isinstance(node.value, ast.Name)
-        and node.value.id == "os"
+_ENV_ORIGIN_OS_MODULE = "os_module"
+_ENV_ORIGIN_GETENV = "getenv"
+_ENV_ORIGIN_MAPPING = "environ"
+_ENV_ORIGIN_LEGACY_SIGNAL = "legacy_signal"
+_ENV_ORIGIN_OTHER = "other"
+
+
+@dataclass
+class _EnvironmentScopeFacts:
+    parent: int | None
+    root: ast.AST
+    base_origins: dict[str, set[str]]
+    origins: dict[str, set[str]]
+    assignments: list[tuple[set[str], ast.AST]]
+
+
+class _EnvironmentScopeIndex(ast.NodeVisitor):
+    """Map environment reads to lexical scopes without executing production code."""
+
+    def __init__(self, tree: ast.AST) -> None:
+        self.scopes = [
+            _EnvironmentScopeFacts(None, tree, defaultdict(set), defaultdict(set), [])
+        ]
+        self.node_scopes: dict[int, int] = {}
+        self._current = 0
+        self.visit(tree)
+
+    def visit(self, node: ast.AST) -> Any:
+        self.node_scopes[id(node)] = self._current
+        return super().visit(node)
+
+    def _new_scope(self, root: ast.AST, parent: int) -> int:
+        scope_id = len(self.scopes)
+        self.scopes.append(
+            _EnvironmentScopeFacts(parent, root, defaultdict(set), defaultdict(set), [])
+        )
+        return scope_id
+
+    def _nested_lexical_parent(self) -> int:
+        parent = self._current
+        # IMPORTANT: function, lambda, comprehension, and nested-class name resolution skips class
+        # namespaces. Treating a class attribute as a closure binding hides real module env reads.
+        while isinstance(self.scopes[parent].root, ast.ClassDef):
+            enclosing = self.scopes[parent].parent
+            if enclosing is None:
+                break
+            parent = enclosing
+        return parent
+
+    def _visit_function_header(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef
+    ) -> None:
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for default in (*node.args.defaults, *node.args.kw_defaults):
+            if default is not None:
+                self.visit(default)
+        if node.returns is not None:
+            self.visit(node.returns)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_function_header(node)
+        parent = self._current
+        self._current = self._new_scope(node, self._nested_lexical_parent())
+        for statement in node.body:
+            self.visit(statement)
+        self._current = parent
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_function_header(node)
+        parent = self._current
+        self._current = self._new_scope(node, self._nested_lexical_parent())
+        for statement in node.body:
+            self.visit(statement)
+        self._current = parent
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        for default in (*node.args.defaults, *node.args.kw_defaults):
+            if default is not None:
+                self.visit(default)
+        parent = self._current
+        self._current = self._new_scope(node, self._nested_lexical_parent())
+        self.visit(node.body)
+        self._current = parent
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for base in node.bases:
+            self.visit(base)
+        for keyword in node.keywords:
+            self.visit(keyword)
+        parent = self._current
+        self._current = self._new_scope(node, self._nested_lexical_parent())
+        for statement in node.body:
+            self.visit(statement)
+        self._current = parent
+
+    def _visit_comprehension_scope(self, node: ast.AST) -> None:
+        parent = self._current
+        self._current = self._new_scope(node, self._nested_lexical_parent())
+        self.generic_visit(node)
+        self._current = parent
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._visit_comprehension_scope(node)
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._visit_comprehension_scope(node)
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self._visit_comprehension_scope(node)
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        self._visit_comprehension_scope(node)
+
+
+def _scope_has_origin(
+    index: _EnvironmentScopeIndex,
+    scope_id: int,
+    name: str,
+    origin: str,
+) -> bool:
+    current: int | None = scope_id
+    while current is not None:
+        facts = index.scopes[current]
+        if name in facts.origins:
+            return facts.origins[name] == {origin}
+        current = facts.parent
+    return False
+
+
+def _static_string(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _static_string(node.left)
+        right = _static_string(node.right)
+        if left is not None and right is not None:
+            return left + right
+    return None
+
+
+def _expression_has_origin(
+    node: ast.AST,
+    index: _EnvironmentScopeIndex,
+    scope_id: int,
+    origin: str,
+) -> bool:
+    return isinstance(node, ast.Name) and _scope_has_origin(
+        index, scope_id, node.id, origin
     )
 
 
-def _is_raw_env_call(node: ast.Call) -> bool:
-    func = node.func
-    if not isinstance(func, ast.Attribute):
-        return False
-    if func.attr == "get" and _is_os_environ(func.value):
+def _is_os_module_expression(
+    node: ast.AST, index: _EnvironmentScopeIndex, scope_id: int
+) -> bool:
+    return _expression_has_origin(node, index, scope_id, _ENV_ORIGIN_OS_MODULE)
+
+
+def _is_env_mapping_expression(
+    node: ast.AST, index: _EnvironmentScopeIndex, scope_id: int
+) -> bool:
+    if _expression_has_origin(node, index, scope_id, _ENV_ORIGIN_MAPPING):
+        return True
+    if (
+        isinstance(node, ast.Attribute)
+        and node.attr == "environ"
+        and _is_os_module_expression(node.value, index, scope_id)
+    ):
+        return True
+    if isinstance(node, (ast.BoolOp, ast.IfExp)):
+        return any(
+            _is_env_mapping_expression(part, index, scope_id)
+            for part in ast.iter_child_nodes(node)
+        )
+    return False
+
+
+def _is_getenv_expression(
+    node: ast.AST, index: _EnvironmentScopeIndex, scope_id: int
+) -> bool:
+    if _expression_has_origin(node, index, scope_id, _ENV_ORIGIN_GETENV):
         return True
     return (
-        func.attr == "getenv"
-        and isinstance(func.value, ast.Name)
-        and func.value.id == "os"
+        isinstance(node, ast.Attribute)
+        and node.attr == "getenv"
+        and _is_os_module_expression(node.value, index, scope_id)
+    )
+
+
+def _is_raw_env_call(
+    node: ast.Call, index: _EnvironmentScopeIndex, scope_id: int
+) -> bool:
+    func = node.func
+    if _is_getenv_expression(func, index, scope_id):
+        return True
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "get"
+        and _is_env_mapping_expression(func.value, index, scope_id)
     )
 
 
 def _contains_legacy_env_signal(
     node: ast.AST,
-    signal_names: Collection[str] = frozenset(),
+    index: _EnvironmentScopeIndex,
+    scope_id: int,
 ) -> bool:
+    static_value = _static_string(node)
+    if static_value is not None and static_value.startswith(_LEGACY_ENV_PREFIXES):
+        return True
     for part in ast.walk(node):
-        if (
-            isinstance(part, ast.Constant)
-            and isinstance(part.value, str)
-            and part.value.startswith(_LEGACY_ENV_PREFIXES)
-        ):
-            return True
+        if part is not node:
+            static_value = _static_string(part)
+            if static_value is not None and static_value.startswith(
+                _LEGACY_ENV_PREFIXES
+            ):
+                return True
         if isinstance(part, ast.Name) and (
-            "legacy" in part.id.lower() or part.id in signal_names
+            "legacy" in part.id.lower()
+            or _scope_has_origin(index, scope_id, part.id, _ENV_ORIGIN_LEGACY_SIGNAL)
         ):
             return True
     return False
@@ -1432,44 +1625,113 @@ def _target_names(node: ast.AST) -> set[str]:
     return set()
 
 
-def _legacy_env_signal_names(tree: ast.AST) -> frozenset[str]:
-    signals: set[str] = set()
+def _build_environment_scope_index(tree: ast.AST) -> _EnvironmentScopeIndex:
+    index = _EnvironmentScopeIndex(tree)
+    for node in ast.walk(tree):
+        scope_id = index.node_scopes.get(id(node), 0)
+        facts = index.scopes[scope_id]
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            facts.base_origins[node.name].add(_ENV_ORIGIN_OTHER)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                bound = alias.asname or alias.name.split(".", 1)[0]
+                facts.base_origins[bound].add(
+                    _ENV_ORIGIN_OS_MODULE if alias.name == "os" else _ENV_ORIGIN_OTHER
+                )
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                bound = alias.asname or alias.name
+                if node.module == "os" and alias.name in {"getenv", "environ"}:
+                    facts.base_origins[bound].add(
+                        _ENV_ORIGIN_GETENV
+                        if alias.name == "getenv"
+                        else _ENV_ORIGIN_MAPPING
+                    )
+                elif node.module == "os" and alias.name == "*":
+                    facts.base_origins["getenv"].add(_ENV_ORIGIN_GETENV)
+                    facts.base_origins["environ"].add(_ENV_ORIGIN_MAPPING)
+                else:
+                    facts.base_origins[bound].add(_ENV_ORIGIN_OTHER)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            child_scope = next(
+                (
+                    candidate
+                    for candidate, child in enumerate(index.scopes)
+                    if child.root is node
+                ),
+                None,
+            )
+            if child_scope is not None:
+                child_facts = index.scopes[child_scope]
+                arguments = (
+                    *node.args.posonlyargs,
+                    *node.args.args,
+                    *node.args.kwonlyargs,
+                )
+                for argument in arguments:
+                    child_facts.base_origins[argument.arg].add(_ENV_ORIGIN_OTHER)
+                if node.args.vararg is not None:
+                    child_facts.base_origins[node.args.vararg.arg].add(
+                        _ENV_ORIGIN_OTHER
+                    )
+                if node.args.kwarg is not None:
+                    child_facts.base_origins[node.args.kwarg.arg].add(_ENV_ORIGIN_OTHER)
+
+        targets: set[str] = set()
+        value: ast.AST | None = None
+        if isinstance(node, ast.Assign):
+            targets = {
+                name for target in node.targets for name in _target_names(target)
+            }
+            value = node.value
+        elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)):
+            targets = _target_names(node.target)
+            value = node.value
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+            targets = _target_names(node.target)
+            value = node.iter
+        if targets and value is not None:
+            facts.assignments.append((targets, value))
+
+    for facts in index.scopes:
+        facts.origins = defaultdict(
+            set, {name: set(origins) for name, origins in facts.base_origins.items()}
+        )
+
     changed = True
     while changed:
         changed = False
-        for node in ast.walk(tree):
-            targets: set[str] = set()
-            value: ast.AST | None = None
-            if isinstance(node, ast.Assign):
-                targets = {
-                    name for target in node.targets for name in _target_names(target)
-                }
-                value = node.value
-            elif isinstance(node, ast.AnnAssign):
-                targets = _target_names(node.target)
-                value = node.value
-            elif isinstance(node, (ast.For, ast.comprehension)):
-                targets = _target_names(node.target)
-                value = node.iter
-            if not targets or value is None:
-                continue
-            # IMPORTANT: propagate legacy-bearing collections into neutral loop targets. Checking
-            # identifier spelling alone misses raw reads such as `for key in ENV_KEYS`.
-            if _contains_legacy_env_signal(value, signals):
-                new_targets = targets - signals
-                if new_targets:
-                    signals.update(new_targets)
-                    changed = True
-    return frozenset(signals)
+        for scope_id, facts in enumerate(index.scopes):
+            calculated = defaultdict(
+                set,
+                {name: set(origins) for name, origins in facts.base_origins.items()},
+            )
+            for targets, value in facts.assignments:
+                new_origins: set[str] = set()
+                if _is_os_module_expression(value, index, scope_id):
+                    new_origins.add(_ENV_ORIGIN_OS_MODULE)
+                if _is_getenv_expression(value, index, scope_id):
+                    new_origins.add(_ENV_ORIGIN_GETENV)
+                if _is_env_mapping_expression(value, index, scope_id):
+                    new_origins.add(_ENV_ORIGIN_MAPPING)
+                # IMPORTANT: signal propagation is lexical. File-wide name sets made an unrelated
+                # function's `key` inherit a legacy loop target and caused false policy failures.
+                if _contains_legacy_env_signal(value, index, scope_id):
+                    new_origins.add(_ENV_ORIGIN_LEGACY_SIGNAL)
+                if not new_origins:
+                    new_origins.add(_ENV_ORIGIN_OTHER)
+                for target in targets:
+                    calculated[target].update(new_origins)
+            if dict(calculated) != dict(facts.origins):
+                facts.origins = calculated
+                changed = True
+    return index
 
 
 def _legacy_key_from_expression(node: ast.AST) -> str | None:
-    if (
-        isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and node.value.startswith(_LEGACY_ENV_PREFIXES)
-    ):
-        return node.value
+    value = _static_string(node)
+    if value is not None and value.startswith(_LEGACY_ENV_PREFIXES):
+        return value
     return None
 
 
@@ -1481,13 +1743,24 @@ def _observe_raw_legacy_env_reads(
     if path == contract.central_owner:
         return ()
     findings: list[Finding] = []
-    known = contract.supported_legacy_keys | contract.rejected_legacy_keys
-    legacy_signal_names = _legacy_env_signal_names(tree)
+    known = (
+        contract.supported_legacy_keys
+        | contract.supported_dynamic_legacy_keys
+        | contract.rejected_legacy_keys
+    )
+    scope_index = _build_environment_scope_index(tree)
     for node in ast.walk(tree):
+        scope_id = scope_index.node_scopes.get(id(node), 0)
         key_node: ast.AST | None = None
-        if isinstance(node, ast.Call) and _is_raw_env_call(node) and node.args:
+        if (
+            isinstance(node, ast.Call)
+            and _is_raw_env_call(node, scope_index, scope_id)
+            and node.args
+        ):
             key_node = node.args[0]
-        elif isinstance(node, ast.Subscript) and _is_os_environ(node.value):
+        elif isinstance(node, ast.Subscript) and _is_env_mapping_expression(
+            node.value, scope_index, scope_id
+        ):
             key_node = node.slice
         if key_node is None:
             continue
@@ -1510,7 +1783,7 @@ def _observe_raw_legacy_env_reads(
                         subject=key,
                     )
                 )
-        elif _contains_legacy_env_signal(key_node, legacy_signal_names):
+        elif _contains_legacy_env_signal(key_node, scope_index, scope_id):
             findings.append(
                 _finding(
                     "ENV_ALIAS_DYNAMIC_READ",
@@ -1523,24 +1796,69 @@ def _observe_raw_legacy_env_reads(
 
 
 def _assigned_string_set(tree: ast.AST, assignment_name: str) -> frozenset[str] | None:
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
-            continue
-        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-        if not any(
-            isinstance(target, ast.Name) and target.id == assignment_name
-            for target in targets
+    if not isinstance(tree, ast.Module):
+        return None
+    for node in tree.body:
+        bound_names: set[str] = set()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound_names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            bound_names.update(
+                name for target in node.targets for name in _target_names(target)
+            )
+        elif isinstance(node, ast.AnnAssign):
+            bound_names.update(_target_names(node.target))
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            bound_names.update(
+                alias.asname or alias.name.split(".", 1)[0] for alias in node.names
+            )
+        if "frozenset" in bound_names:
+            return None
+    matches: list[ast.AST] = []
+    for node in tree.body:
+        value: ast.AST | None = None
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == assignment_name
         ):
-            continue
-        value = node.value
-        if value is None:
-            return frozenset()
-        return frozenset(
-            part.value
-            for part in ast.walk(value)
-            if isinstance(part, ast.Constant) and isinstance(part.value, str)
-        )
-    return None
+            value = node.value
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == assignment_name
+            and node.value is not None
+        ):
+            value = node.value
+        if value is not None:
+            matches.append(value)
+    if len(matches) != 1:
+        return None
+    value = matches[0]
+    if not (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and value.func.id == "frozenset"
+        and not value.keywords
+        and len(value.args) <= 1
+    ):
+        return None
+    if not value.args:
+        return frozenset()
+    literal = value.args[0]
+    if not isinstance(literal, (ast.Set, ast.List, ast.Tuple)):
+        return None
+    strings = [
+        element.value
+        for element in literal.elts
+        if isinstance(element, ast.Constant) and isinstance(element.value, str)
+    ]
+    # CRITICAL: registry-policy parity must come from one literal immutable assignment. Walking
+    # arbitrary expressions allowed dead-branch canaries to impersonate runtime registry values.
+    if len(strings) != len(literal.elts) or len(strings) != len(set(strings)):
+        return None
+    return frozenset(strings)
 
 
 def _validate_live_environment_aliases(
@@ -1569,8 +1887,9 @@ def _validate_live_environment_aliases(
         return tuple(findings)
     moltbot = _assigned_string_set(central_tree, "LEGACY_MOLTBOT_ENV_KEYS")
     clawdbot = _assigned_string_set(central_tree, "SUPPORTED_CLAWDBOT_ENV_KEYS")
+    dynamic = _assigned_string_set(central_tree, "SUPPORTED_DYNAMIC_MOLTBOT_ENV_KEYS")
     rejected = _assigned_string_set(central_tree, "REJECTED_LEGACY_ENV_KEYS")
-    if moltbot is None or clawdbot is None or rejected is None:
+    if moltbot is None or clawdbot is None or dynamic is None or rejected is None:
         findings.append(
             _finding("ENV_ALIAS_REGISTRY_UNREADABLE", path=contract.central_owner)
         )
@@ -1587,6 +1906,14 @@ def _validate_live_environment_aliases(
         findings.append(
             _finding(
                 "ENV_ALIAS_REGISTRY_UNREGISTERED",
+                path=contract.central_owner,
+                subject=key,
+            )
+        )
+    for key in sorted(contract.supported_dynamic_legacy_keys ^ dynamic):
+        findings.append(
+            _finding(
+                "ENV_ALIAS_DYNAMIC_KEYS_DRIFT",
                 path=contract.central_owner,
                 subject=key,
             )

@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 from unittest.mock import patch
 
 from services.env_aliases import (
@@ -14,6 +15,7 @@ from services.env_aliases import (
     LEGACY_MOLTBOT_ENV_KEYS,
     REJECTED_LEGACY_ENV_KEYS,
     SUPPORTED_CLAWDBOT_ENV_KEYS,
+    SUPPORTED_DYNAMIC_MOLTBOT_ENV_KEYS,
     EnvLookupMode,
     get_env_value,
     reset_warning_state_for_tests,
@@ -68,6 +70,17 @@ class TestLegacyEnvironmentAliasResolver(unittest.TestCase):
         self.assertEqual(len(LEGACY_MOLTBOT_ENV_KEYS), 86)
         self.assertEqual(len(ENV_ALIAS_REGISTRY), 86)
         self.assertEqual(SUPPORTED_CLAWDBOT_ENV_KEYS, {"CLAWDBOT_LLM_API_KEY"})
+        self.assertEqual(
+            SUPPORTED_DYNAMIC_MOLTBOT_ENV_KEYS,
+            {
+                "MOLTBOT_RATE_LIMIT_ADMIN_DAILY_CAP",
+                "MOLTBOT_RATE_LIMIT_BRIDGE_DAILY_CAP",
+                "MOLTBOT_RATE_LIMIT_CONNECTOR_DAILY_CAP",
+                "MOLTBOT_RATE_LIMIT_EVENTS_DAILY_CAP",
+                "MOLTBOT_RATE_LIMIT_TRIGGER_DAILY_CAP",
+                "MOLTBOT_RATE_LIMIT_WEBHOOK_DAILY_CAP",
+            },
+        )
         self.assertEqual(REJECTED_LEGACY_ENV_KEYS, {"CLAWDBOT_GATEWAY_TOKEN"})
         self.assertEqual(
             ENV_ALIAS_REGISTRY["OPENCLAW_LLM_API_KEY"].aliases,
@@ -134,6 +147,32 @@ class TestLegacyEnvironmentAliasResolver(unittest.TestCase):
 
         self.assertEqual(result.value, "older")
         self.assertEqual(result.selected_key, "CLAWDBOT_LLM_API_KEY")
+        self.assertTrue(result.used_legacy)
+
+    def test_explicit_aliases_cannot_enable_rejected_clawdbot_key(self):
+        with self.assertRaisesRegex(ValueError, "CLAWDBOT_GATEWAY_TOKEN"):
+            resolve_env(
+                "OPENCLAW_GATEWAY_TOKEN",
+                aliases=("CLAWDBOT_GATEWAY_TOKEN",),
+                env={"CLAWDBOT_GATEWAY_TOKEN": "synthetic"},
+            )
+
+        with self.assertRaisesRegex(ValueError, "MOLTBOT_UNINVENTORIED"):
+            resolve_env(
+                "OPENCLAW_DYNAMIC_FAMILY",
+                aliases=("MOLTBOT_UNINVENTORIED",),
+                env={"MOLTBOT_UNINVENTORIED": "synthetic"},
+            )
+
+    def test_reviewed_dynamic_rate_limit_alias_remains_supported(self):
+        result = resolve_env(
+            "OPENCLAW_RATE_LIMIT_WEBHOOK_DAILY_CAP",
+            aliases=("MOLTBOT_RATE_LIMIT_WEBHOOK_DAILY_CAP",),
+            env={"MOLTBOT_RATE_LIMIT_WEBHOOK_DAILY_CAP": "17"},
+        )
+
+        self.assertEqual(result.value, "17")
+        self.assertEqual(result.selected_key, "MOLTBOT_RATE_LIMIT_WEBHOOK_DAILY_CAP")
         self.assertTrue(result.used_legacy)
 
     def test_winning_legacy_key_warns_once_without_value_disclosure(self):
@@ -338,6 +377,67 @@ class TestLegacyEnvironmentAliasResolver(unittest.TestCase):
 
         self.assertEqual(len(captured.output), 1)
         self.assertIn("MOLTBOT_TELEMETRY_OPT_OUT", captured.output[0])
+
+    def test_runtime_config_and_direct_lookup_share_process_warning_dedupe(self):
+        from services import runtime_config
+
+        test_logger = logging.getLogger("ComfyUI-OpenClaw.services.runtime_config")
+        with patch.dict(
+            os.environ,
+            {"MOLTBOT_LLM_PROVIDER": "synthetic"},
+            clear=True,
+        ):
+            with self.assertLogs(test_logger, level="WARNING") as captured:
+                self.assertEqual(
+                    get_env_value(
+                        "OPENCLAW_LLM_PROVIDER",
+                        target_logger=test_logger,
+                    ),
+                    "synthetic",
+                )
+                self.assertEqual(runtime_config._get_env_value("provider"), "synthetic")
+
+        self.assertEqual(len(captured.output), 1)
+        self.assertIn("OPENCLAW_LEGACY_ENV_ALIAS_USED", captured.output[0])
+
+    def test_runtime_config_concurrent_lookup_uses_locked_central_dedupe(self):
+        from services import runtime_config
+
+        worker_count = 8
+        legacy_warning_barrier = Barrier(worker_count)
+        emitted: list[str] = []
+
+        def capture_warning(message, *args) -> None:
+            rendered = message % args
+            # IMPORTANT: the retired facade warning ran outside a lock. Coordinating only that
+            # legacy format makes the race deterministic without blocking the central one-call path.
+            if rendered.startswith("Config: Using legacy environment variable"):
+                legacy_warning_barrier.wait(timeout=5)
+            emitted.append(rendered)
+
+        with (
+            patch.dict(
+                os.environ,
+                {"MOLTBOT_LLM_PROVIDER": "synthetic"},
+                clear=True,
+            ),
+            patch.object(
+                runtime_config.logger,
+                "warning",
+                side_effect=capture_warning,
+            ),
+        ):
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                values = list(
+                    executor.map(
+                        lambda _index: runtime_config._get_env_value("provider"),
+                        range(worker_count),
+                    )
+                )
+
+        self.assertEqual(values, ["synthetic"] * worker_count)
+        self.assertEqual(len(emitted), 1)
+        self.assertIn("OPENCLAW_LEGACY_ENV_ALIAS_USED", emitted[0])
 
 
 if __name__ == "__main__":

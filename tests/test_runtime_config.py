@@ -33,6 +33,9 @@ class TestRuntimeConfig(unittest.TestCase):
 
     def setUp(self):
         """Clear env overrides before each test."""
+        from services.env_aliases import reset_warning_state_for_tests
+
+        reset_warning_state_for_tests()
         # Patch CONFIG_FILE to ensure we use specific temp file for each test or shared temp dir
         # We need to patch where it is used.
         # services.runtime_config.CONFIG_FILE is imported as global in that module.
@@ -42,20 +45,6 @@ class TestRuntimeConfig(unittest.TestCase):
         )
         patcher.start()
         self.addCleanup(patcher.stop)
-
-        # IMPORTANT:
-        # runtime_config._get_env_value caches legacy-warning emission in a function
-        # attribute (`_warned_legacy`). Without resetting it here, test order can
-        # suppress expected warning logs and produce false negatives in CI.
-        try:
-            for mod_name, mod in list(sys.modules.items()):
-                if not mod_name.endswith("runtime_config"):
-                    continue
-                fn = getattr(mod, "_get_env_value", None)
-                if callable(fn):
-                    setattr(fn, "_warned_legacy", set())
-        except Exception:
-            pass
 
         for key in [
             "MOLTBOT_LLM_PROVIDER",
@@ -109,7 +98,8 @@ class TestRuntimeConfig(unittest.TestCase):
                 # Verify warning log for legacy usage
                 self.assertTrue(
                     any(
-                        "legacy environment variable MOLTBOT_LLM_PROVIDER" in o
+                        "OPENCLAW_LEGACY_ENV_ALIAS_USED" in o
+                        and "MOLTBOT_LLM_PROVIDER" in o
                         for o in cm.output
                     )
                 )

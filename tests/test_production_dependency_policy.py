@@ -138,6 +138,7 @@ def configure_environment_alias_contract(
     policy: dict,
     *,
     supported: list[str] | None = None,
+    supported_dynamic: list[str] | None = None,
     rejected: list[str] | None = None,
     exceptions: list[dict] | None = None,
 ) -> None:
@@ -145,6 +146,7 @@ def configure_environment_alias_contract(
         "production_roots": ["alpha", "beta"],
         "central_owner": "alpha/env_aliases.py",
         "supported_legacy_keys": supported or ["MOLTBOT_FLAG"],
+        "supported_dynamic_legacy_keys": supported_dynamic or [],
         "rejected_legacy_keys": rejected or ["CLAWDBOT_REJECTED"],
         "direct_read_exceptions": exceptions or [],
     }
@@ -155,6 +157,7 @@ def environment_alias_owner_source() -> str:
     return (
         "LEGACY_MOLTBOT_ENV_KEYS = frozenset({'MOLTBOT_FLAG'})\n"
         "SUPPORTED_CLAWDBOT_ENV_KEYS = frozenset()\n"
+        "SUPPORTED_DYNAMIC_MOLTBOT_ENV_KEYS = frozenset()\n"
         "REJECTED_LEGACY_ENV_KEYS = frozenset({'CLAWDBOT_REJECTED'})\n"
     )
 
@@ -600,6 +603,8 @@ def load(name):
         files[
             "alpha/api.py"
         ] = """import os
+from os import environ
+from os import getenv
 legacy = "OPENCLAW_FLAG".replace("OPENCLAW_", "MOLTBOT_", 1)
 KEYS = ("OPENCLAW_FLAG", "MOLTBOT_FLAG")
 ONE = os.environ.get("MOLTBOT_FLAG")
@@ -619,6 +624,203 @@ for key in KEYS:
         self.assertEqual(codes.count("ENV_ALIAS_DIRECT_READ"), 3)
         self.assertEqual(codes.count("ENV_ALIAS_DYNAMIC_READ"), 2)
         self.assertEqual(codes.count("ENV_ALIAS_UNKNOWN_KEY"), 1)
+
+    def test_environment_alias_contract_tracks_import_and_environment_object_aliases(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/api.py"
+        ] = """import os as operating_system
+from os import environ as process_environment
+from os import getenv as read_environment
+
+environment_alias = operating_system.environ
+ONE = operating_system.getenv("MOLTBOT_FLAG")
+TWO = read_environment("MOLTBOT_FLAG")
+THREE = environment_alias.get("MOLTBOT_FLAG")
+FOUR = process_environment["MOLTBOT_FLAG"]
+"""
+
+        findings = self._evaluate(
+            files,
+            configure=lambda policy: configure_environment_alias_contract(policy),
+        )
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            4,
+        )
+
+    def test_environment_alias_contract_respects_shadowing_and_lexical_signal_scope(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/api.py"
+        ] = """import os
+from os import environ
+from os import getenv
+
+KEYS = ("OPENCLAW_FLAG", "MOLTBOT_FLAG")
+
+def governed():
+    for key in KEYS:
+        os.getenv(key)
+
+def unrelated():
+    key = "PATH"
+    os.getenv(key)
+
+def parameter_shadow(os):
+    return os.getenv("MOLTBOT_FLAG")
+
+def local_shadow():
+    os = client
+    return os.getenv("MOLTBOT_FLAG")
+
+def imported_getter_shadow(getenv):
+    return getenv("MOLTBOT_FLAG")
+
+def imported_mapping_shadow(environ):
+    return environ.get("MOLTBOT_FLAG")
+"""
+
+        findings = self._evaluate(
+            files,
+            configure=lambda policy: configure_environment_alias_contract(policy),
+        )
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DYNAMIC_READ"),
+            1,
+        )
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            0,
+        )
+
+    def test_environment_alias_contract_respects_same_scope_rebinding(self):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/api.py"
+        ] = """import os
+from os import environ
+from os import getenv
+
+os = fake_client
+environ = fake_mapping
+getenv = fake_reader
+
+ONE = os.getenv("MOLTBOT_FLAG")
+TWO = environ.get("MOLTBOT_FLAG")
+THREE = getenv("MOLTBOT_FLAG")
+"""
+
+        findings = self._evaluate(
+            files,
+            configure=lambda policy: configure_environment_alias_contract(policy),
+        )
+
+        self.assertNotIn(
+            "ENV_ALIAS_DIRECT_READ", {finding.rule_id for finding in findings}
+        )
+
+    def test_environment_alias_contract_skips_class_namespace_for_method_resolution(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/api.py"
+        ] = """import os
+
+class Example:
+    os = client
+
+    def governed(self):
+        return os.getenv("MOLTBOT_FLAG")
+
+    def parameter_shadow(self, os):
+        return os.getenv("MOLTBOT_FLAG")
+"""
+
+        findings = self._evaluate(
+            files,
+            configure=lambda policy: configure_environment_alias_contract(policy),
+        )
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            1,
+        )
+
+    def test_environment_alias_contract_rejects_split_constant_dynamic_key(self):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/api.py"
+        ] = """import os
+key = "MOLT" + "BOT_FLAG"
+VALUE = os.getenv(key)
+"""
+
+        findings = self._evaluate(
+            files,
+            configure=lambda policy: configure_environment_alias_contract(policy),
+        )
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DYNAMIC_READ"),
+            1,
+        )
+
+    def test_environment_alias_registry_requires_auditable_literal_frozensets(self):
+        files = self._base_files()
+        files[
+            "alpha/env_aliases.py"
+        ] = """def load_keys():
+    return ()
+
+LEGACY_MOLTBOT_ENV_KEYS = frozenset(
+    load_keys() if True else {"MOLTBOT_FLAG"}
+)
+SUPPORTED_CLAWDBOT_ENV_KEYS = frozenset()
+SUPPORTED_DYNAMIC_MOLTBOT_ENV_KEYS = frozenset()
+REJECTED_LEGACY_ENV_KEYS = frozenset({"CLAWDBOT_REJECTED"})
+"""
+
+        findings = self._evaluate(
+            files,
+            configure=lambda policy: configure_environment_alias_contract(policy),
+        )
+
+        self.assertIn(
+            "ENV_ALIAS_REGISTRY_UNREADABLE",
+            [finding.rule_id for finding in findings],
+        )
+
+        files[
+            "alpha/env_aliases.py"
+        ] = """def frozenset(values):
+    return load_keys()
+
+LEGACY_MOLTBOT_ENV_KEYS = frozenset({"MOLTBOT_FLAG"})
+SUPPORTED_CLAWDBOT_ENV_KEYS = frozenset()
+SUPPORTED_DYNAMIC_MOLTBOT_ENV_KEYS = frozenset()
+REJECTED_LEGACY_ENV_KEYS = frozenset({"CLAWDBOT_REJECTED"})
+"""
+        findings = self._evaluate(
+            files,
+            configure=lambda policy: configure_environment_alias_contract(policy),
+        )
+        self.assertIn(
+            "ENV_ALIAS_REGISTRY_UNREADABLE",
+            [finding.rule_id for finding in findings],
+        )
 
     def test_environment_alias_contract_matches_static_registry_without_importing_it(
         self,
@@ -653,6 +855,26 @@ for key in KEYS:
 
         self.assertIn("ENV_ALIAS_REGISTRY_MISSING", codes)
         self.assertIn("ENV_ALIAS_REJECTED_DRIFT", codes)
+
+    def test_environment_alias_contract_fails_closed_on_dynamic_family_drift(self):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source().replace(
+            "SUPPORTED_DYNAMIC_MOLTBOT_ENV_KEYS = frozenset()",
+            "SUPPORTED_DYNAMIC_MOLTBOT_ENV_KEYS = frozenset({'MOLTBOT_DYNAMIC_FLAG'})",
+        )
+
+        findings = self._evaluate(
+            files,
+            configure=lambda policy: configure_environment_alias_contract(
+                policy,
+                supported_dynamic=["MOLTBOT_DIFFERENT_DYNAMIC_FLAG"],
+            ),
+        )
+
+        self.assertIn(
+            "ENV_ALIAS_DYNAMIC_KEYS_DRIFT",
+            {finding.rule_id for finding in findings},
+        )
 
     def test_environment_alias_direct_read_exception_must_be_exact_and_live(self):
         files = self._base_files()

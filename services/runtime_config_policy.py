@@ -19,7 +19,6 @@ try:
         SOURCE_PERSISTED,
         SOURCE_RUNTIME_OVERRIDE,
         get_first_present_env,
-        get_preferred_env_value,
     )
 except ImportError:
     from services.config_layers import (  # type: ignore
@@ -29,7 +28,6 @@ except ImportError:
         SOURCE_PERSISTED,
         SOURCE_RUNTIME_OVERRIDE,
         get_first_present_env,
-        get_preferred_env_value,
     )
 
 try:
@@ -194,24 +192,20 @@ def env_flag(primary: str, legacy: str, default: bool = False) -> bool:
 def get_env_value(
     key: str,
     *,
-    warned_legacy: set[str],
     logger,
 ) -> Optional[str]:
     env_vars = ENV_MAPPINGS.get(key)
     if not env_vars:
         return None
     primary, legacy = env_vars
-    value, used_legacy = get_preferred_env_value(primary, legacy)
-    if not used_legacy:
-        return value
-    if legacy not in warned_legacy:
-        logger.warning(
-            "Config: Using legacy environment variable %s. Please update to %s in future versions.",
-            legacy,
-            primary,
-        )
-        warned_legacy.add(legacy)
-    return value
+    # IMPORTANT: warning ownership must remain in env_aliases' locked process-wide registry.
+    # Reintroducing a facade-local set duplicates warnings and races under concurrent reads.
+    return resolve_env_value(
+        primary,
+        aliases=(legacy,),
+        mode=EnvLookupMode.PRESENCE,
+        target_logger=logger,
+    )
 
 
 def _coerce_bool(value: Any) -> bool:

@@ -127,7 +127,22 @@ LEGACY_MOLTBOT_ENV_KEYS = frozenset(
 )
 
 SUPPORTED_CLAWDBOT_ENV_KEYS = frozenset({"CLAWDBOT_LLM_API_KEY"})
+SUPPORTED_DYNAMIC_MOLTBOT_ENV_KEYS = frozenset(
+    {
+        "MOLTBOT_RATE_LIMIT_ADMIN_DAILY_CAP",
+        "MOLTBOT_RATE_LIMIT_BRIDGE_DAILY_CAP",
+        "MOLTBOT_RATE_LIMIT_CONNECTOR_DAILY_CAP",
+        "MOLTBOT_RATE_LIMIT_EVENTS_DAILY_CAP",
+        "MOLTBOT_RATE_LIMIT_TRIGGER_DAILY_CAP",
+        "MOLTBOT_RATE_LIMIT_WEBHOOK_DAILY_CAP",
+    }
+)
 REJECTED_LEGACY_ENV_KEYS = frozenset({"CLAWDBOT_GATEWAY_TOKEN"})
+_SUPPORTED_LEGACY_ENV_KEYS = (
+    LEGACY_MOLTBOT_ENV_KEYS
+    | SUPPORTED_CLAWDBOT_ENV_KEYS
+    | SUPPORTED_DYNAMIC_MOLTBOT_ENV_KEYS
+)
 _SENSITIVE_KEY_PARTS = ("TOKEN", "API_KEY", "SECRET", "PASSWORD", "CERT")
 _TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
 
@@ -227,6 +242,21 @@ def resolve_env(
     ordered_aliases = (
         tuple(aliases) if aliases is not None else (spec.aliases if spec else ())
     )
+    rejected = tuple(
+        alias for alias in ordered_aliases if alias in REJECTED_LEGACY_ENV_KEYS
+    )
+    unknown_legacy = tuple(
+        alias
+        for alias in ordered_aliases
+        if alias.startswith(("MOLTBOT_", "CLAWDBOT_"))
+        and alias not in _SUPPORTED_LEGACY_ENV_KEYS
+        and alias not in REJECTED_LEGACY_ENV_KEYS
+    )
+    # CRITICAL: explicit aliases are a reviewed dynamic-family seam, not an escape hatch for
+    # rejected or unknown legacy keys. Accepting CLAWDBOT_GATEWAY_TOKEN here silently revived it.
+    if rejected or unknown_legacy:
+        invalid = (*rejected, *unknown_legacy)
+        raise ValueError(f"unsupported legacy environment alias: {invalid[0]}")
     normalized_mode = _normalize_mode(mode)
     value, selected_key = _select_value(
         env_map,
@@ -282,6 +312,7 @@ __all__ = [
     "LEGACY_MOLTBOT_ENV_KEYS",
     "REJECTED_LEGACY_ENV_KEYS",
     "SUPPORTED_CLAWDBOT_ENV_KEYS",
+    "SUPPORTED_DYNAMIC_MOLTBOT_ENV_KEYS",
     "EnvAliasSpec",
     "EnvLookupMode",
     "EnvResolution",

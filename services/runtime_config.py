@@ -198,11 +198,7 @@ CONFIG_FILE = get_default_config_file()
 
 
 def _get_env_value(key: str) -> Optional[str]:
-    warned_legacy = getattr(_get_env_value, "_warned_legacy", None)
-    if warned_legacy is None:
-        warned_legacy = set()
-        _get_env_value._warned_legacy = warned_legacy
-    return _get_env_value_impl(key, warned_legacy=warned_legacy, logger=logger)
+    return _get_env_value_impl(key, logger=logger)
 
 
 def _env_flag(primary: str, legacy: str, default: bool = False) -> bool:
