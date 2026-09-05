@@ -1939,6 +1939,79 @@ BARE = bare_container("MOLTBOT_FLAG")
             ),
         )
 
+    def test_environment_alias_contract_correlates_materialized_comprehension_bindings(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/correlated_materialized_comprehensions.py"
+        ] = """import os
+
+def client(key):
+    return None
+
+readers = [reader for reader in [client, os.getenv]]
+SAFE_INDEX = readers[0]("MOLTBOT_FLAG")
+LIVE_INDEX = readers[1]("MOLTBOT_FLAG")
+
+iter_readers = [reader for reader in iter([client, os.getenv])]
+SAFE_ITER_INDEX = iter_readers[0]("MOLTBOT_FLAG")
+LIVE_ITER_INDEX = iter_readers[1]("MOLTBOT_FLAG")
+
+safe_unpack, live_unpack = [reader for reader in [client, os.getenv]]
+SAFE_UNPACK = safe_unpack("MOLTBOT_FLAG")
+LIVE_UNPACK = live_unpack("MOLTBOT_FLAG")
+
+mapping = {
+    key: value
+    for key, value in [("safe", client), ("reader", os.getenv)]
+}
+SAFE_DICT = mapping["safe"]("MOLTBOT_FLAG")
+LIVE_DICT = mapping["reader"]("MOLTBOT_FLAG")
+
+safe_last = {
+    key: value
+    for key, value in [("reader", os.getenv), ("reader", client)]
+}
+SAFE_LAST = safe_last["reader"]("MOLTBOT_FLAG")
+
+live_last = {
+    key: value
+    for key, value in [("reader", client), ("reader", os.getenv)]
+}
+LIVE_LAST = live_last["reader"]("MOLTBOT_FLAG")
+
+dynamic_key = "reader"
+dynamic_mapping = {
+    key: value
+    for key, value in [(dynamic_key, os.getenv)]
+}
+LIVE_DYNAMIC_KEY = dynamic_mapping["reader"]("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append(
+                "alpha/correlated_materialized_comprehensions.py"
+            )
+
+        findings = self._evaluate(files, configure=configure)
+        direct_reads = [
+            finding
+            for finding in findings
+            if finding.rule_id == "ENV_ALIAS_DIRECT_READ"
+        ]
+
+        self.assertEqual(
+            len(direct_reads),
+            6,
+            msg="\n".join(
+                f"{finding.path}:{finding.line}: {finding.subject}"
+                for finding in direct_reads
+            ),
+        )
+
     def test_environment_alias_contract_consumes_bound_materialized_members(self):
         files = self._base_files()
         files["alpha/env_aliases.py"] = environment_alias_owner_source()
@@ -2100,6 +2173,83 @@ def nonreader_outer():
         self.assertEqual(
             len(direct_reads),
             5,
+            msg="\n".join(
+                f"{finding.path}:{finding.line}: {finding.subject}"
+                for finding in direct_reads
+            ),
+        )
+
+    def test_environment_alias_contract_checks_every_reachable_execution_entry(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/multiple_execution_entries.py"
+        ] = """import os
+
+def client():
+    return None
+
+def later_live_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+
+    def inner():
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+
+    saved = inner
+
+    def middle():
+        return inner()
+
+    inner = client
+    middle()
+    inner = saved
+    return middle()
+
+def first_live_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+
+    def inner():
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+
+    def middle():
+        return inner()
+
+    middle()
+    inner = client
+    return middle()
+
+def never_live_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+
+    def inner():
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+
+    def middle():
+        return inner()
+
+    inner = client
+    return middle()
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/multiple_execution_entries.py")
+
+        findings = self._evaluate(files, configure=configure)
+        direct_reads = [
+            finding
+            for finding in findings
+            if finding.rule_id == "ENV_ALIAS_DIRECT_READ"
+        ]
+
+        self.assertEqual(
+            len(direct_reads),
+            2,
             msg="\n".join(
                 f"{finding.path}:{finding.line}: {finding.subject}"
                 for finding in direct_reads
