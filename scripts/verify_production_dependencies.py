@@ -22,6 +22,7 @@ from typing import Any
 
 POLICY_PATH = "tests/architecture_dependency_policy.json"
 MAX_FINDINGS = 50
+_MAX_STATIC_MATERIALIZED_ELEMENTS = 4096
 _TOP_LEVEL_KEYS = {
     "schema_version",
     "review",
@@ -2524,6 +2525,39 @@ def _static_container_selections(
         and static_value_truth != value_truth
     ):
         return ()
+    if isinstance(node.value, ast.ListComp):
+        # CRITICAL: selecting from a materialized comprehension retrieves a yielded element.
+        # Returning the container expression loses callable provenance; ignoring exact
+        # cardinality instead invents findings for empty, filtered, or out-of-range selections.
+        if value_truth is False:
+            return ()
+        elements = _resolved_materialized_comprehension_elements(
+            node.value, index, scope_id
+        )
+        if elements is None:
+            if _comprehension_cardinality_truth(node.value, index, scope_id) is False:
+                return ()
+            return (node.value.elt,) if isinstance(selector, (int, slice)) else ()
+        if isinstance(selector, int):
+            try:
+                return (elements[selector],)
+            except IndexError:
+                return ()
+        if isinstance(selector, slice):
+            comprehension_slice = ast.List(
+                elts=list(elements[selector]), ctx=ast.Load()
+            )
+            return (ast.copy_location(comprehension_slice, node),)
+        return ()
+    if isinstance(node.value, ast.DictComp) and not isinstance(selector, slice):
+        if _comprehension_cardinality_truth(node.value, index, scope_id) is False:
+            return ()
+        key_is_static, key = _static_subscript_selector(node.value.key)
+        if key_is_static and key != selector:
+            return ()
+        # CRITICAL: a dict-comprehension subscript returns the yielded value. Preserve that
+        # element provenance while rejecting a selector proven different from every key.
+        return (node.value.value,)
     if isinstance(node.value, (ast.List, ast.Tuple)):
         # CRITICAL: a list/tuple that reaches a Boolean result under a required false value is
         # empty, so no static index can retrieve a starred member from it. Dropping this outer
@@ -2830,6 +2864,41 @@ def _static_iterable_elements(node: ast.AST) -> tuple[ast.expr, ...] | None:
     return tuple(elements)
 
 
+def _resolved_materialized_comprehension_elements(
+    node: ast.ListComp | ast.SetComp | ast.DictComp,
+    index: _EnvironmentScopeIndex,
+    scope_id: int,
+) -> tuple[ast.expr, ...] | None:
+    result = node.key if isinstance(node, ast.DictComp) else node.elt
+    cardinality = 1
+    for generator in node.generators:
+        generator_scope = index.node_scopes.get(id(generator), scope_id)
+        iterable_scope = index.node_scopes.get(id(generator.iter), generator_scope)
+        elements = _resolved_static_iterable_elements(
+            generator.iter, index, iterable_scope, generator.iter
+        )
+        if elements is None:
+            return None
+        if not elements:
+            return ()
+        for condition in generator.ifs:
+            condition_scope = index.node_scopes.get(id(condition), generator_scope)
+            condition_truth = _resolved_static_truth_value(
+                condition, index, condition_scope, condition
+            )
+            if condition_truth is False:
+                return ()
+            if condition_truth is None:
+                return None
+        cardinality *= len(elements)
+        if cardinality > _MAX_STATIC_MATERIALIZED_ELEMENTS:
+            # IMPORTANT: exact comprehension expansion is only a precision aid. Bound it so
+            # adversarial nested literals cannot exhaust verifier memory; callers conservatively
+            # preserve the reachable yielded expression when exact cardinality is unavailable.
+            return None
+    return tuple(result for _ in range(cardinality))
+
+
 def _resolved_static_sequence_elements(
     node: ast.AST,
     index: _EnvironmentScopeIndex,
@@ -2837,6 +2906,11 @@ def _resolved_static_sequence_elements(
     use: ast.AST,
     resolving: frozenset[tuple[int, str]] = frozenset(),
 ) -> tuple[ast.expr, ...] | None:
+    if isinstance(node, ast.ListComp):
+        # CRITICAL: a materialized list-comprehension stores its yielded elements, not the
+        # comprehension object. Losing that boundary lets a later index or exact unpack hide
+        # `os.getenv` or a generator consumer; statically empty/filtered results stay empty.
+        return _resolved_materialized_comprehension_elements(node, index, scope_id)
     if isinstance(node, (ast.List, ast.Tuple)):
         elements: list[ast.expr] = []
         for element in node.elts:
@@ -2872,6 +2946,10 @@ def _resolved_static_iterable_elements(
     use: ast.AST,
     resolving: frozenset[tuple[int, str]] = frozenset(),
 ) -> tuple[ast.expr, ...] | None:
+    if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp)):
+        # IMPORTANT: iterating or unpacking a materialized comprehension consumes its result
+        # members (dict keys), so keep their use-site provenance through a later binding.
+        return _resolved_materialized_comprehension_elements(node, index, scope_id)
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
         elements: list[ast.expr] = []
         for element in node.elts:
@@ -3163,18 +3241,56 @@ def _node_is_statically_unreachable(
     return False
 
 
+def _environment_binding_sources_at_execution(
+    index: _EnvironmentScopeIndex,
+    scope_id: int,
+    name: str,
+    node: ast.AST,
+    execution_entries: Mapping[int, ast.AST],
+) -> tuple[ast.expr, ...]:
+    current: int | None = scope_id
+    effective_use = node
+    while current is not None:
+        facts = index.scopes[current]
+        if current != 0 and (
+            name in facts.global_names or name in facts.nonlocal_names
+        ):
+            current = 0 if name in facts.global_names else facts.parent
+            continue
+        if name in facts.origins or name in facts.binding_events:
+            return _environment_binding_source_expressions_at(
+                index, current, name, effective_use
+            )
+        parent = facts.parent
+        if parent is None:
+            return ()
+        if isinstance(facts.root, (ast.FunctionDef, ast.Lambda, ast.GeneratorExp)):
+            entry = execution_entries.get(current)
+            if entry is None:
+                return ()
+            effective_use = entry
+        current = parent
+    return ()
+
+
 def _expression_resolves_to_node(
     node: ast.AST,
     target: ast.AST,
     index: _EnvironmentScopeIndex,
     scope_id: int,
     resolving: frozenset[tuple[int, str, int]] = frozenset(),
+    execution_entries: Mapping[int, ast.AST] | None = None,
 ) -> bool:
     if node is target or index.definition_sources.get(id(node)) is target:
         return True
     if isinstance(node, ast.NamedExpr):
         return _expression_resolves_to_node(
-            node.value, target, index, scope_id, resolving
+            node.value,
+            target,
+            index,
+            scope_id,
+            resolving,
+            execution_entries,
         )
     selections = _static_container_selections(node, index, scope_id)
     if selections:
@@ -3185,6 +3301,7 @@ def _expression_resolves_to_node(
                 index,
                 index.node_scopes.get(id(selected), scope_id),
                 resolving,
+                execution_entries,
             )
             for selected in selections
         )
@@ -3198,6 +3315,7 @@ def _expression_resolves_to_node(
                 index,
                 index.node_scopes.get(id(element), scope_id),
                 resolving,
+                execution_entries,
             )
             for element in node.elts
         )
@@ -3209,6 +3327,7 @@ def _expression_resolves_to_node(
                 index,
                 index.node_scopes.get(id(member), scope_id),
                 resolving,
+                execution_entries,
             )
             for member in (
                 *tuple(key for key in node.keys if key is not None),
@@ -3217,12 +3336,26 @@ def _expression_resolves_to_node(
         )
     if isinstance(node, ast.IfExp):
         return any(
-            _expression_resolves_to_node(part, target, index, scope_id, resolving)
+            _expression_resolves_to_node(
+                part,
+                target,
+                index,
+                scope_id,
+                resolving,
+                execution_entries,
+            )
             for part in (node.body, node.orelse)
         )
     if isinstance(node, ast.BoolOp):
         return any(
-            _expression_resolves_to_node(part, target, index, scope_id, resolving)
+            _expression_resolves_to_node(
+                part,
+                target,
+                index,
+                scope_id,
+                resolving,
+                execution_entries,
+            )
             for part in node.values
         )
     if not isinstance(node, ast.Name):
@@ -3230,12 +3363,22 @@ def _expression_resolves_to_node(
     guard = (scope_id, node.id, id(target))
     if guard in resolving:
         return False
-    for source in _environment_binding_source_expressions_at(
-        index, scope_id, node.id, node
-    ):
+    sources = (
+        _environment_binding_sources_at_execution(
+            index, scope_id, node.id, node, execution_entries
+        )
+        if execution_entries is not None
+        else _environment_binding_source_expressions_at(index, scope_id, node.id, node)
+    )
+    for source in sources:
         source_scope = index.node_scopes.get(id(source), scope_id)
         if _expression_resolves_to_node(
-            source, target, index, source_scope, resolving | {guard}
+            source,
+            target,
+            index,
+            source_scope,
+            resolving | {guard},
+            execution_entries,
         ):
             return True
     return False
@@ -3436,48 +3579,109 @@ def _eager_execution_scope(index: _EnvironmentScopeIndex, scope_id: int) -> int:
     return current
 
 
-def _function_scope_is_invoked_from(
+def _execution_scope_is_reached_from(
     tree: ast.AST,
     index: _EnvironmentScopeIndex,
     scope_id: int,
     ancestor_scope: int,
     parents: Mapping[int, ast.AST],
     resolving: frozenset[int] = frozenset(),
+    memo: dict[int, bool] | None = None,
+    execution_entries: dict[int, ast.AST] | None = None,
 ) -> bool:
+    scope_id = _eager_execution_scope(index, scope_id)
     if scope_id == ancestor_scope:
         return True
+    if memo is None:
+        memo = {}
+    if execution_entries is None:
+        execution_entries = {}
+    if scope_id in memo:
+        return memo[scope_id]
     if scope_id in resolving:
         return False
     scope = index.scopes[scope_id]
     root = scope.root
     parent_scope = scope.parent
-    if not isinstance(root, (ast.FunctionDef, ast.Lambda)) or parent_scope is None:
+    if parent_scope is None:
         return False
-    if not _function_scope_is_invoked_from(
-        tree,
-        index,
-        parent_scope,
-        ancestor_scope,
-        parents,
-        resolving | {scope_id},
-    ):
+    next_resolving = resolving | {scope_id}
+    if isinstance(root, (ast.FunctionDef, ast.Lambda)):
+        for candidate in ast.walk(tree):
+            if not isinstance(candidate, ast.Call) or _node_is_statically_unreachable(
+                candidate, parents
+            ):
+                continue
+            candidate_scope = index.node_scopes.get(id(candidate), parent_scope)
+            execution_scope = _eager_execution_scope(index, candidate_scope)
+            if execution_scope == scope_id or not _execution_scope_is_reached_from(
+                tree,
+                index,
+                execution_scope,
+                ancestor_scope,
+                parents,
+                next_resolving,
+                memo,
+                execution_entries,
+            ):
+                continue
+            if _expression_resolves_to_node(
+                candidate.func,
+                root,
+                index,
+                candidate_scope,
+                execution_entries=execution_entries,
+            ):
+                # CRITICAL: deferred execution is transitive. A closure call nested in another
+                # invoked closure/lambda is live, but a never-called or replaced definition is
+                # not. Require exact use-site provenance and a proven execution path from the
+                # ancestor; checking only the lexical parent misses live consume-then-read paths.
+                execution_entries[scope_id] = candidate
+                memo[scope_id] = True
+                return True
+        memo[scope_id] = False
         return False
-    for candidate in ast.walk(tree):
-        if not isinstance(candidate, ast.Call) or _node_is_statically_unreachable(
-            candidate, parents
-        ):
-            continue
-        candidate_scope = _eager_execution_scope(
-            index, index.node_scopes.get(id(candidate), parent_scope)
-        )
-        if candidate_scope != parent_scope:
-            continue
-        if _expression_resolves_to_node(candidate.func, root, index, parent_scope):
-            # CRITICAL: a nested function body is deferred until its exact definition is called.
-            # Projecting every function scope outward invents generator-walrus activation in
-            # never-called closures; use-site provenance through aliases/selections preserves the
-            # deferred boundary while allowing same-closure consume-then-read analysis.
-            return True
+    if isinstance(root, ast.GeneratorExp):
+        for candidate in ast.walk(tree):
+            candidate_scope = index.node_scopes.get(id(candidate), parent_scope)
+            sites = _generator_consumption_sites(candidate, index, candidate_scope)
+            if not sites or _node_is_statically_unreachable(candidate, parents):
+                continue
+            execution_scope = _eager_execution_scope(index, candidate_scope)
+            if execution_scope == scope_id or not _execution_scope_is_reached_from(
+                tree,
+                index,
+                execution_scope,
+                ancestor_scope,
+                parents,
+                next_resolving,
+                memo,
+                execution_entries,
+            ):
+                continue
+            if not any(
+                part is root for part in ast.walk(candidate)
+            ) and _environment_end_position(candidate) <= _environment_end_position(
+                root
+            ):
+                continue
+            for consumed, _activation in sites:
+                consumed_scope = index.node_scopes.get(id(consumed), candidate_scope)
+                if _expression_resolves_to_node(
+                    consumed,
+                    root,
+                    index,
+                    consumed_scope,
+                    execution_entries=execution_entries,
+                ):
+                    # CRITICAL: a generator-expression body is deferred until the exact object
+                    # is consumed from an already reachable scope. Treating construction as
+                    # execution activates unconsumed expressions; ignoring this transitive edge
+                    # misses calls inside `list(inner() for ...)` and equivalent consumers.
+                    execution_entries[scope_id] = _activation
+                    memo[scope_id] = True
+                    return True
+    memo[scope_id] = False
     return False
 
 
@@ -3532,14 +3736,22 @@ def _walrus_comprehension_activation(
     activation_nodes: dict[int, ast.AST] = {target_scope: owner}
     if isinstance(owner, ast.GeneratorExp):
         activation_nodes = {}
+        execution_reachability: dict[int, bool] = {}
+        execution_entries: dict[int, ast.AST] = {}
         for candidate in ast.walk(tree):
             candidate_scope = index.node_scopes.get(id(candidate), target_scope)
             sites = _generator_consumption_sites(candidate, index, candidate_scope)
             if not sites or _node_is_statically_unreachable(candidate, parents):
                 continue
             execution_scope = _eager_execution_scope(index, candidate_scope)
-            if not _function_scope_is_invoked_from(
-                tree, index, execution_scope, target_scope, parents
+            if not _execution_scope_is_reached_from(
+                tree,
+                index,
+                execution_scope,
+                target_scope,
+                parents,
+                memo=execution_reachability,
+                execution_entries=execution_entries,
             ) or (
                 not any(part is owner for part in ast.walk(candidate))
                 and _environment_end_position(candidate)

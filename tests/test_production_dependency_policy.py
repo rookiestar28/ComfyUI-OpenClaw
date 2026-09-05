@@ -1867,6 +1867,245 @@ def deferred_lambda_outer():
             8,
         )
 
+    def test_environment_alias_contract_preserves_materialized_comprehension_members(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/materialized_comprehension_members.py"
+        ] = """import os
+
+plain_readers = [reader for reader in [os.getenv]]
+ONE = plain_readers[0]("MOLTBOT_FLAG")
+
+iter_readers = [reader for reader in iter([os.getenv])]
+TWO = iter_readers[0]("MOLTBOT_FLAG")
+
+THREE = [reader for reader in [os.getenv]][0]("MOLTBOT_FLAG")
+
+starred_readers = [*(reader for reader in iter([os.getenv]))]
+FOUR = starred_readers[0]("MOLTBOT_FLAG")
+
+literal_readers = [os.getenv]
+FIVE = literal_readers[0]("MOLTBOT_FLAG")
+
+mapping = {"reader": reader for reader in [os.getenv]}
+SIX = mapping["reader"]("MOLTBOT_FLAG")
+
+(list_reader,) = [reader for reader in [os.getenv]]
+SEVEN = list_reader("MOLTBOT_FLAG")
+
+(set_reader,) = {reader for reader in [os.getenv]}
+EIGHT = set_reader("MOLTBOT_FLAG")
+
+empty_readers = [reader for reader in []]
+EMPTY = empty_readers[0]("MOLTBOT_FLAG")
+
+filtered_readers = [reader for reader in [os.getenv] if False]
+FILTERED = filtered_readers[0]("MOLTBOT_FLAG")
+
+invalid_readers = [reader for reader in [os.getenv]]
+INVALID = invalid_readers[1]("MOLTBOT_FLAG")
+
+def shadowed_reader():
+    os = client
+    readers = [reader for reader in [os.getenv]]
+    return readers[0]("MOLTBOT_FLAG")
+
+bare_container = [reader for reader in [os.getenv]]
+BARE = bare_container("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append(
+                "alpha/materialized_comprehension_members.py"
+            )
+
+        findings = self._evaluate(files, configure=configure)
+        direct_reads = [
+            finding
+            for finding in findings
+            if finding.rule_id == "ENV_ALIAS_DIRECT_READ"
+        ]
+
+        self.assertEqual(
+            len(direct_reads),
+            8,
+            msg="\n".join(
+                f"{finding.path}:{finding.line}: {finding.subject}"
+                for finding in direct_reads
+            ),
+        )
+
+    def test_environment_alias_contract_consumes_bound_materialized_members(self):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/bound_materialized_members.py"
+        ] = """import os
+
+plain_generator = ((plain_reader := os.getenv) for _ in [1])
+plain_steps = [step for step in [plain_generator.__next__]]
+plain_steps[0]()
+ONE = plain_reader("MOLTBOT_FLAG")
+
+iter_generator = ((iter_reader := os.getenv) for _ in [1])
+iter_steps = [step for step in iter([iter_generator.__next__])]
+iter_steps[0]()
+TWO = iter_reader("MOLTBOT_FLAG")
+
+starred_generator = ((starred_reader := os.getenv) for _ in [1])
+starred_steps = [*(step for step in iter([starred_generator.__next__]))]
+starred_steps[0]()
+THREE = starred_reader("MOLTBOT_FLAG")
+
+literal_generator = ((literal_reader := os.getenv) for _ in [1])
+literal_steps = [literal_generator.__next__]
+literal_steps[0]()
+FOUR = literal_reader("MOLTBOT_FLAG")
+
+deferred_generator = ((deferred_reader := os.getenv) for _ in [1])
+deferred_steps = [step for step in [deferred_generator.__next__]]
+DEFERRED = deferred_reader("MOLTBOT_FLAG")
+
+filtered_generator = ((filtered_reader := os.getenv) for _ in [1])
+filtered_steps = [step for step in [filtered_generator.__next__] if False]
+FILTERED = filtered_reader("MOLTBOT_FLAG")
+
+invalid_generator = ((invalid_reader := os.getenv) for _ in [1])
+invalid_steps = [step for step in [invalid_generator.__next__]]
+invalid_steps[1]()
+INVALID = invalid_reader("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/bound_materialized_members.py")
+
+        findings = self._evaluate(files, configure=configure)
+        direct_reads = [
+            finding
+            for finding in findings
+            if finding.rule_id == "ENV_ALIAS_DIRECT_READ"
+        ]
+
+        self.assertEqual(
+            len(direct_reads),
+            4,
+            msg="\n".join(
+                f"{finding.path}:{finding.line}: {finding.subject}"
+                for finding in direct_reads
+            ),
+        )
+
+    def test_environment_alias_contract_tracks_transitive_deferred_execution(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/transitive_deferred_execution.py"
+        ] = """import os
+
+def direct_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+    def inner():
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+    return inner()
+
+def multilevel_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+    def inner():
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+    def middle():
+        return inner()
+    return middle()
+
+def immediate_lambda_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+    def inner():
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+    return (lambda: inner())()
+
+def eager_listcomp_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+    def inner():
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+    return [inner() for _ in [1]]
+
+def consumed_genexpr_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+    def inner():
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+    return list(inner() for _ in [1])
+
+def deferred_genexpr_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+    def inner():
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+    return (inner() for _ in [1])
+
+def never_called_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+    def inner():
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+    return None
+
+def definitely_replaced_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+    def inner():
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+    inner = client
+    return (lambda: inner())()
+
+def read_before_consume_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+    def inner():
+        value = reader("MOLTBOT_FLAG")
+        generator.__next__()
+        return value
+    def middle():
+        return inner()
+    return middle()
+
+def nonreader_outer():
+    generator = ((reader := client) for _ in [1])
+    def inner():
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+    return (lambda: inner())()
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/transitive_deferred_execution.py")
+
+        findings = self._evaluate(files, configure=configure)
+        direct_reads = [
+            finding
+            for finding in findings
+            if finding.rule_id == "ENV_ALIAS_DIRECT_READ"
+        ]
+
+        self.assertEqual(
+            len(direct_reads),
+            5,
+            msg="\n".join(
+                f"{finding.path}:{finding.line}: {finding.subject}"
+                for finding in direct_reads
+            ),
+        )
+
     def test_environment_alias_contract_tracks_keyword_and_explicit_mapping_reads(
         self,
     ):
