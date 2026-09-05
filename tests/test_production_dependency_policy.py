@@ -2321,6 +2321,153 @@ ORDINARY_UNKNOWN = ordinary_unknown_only["reader"]("MOLTBOT_FLAG")
             ),
         )
 
+    def test_environment_alias_contract_resolves_dictionary_key_aliases_at_use_site(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/dictionary_key_aliases.py"
+        ] = """import os
+
+def client(key):
+    return None
+
+known_path = "PATH"
+known_reader = "reader"
+
+ordinary_safe = {"reader": client, known_path: os.getenv}
+ORDINARY_SAFE = ordinary_safe["reader"]("MOLTBOT_FLAG")
+ordinary_live = {"reader": client, known_reader: os.getenv}
+ORDINARY_LIVE = ordinary_live["reader"]("MOLTBOT_FLAG")
+
+comp_safe = {
+    key: value
+    for key, value in [("reader", client), (known_path, os.getenv)]
+}
+COMP_SAFE = comp_safe["reader"]("MOLTBOT_FLAG")
+comp_live = {
+    key: value
+    for key, value in [("reader", client), (known_reader, os.getenv)]
+}
+COMP_LIVE = comp_live["reader"]("MOLTBOT_FLAG")
+
+rebound_key = "PATH"
+rebound_key = "reader"
+rebound_ordinary = {"reader": client, rebound_key: os.getenv}
+REBOUND_ORDINARY = rebound_ordinary["reader"]("MOLTBOT_FLAG")
+rebound_comp = {
+    key: value
+    for key, value in [("reader", client), (rebound_key, os.getenv)]
+}
+REBOUND_COMP = rebound_comp["reader"]("MOLTBOT_FLAG")
+
+deleted_key = "PATH"
+del deleted_key
+deleted_ordinary = {"reader": client, deleted_key: os.getenv}
+DELETED_ORDINARY = deleted_ordinary["reader"]("MOLTBOT_FLAG")
+deleted_comp = {
+    key: value
+    for key, value in [("reader", client), (deleted_key, os.getenv)]
+}
+DELETED_COMP = deleted_comp["reader"]("MOLTBOT_FLAG")
+
+branch_key = "PATH"
+if flag:
+    branch_key = "reader"
+branch_ordinary = {"reader": client, branch_key: os.getenv}
+BRANCH_ORDINARY = branch_ordinary["reader"]("MOLTBOT_FLAG")
+branch_comp = {
+    key: value
+    for key, value in [("reader", client), (branch_key, os.getenv)]
+}
+BRANCH_COMP = branch_comp["reader"]("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/dictionary_key_aliases.py")
+
+        findings = self._evaluate(files, configure=configure)
+        direct_reads = [
+            finding
+            for finding in findings
+            if finding.rule_id == "ENV_ALIAS_DIRECT_READ"
+        ]
+
+        self.assertEqual(
+            len(direct_reads),
+            8,
+            msg="\n".join(
+                f"{finding.path}:{finding.line}: {finding.subject}"
+                for finding in direct_reads
+            ),
+        )
+
+    def test_environment_alias_contract_resolves_dictionary_selector_aliases_at_use_site(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/dictionary_selector_aliases.py"
+        ] = """import os
+
+def client(key):
+    return None
+
+def choose():
+    return "reader"
+
+reader_map = {"reader": os.getenv, "safe": client}
+reader_comp = {key: value for key, value in [("reader", os.getenv), ("safe", client)]}
+known_reader = "reader"
+known_safe = "safe"
+
+LIVE = reader_map[known_reader]("MOLTBOT_FLAG")
+SAFE = reader_map[known_safe]("MOLTBOT_FLAG")
+UNKNOWN = reader_map[choose()]("MOLTBOT_FLAG")
+COMP_LIVE = reader_comp[known_reader]("MOLTBOT_FLAG")
+COMP_SAFE = reader_comp[known_safe]("MOLTBOT_FLAG")
+COMP_UNKNOWN = reader_comp[choose()]("MOLTBOT_FLAG")
+
+rebound_selector = "safe"
+rebound_selector = "reader"
+REBOUND = reader_map[rebound_selector]("MOLTBOT_FLAG")
+COMP_REBOUND = reader_comp[rebound_selector]("MOLTBOT_FLAG")
+
+deleted_selector = "safe"
+del deleted_selector
+DELETED = reader_map[deleted_selector]("MOLTBOT_FLAG")
+COMP_DELETED = reader_comp[deleted_selector]("MOLTBOT_FLAG")
+
+branch_selector = "safe"
+if flag:
+    branch_selector = "reader"
+BRANCH = reader_map[branch_selector]("MOLTBOT_FLAG")
+COMP_BRANCH = reader_comp[branch_selector]("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/dictionary_selector_aliases.py")
+
+        findings = self._evaluate(files, configure=configure)
+        direct_reads = [
+            finding
+            for finding in findings
+            if finding.rule_id == "ENV_ALIAS_DIRECT_READ"
+        ]
+
+        self.assertEqual(
+            len(direct_reads),
+            10,
+            msg="\n".join(
+                f"{finding.path}:{finding.line}: {finding.subject}"
+                for finding in direct_reads
+            ),
+        )
+
     def test_environment_alias_contract_reaches_externally_rooted_recursive_sccs(
         self,
     ):
@@ -2394,6 +2541,84 @@ def finite_cycle():
         self.assertEqual(
             len(direct_reads),
             2,
+            msg="\n".join(
+                f"{finding.path}:{finding.line}: {finding.subject}"
+                for finding in direct_reads
+            ),
+        )
+
+    def test_environment_alias_contract_reaches_recursive_sccs_independent_of_definition_order(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        definitions = {
+            "live": """    def live():
+        source.__next__()
+        return reader(\"MOLTBOT_FLAG\")
+""",
+            "a": """    def a():
+        return b()
+""",
+            "b": """    def b():
+        live()
+        return a()
+""",
+        }
+        orders = (
+            ("a", "b", "live"),
+            ("a", "live", "b"),
+            ("b", "a", "live"),
+            ("b", "live", "a"),
+            ("live", "a", "b"),
+            ("live", "b", "a"),
+        )
+        functions = ["import os", ""]
+        for index, order in enumerate(orders):
+            functions.extend(
+                [
+                    f"def rooted_{index}(flag):",
+                    "    source = ((reader := os.getenv) for _ in [1])",
+                    *(definitions[name].rstrip("\n") for name in order),
+                    (
+                        "    return a()"
+                        if index % 3 == 0
+                        else (
+                            "    entry = a\n    return entry()"
+                            if index % 3 == 1
+                            else "    entry = a if flag else a\n    return entry()"
+                        )
+                    ),
+                    "",
+                ]
+            )
+        functions.extend(
+            [
+                "def unreachable_control():",
+                "    source = ((reader := os.getenv) for _ in [1])",
+                definitions["a"].rstrip("\n"),
+                definitions["b"].rstrip("\n"),
+                definitions["live"].rstrip("\n"),
+                "    return None",
+                "",
+            ]
+        )
+        files["alpha/recursive_definition_order.py"] = "\n".join(functions)
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/recursive_definition_order.py")
+
+        findings = self._evaluate(files, configure=configure)
+        direct_reads = [
+            finding
+            for finding in findings
+            if finding.rule_id == "ENV_ALIAS_DIRECT_READ"
+        ]
+
+        self.assertEqual(
+            len(direct_reads),
+            6,
             msg="\n".join(
                 f"{finding.path}:{finding.line}: {finding.subject}"
                 for finding in direct_reads
@@ -2483,6 +2708,144 @@ def finally_after_return():
         self.assertEqual(
             len(direct_reads),
             3,
+            msg="\n".join(
+                f"{finding.path}:{finding.line}: {finding.subject}"
+                for finding in direct_reads
+            ),
+        )
+
+    def test_environment_alias_contract_excludes_entries_after_compound_terminators(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/compound_terminated_execution_entries.py"
+        ] = """import os
+
+def after_constant_return():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    if True:
+        return None
+    inner()
+
+def after_try_return():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    try:
+        return None
+    finally:
+        pass
+    inner()
+
+def after_try_raise():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    try:
+        raise RuntimeError
+    finally:
+        pass
+    inner()
+
+def live_in_finally():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    try:
+        return None
+    finally:
+        inner()
+
+def live_after_caught_raise():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    try:
+        raise RuntimeError
+    except RuntimeError:
+        pass
+    inner()
+
+def live_after_conditional_return(flag):
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    if flag:
+        return None
+    inner()
+
+def after_compound_break():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    for _ in [1]:
+        if True:
+            break
+        inner()
+
+def after_compound_continue():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    for _ in [1]:
+        try:
+            continue
+        finally:
+            pass
+        inner()
+
+def live_after_conditional_break(flag):
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    for _ in [1]:
+        if flag:
+            break
+        inner()
+
+def live_after_conditional_continue(flag):
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    for _ in [1]:
+        try:
+            if flag:
+                continue
+        finally:
+            pass
+        inner()
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append(
+                "alpha/compound_terminated_execution_entries.py"
+            )
+
+        findings = self._evaluate(files, configure=configure)
+        direct_reads = [
+            finding
+            for finding in findings
+            if finding.rule_id == "ENV_ALIAS_DIRECT_READ"
+        ]
+
+        self.assertEqual(
+            len(direct_reads),
+            5,
             msg="\n".join(
                 f"{finding.path}:{finding.line}: {finding.subject}"
                 for finding in direct_reads
@@ -2685,7 +3048,7 @@ THREE = readers[1:][0]("MOLTBOT_FLAG")
 FOUR = readers[::-1][0]("MOLTBOT_FLAG")
 
 dynamic_index = choose_index()
-NOT_PROVEN = matrix[dynamic_index][0]("MOLTBOT_FLAG")
+DYNAMIC_SELECTOR = matrix[dynamic_index][0]("MOLTBOT_FLAG")
 INVALID_INDEX = readers[99:][0]("MOLTBOT_FLAG")
 NOT_ENVIRONMENT = [[client]][0][0]("MOLTBOT_FLAG")
 FIVE = [*[], os.getenv][0]("MOLTBOT_FLAG")
@@ -2703,7 +3066,7 @@ EIGHT = (*[*(), os.getenv],)[0]("MOLTBOT_FLAG")
 
         self.assertEqual(
             [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
-            8,
+            9,
         )
 
     def test_environment_alias_contract_tracks_extended_unpack_and_literal_iteration(

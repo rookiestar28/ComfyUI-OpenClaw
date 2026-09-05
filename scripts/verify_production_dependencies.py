@@ -1912,6 +1912,56 @@ def _static_literal_key(node: ast.AST) -> tuple[bool, object]:
     return False, None
 
 
+def _resolved_static_literal_key(
+    node: ast.AST,
+    index: _EnvironmentScopeIndex,
+    scope_id: int,
+    use: ast.AST,
+    resolving: frozenset[tuple[int, str]] = frozenset(),
+) -> tuple[bool, object]:
+    is_static, value = _static_literal_key(node)
+    if is_static:
+        return True, value
+    if isinstance(node, ast.Name):
+        guard = (scope_id, node.id)
+        if guard in resolving:
+            return False, None
+        sources = _environment_binding_source_expressions_at(
+            index, scope_id, node.id, use
+        )
+        if not sources:
+            return False, None
+        values: list[object] = []
+        for source in sources:
+            source_scope = index.node_scopes.get(id(source), scope_id)
+            source_is_static, source_value = _resolved_static_literal_key(
+                source,
+                index,
+                source_scope,
+                source,
+                resolving | {guard},
+            )
+            if not source_is_static:
+                return False, None
+            values.append(source_value)
+        first = values[0]
+        if all(candidate == first for candidate in values[1:]):
+            return True, first
+        return False, None
+    if isinstance(node, ast.Tuple):
+        values = []
+        for element in node.elts:
+            element_scope = index.node_scopes.get(id(element), scope_id)
+            element_is_static, element_value = _resolved_static_literal_key(
+                element, index, element_scope, element, resolving
+            )
+            if not element_is_static:
+                return False, None
+            values.append(element_value)
+        return True, tuple(values)
+    return False, None
+
+
 def _static_subscript_selector(node: ast.AST) -> tuple[bool, object]:
     if not isinstance(node, ast.Slice):
         return _static_literal_key(node)
@@ -1927,6 +1977,32 @@ def _static_subscript_selector(node: ast.AST) -> tuple[bool, object]:
     if values[2] == 0:
         return False, None
     return True, slice(*values)
+
+
+def _resolved_static_subscript_selector(
+    node: ast.AST,
+    index: _EnvironmentScopeIndex,
+    scope_id: int,
+    use: ast.AST,
+) -> tuple[bool, object]:
+    if not isinstance(node, ast.Slice):
+        return _resolved_static_literal_key(node, index, scope_id, use)
+    values: list[int | None] = []
+    for part in (node.lower, node.upper, node.step):
+        if part is None:
+            values.append(None)
+            continue
+        part_scope = index.node_scopes.get(id(part), scope_id)
+        is_static, value = _resolved_static_literal_key(part, index, part_scope, part)
+        if not is_static or not isinstance(value, int):
+            return False, None
+        values.append(value)
+    if values[2] == 0:
+        return False, None
+    return True, slice(*values)
+
+
+_UNKNOWN_STATIC_SELECTOR = object()
 
 
 def _static_dict_value_candidates(
@@ -1978,13 +2054,21 @@ def _static_dict_value_candidates(
                 if not unresolved_override:
                     return tuple(possible)
             continue
-        is_static, key_value = _static_literal_key(key)
+        key_scope = index.node_scopes.get(id(key), scope_id) if index else scope_id
+        is_static, key_value = (
+            _resolved_static_literal_key(key, index, key_scope, key)
+            if index is not None
+            else _static_literal_key(key)
+        )
         if not is_static:
-            # CRITICAL: a dynamic key may equal the selector. Its value remains possible when it
-            # appears after a known match; discarding it lets `{known: safe, dynamic: getenv}`
-            # hide the reader. A later definite match still returns before older unknown entries.
+            # CRITICAL: an unresolved key may equal the selector, but an exact name alias is not
+            # dynamic. Resolve names at their use site before retaining the value; otherwise a
+            # proven `PATH` key invents a reader while branch/rebind ambiguity can still hide one.
             possible.append(value)
             unresolved_override = True
+            continue
+        if selector is _UNKNOWN_STATIC_SELECTOR:
+            possible.append(value)
             continue
         if key_value == selector:
             possible.append(value)
@@ -2519,9 +2603,11 @@ def _static_container_selections(
 ) -> tuple[ast.expr, ...]:
     if not isinstance(node, ast.Subscript):
         return ()
-    is_static, selector = _static_subscript_selector(node.slice)
+    is_static, selector = _resolved_static_subscript_selector(
+        node.slice, index, scope_id, node
+    )
     if not is_static:
-        return ()
+        selector = _UNKNOWN_STATIC_SELECTOR
     static_value_truth = _resolved_static_truth_value(
         node.value, index, scope_id, node.value
     )
@@ -2544,6 +2630,8 @@ def _static_container_selections(
             if _comprehension_cardinality_truth(node.value, index, scope_id) is False:
                 return ()
             return (node.value.elt,) if isinstance(selector, (int, slice)) else ()
+        if selector is _UNKNOWN_STATIC_SELECTOR:
+            return tuple(elements)
         if isinstance(selector, int):
             try:
                 return (elements[selector],)
@@ -2581,7 +2669,12 @@ def _static_container_selections(
             return (
                 tuple(value for _key, value in items) if selected is None else selected
             )
-        key_is_static, key = _static_subscript_selector(node.value.key)
+        if selector is _UNKNOWN_STATIC_SELECTOR:
+            return (node.value.value,)
+        key_scope = index.node_scopes.get(id(node.value.key), scope_id)
+        key_is_static, key = _resolved_static_subscript_selector(
+            node.value.key, index, key_scope, node.value.key
+        )
         if key_is_static and key != selector:
             return ()
         return (node.value.value,)
@@ -2610,6 +2703,8 @@ def _static_container_selections(
                     else (element,)
                 )
             )
+        if selector is _UNKNOWN_STATIC_SELECTOR:
+            return tuple(elements)
         if isinstance(selector, int):
             try:
                 return (elements[selector],)
@@ -3418,6 +3513,46 @@ def _loop_target_value_bindings(
     ]
 
 
+def _statement_sequence_guarantees_exit(statements: Sequence[ast.stmt]) -> bool:
+    return any(
+        _statement_guarantees_sequence_exit(statement) for statement in statements
+    )
+
+
+def _statement_guarantees_sequence_exit(statement: ast.stmt) -> bool:
+    if isinstance(statement, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
+        return True
+    if isinstance(statement, ast.If):
+        if isinstance(statement.test, ast.Constant):
+            selected = (
+                statement.body if bool(statement.test.value) else statement.orelse
+            )
+            return _statement_sequence_guarantees_exit(selected)
+        return bool(statement.body and statement.orelse) and all(
+            _statement_sequence_guarantees_exit(branch)
+            for branch in (statement.body, statement.orelse)
+        )
+    if isinstance(statement, ast.Try) or type(statement).__name__ == "TryStar":
+        try_statement: Any = statement
+        if try_statement.finalbody and _statement_sequence_guarantees_exit(
+            try_statement.finalbody
+        ):
+            return True
+        body_or_else_exits = _statement_sequence_guarantees_exit(
+            try_statement.body
+        ) or (
+            bool(try_statement.orelse)
+            and _statement_sequence_guarantees_exit(try_statement.orelse)
+        )
+        if not try_statement.handlers:
+            return body_or_else_exits
+        return body_or_else_exits and all(
+            _statement_sequence_guarantees_exit(handler.body)
+            for handler in try_statement.handlers
+        )
+    return False
+
+
 def _node_is_statically_unreachable(
     node: ast.AST, parents: Mapping[int, ast.AST]
 ) -> bool:
@@ -3427,14 +3562,11 @@ def _node_is_statically_unreachable(
             if not isinstance(field_value, list) or current not in field_value:
                 continue
             current_index = field_value.index(current)
-            if any(
-                isinstance(previous, (ast.Return, ast.Raise, ast.Break, ast.Continue))
-                for previous in field_value[:current_index]
-            ):
-                # CRITICAL: ast.walk includes statements after unconditional terminators. Such a
-                # call cannot activate a deferred reader; treating it as an execution entry creates
-                # deterministic false positives. This sequence-local check leaves conditional
-                # exits and `finally` bodies reachable.
+            if _statement_sequence_guarantees_exit(field_value[:current_index]):
+                # CRITICAL: ast.walk includes statements after direct and compound unconditional
+                # exits. Summarize only proven all-path exits; treating unknown branches or caught
+                # raises as terminating hides live readers, while ignoring `if True`/try-finally
+                # exits invents deterministic execution entries.
                 return True
         if isinstance(parent, (ast.If, ast.IfExp)) and isinstance(
             parent.test, ast.Constant
@@ -3466,6 +3598,34 @@ def _node_is_statically_unreachable(
     return False
 
 
+def _execution_uses_projected_to_scope(
+    index: _EnvironmentScopeIndex,
+    uses: Sequence[ast.AST],
+    target_scope: int,
+    execution_entries: Mapping[int, Sequence[ast.AST]],
+) -> tuple[ast.AST, ...]:
+    pending = list(uses)
+    projected: list[ast.AST] = []
+    seen: set[tuple[int, int]] = set()
+    while pending:
+        use = pending.pop()
+        use_scope = _eager_execution_scope(
+            index, index.node_scopes.get(id(use), target_scope)
+        )
+        marker = (id(use), use_scope)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        if use_scope == target_scope:
+            projected.append(use)
+            continue
+        root = index.scopes[use_scope].root
+        if not isinstance(root, (ast.FunctionDef, ast.Lambda, ast.GeneratorExp)):
+            continue
+        pending.extend(execution_entries.get(use_scope, ()))
+    return tuple(dict.fromkeys(projected))
+
+
 def _environment_binding_sources_at_execution(
     index: _EnvironmentScopeIndex,
     scope_id: int,
@@ -3483,6 +3643,11 @@ def _environment_binding_sources_at_execution(
             current = 0 if name in facts.global_names else facts.parent
             continue
         if name in facts.origins or name in facts.binding_events:
+            effective_uses = _execution_uses_projected_to_scope(
+                index, effective_uses, current, execution_entries
+            )
+            if not effective_uses:
+                return ()
             sources = tuple(
                 source
                 for effective_use in effective_uses
@@ -3499,8 +3664,10 @@ def _environment_binding_sources_at_execution(
             if not entries:
                 return ()
             # CRITICAL: a deferred scope can execute at several use sites with different
-            # dominating rebindings. Joining every reachable entry is required: keeping only
-            # the first witness lets a safe-then-live closure call bypass raw-read governance.
+            # dominating rebindings. Joining every reachable entry, then projecting nested call
+            # entries transitively to the binding owner's scope, is required: source order inside
+            # a definition is not execution order and must not make recursive SCC results depend
+            # on which closure was defined first.
             effective_uses = tuple(entries)
         current = parent
     return ()
