@@ -2256,6 +2256,239 @@ def never_live_outer():
             ),
         )
 
+    def test_environment_alias_contract_preserves_unknown_dict_override_values(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/unknown_dict_overrides.py"
+        ] = """import os
+
+def client(key):
+    return None
+
+def choose():
+    return "reader"
+
+dynamic_key = choose()
+
+comprehension_safe_last = {
+    key: value
+    for key, value in [(dynamic_key, os.getenv), ("reader", client)]
+}
+COMPREHENSION_SAFE = comprehension_safe_last["reader"]("MOLTBOT_FLAG")
+
+comprehension_live_last = {
+    key: value
+    for key, value in [("reader", client), (dynamic_key, os.getenv)]
+}
+COMPREHENSION_LIVE = comprehension_live_last["reader"]("MOLTBOT_FLAG")
+
+comprehension_unknown_only = {
+    key: value
+    for key, value in [(dynamic_key, os.getenv)]
+}
+COMPREHENSION_UNKNOWN = comprehension_unknown_only["reader"]("MOLTBOT_FLAG")
+
+ordinary_safe_last = {dynamic_key: os.getenv, "reader": client}
+ORDINARY_SAFE = ordinary_safe_last["reader"]("MOLTBOT_FLAG")
+
+ordinary_live_last = {"reader": client, dynamic_key: os.getenv}
+ORDINARY_LIVE = ordinary_live_last["reader"]("MOLTBOT_FLAG")
+
+ordinary_unknown_only = {dynamic_key: os.getenv}
+ORDINARY_UNKNOWN = ordinary_unknown_only["reader"]("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/unknown_dict_overrides.py")
+
+        findings = self._evaluate(files, configure=configure)
+        direct_reads = [
+            finding
+            for finding in findings
+            if finding.rule_id == "ENV_ALIAS_DIRECT_READ"
+        ]
+
+        self.assertEqual(
+            len(direct_reads),
+            4,
+            msg="\n".join(
+                f"{finding.path}:{finding.line}: {finding.subject}"
+                for finding in direct_reads
+            ),
+        )
+
+    def test_environment_alias_contract_reaches_externally_rooted_recursive_sccs(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/recursive_execution_entries.py"
+        ] = """import os
+
+def reachable_cycle():
+    source = ((reader := os.getenv) for _ in [1])
+
+    def live():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+
+    def a():
+        return b()
+
+    def b():
+        live()
+        return a()
+
+    return a()
+
+def unreachable_cycle():
+    source = ((reader := os.getenv) for _ in [1])
+
+    def live():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+
+    def a():
+        return b()
+
+    def b():
+        live()
+        return a()
+
+    return None
+
+def finite_cycle():
+    source = ((reader := os.getenv) for _ in [1])
+
+    def live():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+
+    def a(remaining):
+        if remaining:
+            return b(remaining - 1)
+        return live()
+
+    def b(remaining):
+        return a(remaining)
+
+    return a(1)
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/recursive_execution_entries.py")
+
+        findings = self._evaluate(files, configure=configure)
+        direct_reads = [
+            finding
+            for finding in findings
+            if finding.rule_id == "ENV_ALIAS_DIRECT_READ"
+        ]
+
+        self.assertEqual(
+            len(direct_reads),
+            2,
+            msg="\n".join(
+                f"{finding.path}:{finding.line}: {finding.subject}"
+                for finding in direct_reads
+            ),
+        )
+
+    def test_environment_alias_contract_excludes_entries_after_terminators(self):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/terminated_execution_entries.py"
+        ] = """import os
+
+def after_return():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    return None
+    inner()
+
+def after_raise():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    raise RuntimeError
+    inner()
+
+def after_break():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    for _ in [1]:
+        break
+        inner()
+
+def after_continue():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    for _ in [1]:
+        continue
+        inner()
+
+def live_before_return():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    inner()
+    return None
+
+def conditional_return(flag):
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    if flag:
+        return None
+    inner()
+
+def finally_after_return():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    try:
+        return None
+    finally:
+        inner()
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/terminated_execution_entries.py")
+
+        findings = self._evaluate(files, configure=configure)
+        direct_reads = [
+            finding
+            for finding in findings
+            if finding.rule_id == "ENV_ALIAS_DIRECT_READ"
+        ]
+
+        self.assertEqual(
+            len(direct_reads),
+            3,
+            msg="\n".join(
+                f"{finding.path}:{finding.line}: {finding.subject}"
+                for finding in direct_reads
+            ),
+        )
+
     def test_environment_alias_contract_tracks_keyword_and_explicit_mapping_reads(
         self,
     ):

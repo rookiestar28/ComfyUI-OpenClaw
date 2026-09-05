@@ -1980,12 +1980,17 @@ def _static_dict_value_candidates(
             continue
         is_static, key_value = _static_literal_key(key)
         if not is_static:
+            # CRITICAL: a dynamic key may equal the selector. Its value remains possible when it
+            # appears after a known match; discarding it lets `{known: safe, dynamic: getenv}`
+            # hide the reader. A later definite match still returns before older unknown entries.
+            possible.append(value)
             unresolved_override = True
             continue
         if key_value == selector:
             possible.append(value)
-            if not unresolved_override:
-                return tuple(possible)
+            # This is the latest definite match. Older entries cannot override it, while every
+            # unresolved later entry already retained above may still do so.
+            return tuple(possible)
     if possible:
         return tuple(possible)
     return None if unresolved_override else ()
@@ -3418,6 +3423,19 @@ def _node_is_statically_unreachable(
 ) -> bool:
     current = node
     while (parent := parents.get(id(current))) is not None:
+        for _field_name, field_value in ast.iter_fields(parent):
+            if not isinstance(field_value, list) or current not in field_value:
+                continue
+            current_index = field_value.index(current)
+            if any(
+                isinstance(previous, (ast.Return, ast.Raise, ast.Break, ast.Continue))
+                for previous in field_value[:current_index]
+            ):
+                # CRITICAL: ast.walk includes statements after unconditional terminators. Such a
+                # call cannot activate a deferred reader; treating it as an execution entry creates
+                # deterministic false positives. This sequence-local check leaves conditional
+                # exits and `finally` bodies reachable.
+                return True
         if isinstance(parent, (ast.If, ast.IfExp)) and isinstance(
             parent.test, ast.Constant
         ):
@@ -3855,7 +3873,18 @@ def _execution_scope_is_reached_from(
                 entries = execution_entries.setdefault(scope_id, [])
                 if candidate not in entries:
                     entries.append(candidate)
+                    for cached_scope, cached_reached in tuple(memo.items()):
+                        if not cached_reached:
+                            del memo[cached_scope]
                 reached = True
+        if reached:
+            # CRITICAL: recursive deferred call graphs form SCCs. A newly rooted scope or
+            # execution entry invalidates only provisional negative reachability; retaining proven
+            # positives gives a bounded monotone fixed point without repeatedly rescanning every
+            # acyclic scope.
+            for cached_scope, cached_reached in tuple(memo.items()):
+                if not cached_reached:
+                    del memo[cached_scope]
         memo[scope_id] = reached
         return reached
     if isinstance(root, ast.GeneratorExp):
@@ -3899,7 +3928,14 @@ def _execution_scope_is_reached_from(
                     entries = execution_entries.setdefault(scope_id, [])
                     if _activation not in entries:
                         entries.append(_activation)
+                        for cached_scope, cached_reached in tuple(memo.items()):
+                            if not cached_reached:
+                                del memo[cached_scope]
                     reached = True
+        if reached:
+            for cached_scope, cached_reached in tuple(memo.items()):
+                if not cached_reached:
+                    del memo[cached_scope]
         memo[scope_id] = reached
         return reached
     memo[scope_id] = False
