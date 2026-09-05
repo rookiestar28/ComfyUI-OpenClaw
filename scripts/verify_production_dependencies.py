@@ -1395,6 +1395,15 @@ _ENV_ORIGIN_GETENV = "getenv"
 _ENV_ORIGIN_MAPPING = "environ"
 _ENV_ORIGIN_LEGACY_SIGNAL = "legacy_signal"
 _ENV_ORIGIN_OTHER = "other"
+_EnvironmentControlPath = tuple[tuple[int, str], ...]
+
+
+@dataclass(frozen=True)
+class _EnvironmentBindingEvent:
+    position: tuple[int, int]
+    control_path: _EnvironmentControlPath
+    fixed_origins: frozenset[str] | None = None
+    value: ast.AST | None = None
 
 
 @dataclass
@@ -1404,6 +1413,9 @@ class _EnvironmentScopeFacts:
     base_origins: dict[str, set[str]]
     origins: dict[str, set[str]]
     assignments: list[tuple[set[str], ast.AST]]
+    binding_events: dict[str, list[_EnvironmentBindingEvent]]
+    global_names: set[str]
+    nonlocal_names: set[str]
 
 
 class _EnvironmentScopeIndex(ast.NodeVisitor):
@@ -1411,22 +1423,53 @@ class _EnvironmentScopeIndex(ast.NodeVisitor):
 
     def __init__(self, tree: ast.AST) -> None:
         self.scopes = [
-            _EnvironmentScopeFacts(None, tree, defaultdict(set), defaultdict(set), [])
+            _EnvironmentScopeFacts(
+                None,
+                tree,
+                defaultdict(set),
+                defaultdict(set),
+                [],
+                defaultdict(list),
+                set(),
+                set(),
+            )
         ]
         self.node_scopes: dict[int, int] = {}
+        self.node_control_paths: dict[int, _EnvironmentControlPath] = {}
+        self._event_origin_cache: dict[int, frozenset[str]] = {}
+        self._resolving_events: set[int] = set()
         self._current = 0
+        self._control_path: list[tuple[int, str]] = []
         self.visit(tree)
 
     def visit(self, node: ast.AST) -> Any:
         self.node_scopes[id(node)] = self._current
+        self.node_control_paths[id(node)] = tuple(self._control_path)
         return super().visit(node)
 
     def _new_scope(self, root: ast.AST, parent: int) -> int:
         scope_id = len(self.scopes)
         self.scopes.append(
-            _EnvironmentScopeFacts(parent, root, defaultdict(set), defaultdict(set), [])
+            _EnvironmentScopeFacts(
+                parent,
+                root,
+                defaultdict(set),
+                defaultdict(set),
+                [],
+                defaultdict(list),
+                set(),
+                set(),
+            )
         )
         return scope_id
+
+    def _visit_region(
+        self, owner: ast.AST, label: str, nodes: Iterable[ast.AST]
+    ) -> None:
+        self._control_path.append((id(owner), label))
+        for child in nodes:
+            self.visit(child)
+        self._control_path.pop()
 
     def _nested_lexical_parent(self) -> int:
         parent = self._current
@@ -1453,17 +1496,23 @@ class _EnvironmentScopeIndex(ast.NodeVisitor):
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self._visit_function_header(node)
         parent = self._current
+        parent_control_path = self._control_path
         self._current = self._new_scope(node, self._nested_lexical_parent())
+        self._control_path = []
         for statement in node.body:
             self.visit(statement)
+        self._control_path = parent_control_path
         self._current = parent
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         self._visit_function_header(node)
         parent = self._current
+        parent_control_path = self._control_path
         self._current = self._new_scope(node, self._nested_lexical_parent())
+        self._control_path = []
         for statement in node.body:
             self.visit(statement)
+        self._control_path = parent_control_path
         self._current = parent
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
@@ -1471,8 +1520,11 @@ class _EnvironmentScopeIndex(ast.NodeVisitor):
             if default is not None:
                 self.visit(default)
         parent = self._current
+        parent_control_path = self._control_path
         self._current = self._new_scope(node, self._nested_lexical_parent())
+        self._control_path = []
         self.visit(node.body)
+        self._control_path = parent_control_path
         self._current = parent
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
@@ -1483,15 +1535,21 @@ class _EnvironmentScopeIndex(ast.NodeVisitor):
         for keyword in node.keywords:
             self.visit(keyword)
         parent = self._current
+        parent_control_path = self._control_path
         self._current = self._new_scope(node, self._nested_lexical_parent())
+        self._control_path = []
         for statement in node.body:
             self.visit(statement)
+        self._control_path = parent_control_path
         self._current = parent
 
     def _visit_comprehension_scope(self, node: ast.AST) -> None:
         parent = self._current
+        parent_control_path = self._control_path
         self._current = self._new_scope(node, self._nested_lexical_parent())
+        self._control_path = []
         self.generic_visit(node)
+        self._control_path = parent_control_path
         self._current = parent
 
     def visit_ListComp(self, node: ast.ListComp) -> None:
@@ -1506,18 +1564,221 @@ class _EnvironmentScopeIndex(ast.NodeVisitor):
     def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
         self._visit_comprehension_scope(node)
 
+    def visit_If(self, node: ast.If) -> None:
+        self.visit(node.test)
+        self._visit_region(node, "body", node.body)
+        self._visit_region(node, "else", node.orelse)
+
+    def visit_While(self, node: ast.While) -> None:
+        self.visit(node.test)
+        self._visit_region(node, "body", node.body)
+        self._visit_region(node, "else", node.orelse)
+
+    def _visit_for(self, node: ast.For | ast.AsyncFor) -> None:
+        self.visit(node.iter)
+        self._visit_region(node, "body", (node.target, *node.body))
+        self._visit_region(node, "else", node.orelse)
+
+    def visit_For(self, node: ast.For) -> None:
+        self._visit_for(node)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        self._visit_for(node)
+
+    def visit_Try(self, node: ast.Try) -> None:
+        self._visit_region(node, "try-body", node.body)
+        for index, handler in enumerate(node.handlers):
+            self._visit_region(node, f"try-handler:{index}", (handler,))
+        self._visit_region(node, "try-else", node.orelse)
+        for statement in node.finalbody:
+            self.visit(statement)
+
+    def visit_TryStar(self, node: Any) -> None:
+        self.visit_Try(node)
+
+    def visit_IfExp(self, node: ast.IfExp) -> None:
+        self.visit(node.test)
+        self._visit_region(node, "body", (node.body,))
+        self._visit_region(node, "else", (node.orelse,))
+
+    def visit_BoolOp(self, node: ast.BoolOp) -> None:
+        if not node.values:
+            return
+        self.visit(node.values[0])
+        for index, value in enumerate(node.values[1:], start=1):
+            self._visit_region(node, f"value:{index}", (value,))
+
+    def visit_Match(self, node: ast.Match) -> None:
+        self.visit(node.subject)
+        for index, case in enumerate(node.cases):
+            self._visit_region(
+                node,
+                f"case:{index}",
+                tuple(
+                    child
+                    for child in (case.pattern, case.guard, *case.body)
+                    if child is not None
+                ),
+            )
+
+
+def _environment_node_position(node: ast.AST) -> tuple[int, int]:
+    return (
+        int(getattr(node, "lineno", 0)),
+        int(getattr(node, "col_offset", 0)),
+    )
+
+
+def _environment_end_position(node: ast.AST) -> tuple[int, int]:
+    return (
+        int(getattr(node, "end_lineno", getattr(node, "lineno", 0))),
+        int(getattr(node, "end_col_offset", getattr(node, "col_offset", 0))),
+    )
+
+
+def _environment_control_paths_compatible(
+    left: _EnvironmentControlPath, right: _EnvironmentControlPath
+) -> bool:
+    left_regions = dict(left)
+    right_regions = dict(right)
+    return all(
+        owner not in right_regions
+        or label == right_regions[owner]
+        or (
+            label == "try-body"
+            and (
+                right_regions[owner] == "try-else"
+                or right_regions[owner].startswith("try-handler:")
+            )
+        )
+        or (
+            right_regions[owner] == "try-body"
+            and (label == "try-else" or label.startswith("try-handler:"))
+        )
+        for owner, label in left_regions.items()
+    )
+
+
+def _environment_control_path_dominates(
+    event: _EnvironmentControlPath, use: _EnvironmentControlPath
+) -> bool:
+    if len(event) > len(use):
+        return False
+    for index, (event_owner, event_label) in enumerate(event):
+        use_owner, use_label = use[index]
+        if event_owner != use_owner:
+            return False
+        if event_label == use_label:
+            continue
+        if (
+            index == len(event) - 1
+            and event_label == "try-body"
+            and use_label == "try-else"
+        ):
+            continue
+        return False
+    return True
+
+
+def _environment_event_origins(
+    index: _EnvironmentScopeIndex,
+    scope_id: int,
+    event: _EnvironmentBindingEvent,
+) -> frozenset[str]:
+    cache_key = id(event)
+    cached = index._event_origin_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    if event.fixed_origins is not None:
+        index._event_origin_cache[cache_key] = event.fixed_origins
+        return event.fixed_origins
+    if event.value is None or cache_key in index._resolving_events:
+        return frozenset({_ENV_ORIGIN_OTHER})
+    index._resolving_events.add(cache_key)
+    try:
+        origins: set[str] = set()
+        if _is_os_module_expression(event.value, index, scope_id):
+            origins.add(_ENV_ORIGIN_OS_MODULE)
+        if _is_getenv_expression(event.value, index, scope_id):
+            origins.add(_ENV_ORIGIN_GETENV)
+        if _is_env_mapping_expression(event.value, index, scope_id):
+            origins.add(_ENV_ORIGIN_MAPPING)
+        if _contains_legacy_env_signal(event.value, index, scope_id):
+            origins.add(_ENV_ORIGIN_LEGACY_SIGNAL)
+        result = frozenset(origins or {_ENV_ORIGIN_OTHER})
+        index._event_origin_cache[cache_key] = result
+        return result
+    finally:
+        index._resolving_events.remove(cache_key)
+
+
+def _environment_binding_states_at(
+    index: _EnvironmentScopeIndex,
+    scope_id: int,
+    name: str,
+    node: ast.AST,
+) -> set[str | None]:
+    facts = index.scopes[scope_id]
+    states: set[str | None] = {None}
+    position = _environment_node_position(node)
+    control_path = index.node_control_paths.get(id(node), ())
+    for event in facts.binding_events.get(name, ()):
+        if event.position > position:
+            break
+        if not _environment_control_paths_compatible(event.control_path, control_path):
+            continue
+        origins = set(_environment_event_origins(index, scope_id, event))
+        if _environment_control_path_dominates(event.control_path, control_path):
+            states.clear()
+            states.update(origins)
+            if not origins:
+                states.add(None)
+        else:
+            states.update(origins)
+    return states
+
+
+def _environment_origins_at(
+    index: _EnvironmentScopeIndex,
+    scope_id: int,
+    name: str,
+    node: ast.AST,
+) -> set[str]:
+    return {
+        state
+        for state in _environment_binding_states_at(index, scope_id, name, node)
+        if state is not None
+    }
+
 
 def _scope_has_origin(
     index: _EnvironmentScopeIndex,
     scope_id: int,
     name: str,
     origin: str,
+    node: ast.AST,
 ) -> bool:
     current: int | None = scope_id
+    use_scope = scope_id
     while current is not None:
         facts = index.scopes[current]
+        if current != 0 and (
+            name in facts.global_names or name in facts.nonlocal_names
+        ):
+            states = _environment_binding_states_at(index, current, name, node)
+            if origin in states:
+                return True
+            if None not in states:
+                return False
+            current = 0 if name in facts.global_names else facts.parent
+            continue
         if name in facts.origins:
-            return facts.origins[name] == {origin}
+            if current == use_scope:
+                return origin in _environment_origins_at(index, current, name, node)
+            # IMPORTANT: an enclosing module binding is observed when deferred code runs, not
+            # necessarily when it is defined. Retain every reachable origin so a later mutation
+            # cannot hide a real process-environment read behind whole-scope ambiguity.
+            return origin in facts.origins[name]
         current = facts.parent
     return False
 
@@ -1540,7 +1801,7 @@ def _expression_has_origin(
     origin: str,
 ) -> bool:
     return isinstance(node, ast.Name) and _scope_has_origin(
-        index, scope_id, node.id, origin
+        index, scope_id, node.id, origin, node
     )
 
 
@@ -1611,7 +1872,9 @@ def _contains_legacy_env_signal(
                 return True
         if isinstance(part, ast.Name) and (
             "legacy" in part.id.lower()
-            or _scope_has_origin(index, scope_id, part.id, _ENV_ORIGIN_LEGACY_SIGNAL)
+            or _scope_has_origin(
+                index, scope_id, part.id, _ENV_ORIGIN_LEGACY_SIGNAL, part
+            )
         ):
             return True
     return False
@@ -1630,28 +1893,73 @@ def _build_environment_scope_index(tree: ast.AST) -> _EnvironmentScopeIndex:
     for node in ast.walk(tree):
         scope_id = index.node_scopes.get(id(node), 0)
         facts = index.scopes[scope_id]
+        control_path = index.node_control_paths.get(id(node), ())
+        if isinstance(node, ast.Global):
+            facts.global_names.update(node.names)
+        elif isinstance(node, ast.Nonlocal):
+            facts.nonlocal_names.update(node.names)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             facts.base_origins[node.name].add(_ENV_ORIGIN_OTHER)
+            facts.binding_events[node.name].append(
+                _EnvironmentBindingEvent(
+                    _environment_end_position(node),
+                    control_path,
+                    frozenset({_ENV_ORIGIN_OTHER}),
+                )
+            )
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 bound = alias.asname or alias.name.split(".", 1)[0]
-                facts.base_origins[bound].add(
+                imported_origin = (
                     _ENV_ORIGIN_OS_MODULE if alias.name == "os" else _ENV_ORIGIN_OTHER
+                )
+                facts.base_origins[bound].add(imported_origin)
+                facts.binding_events[bound].append(
+                    _EnvironmentBindingEvent(
+                        _environment_end_position(node),
+                        control_path,
+                        frozenset({imported_origin}),
+                    )
                 )
         elif isinstance(node, ast.ImportFrom):
             for alias in node.names:
                 bound = alias.asname or alias.name
                 if node.module == "os" and alias.name in {"getenv", "environ"}:
-                    facts.base_origins[bound].add(
+                    imported_origin = (
                         _ENV_ORIGIN_GETENV
                         if alias.name == "getenv"
                         else _ENV_ORIGIN_MAPPING
                     )
+                    facts.base_origins[bound].add(imported_origin)
+                    facts.binding_events[bound].append(
+                        _EnvironmentBindingEvent(
+                            _environment_end_position(node),
+                            control_path,
+                            frozenset({imported_origin}),
+                        )
+                    )
                 elif node.module == "os" and alias.name == "*":
-                    facts.base_origins["getenv"].add(_ENV_ORIGIN_GETENV)
-                    facts.base_origins["environ"].add(_ENV_ORIGIN_MAPPING)
+                    for star_name, star_origin in (
+                        ("getenv", _ENV_ORIGIN_GETENV),
+                        ("environ", _ENV_ORIGIN_MAPPING),
+                    ):
+                        facts.base_origins[star_name].add(star_origin)
+                        facts.binding_events[star_name].append(
+                            _EnvironmentBindingEvent(
+                                _environment_end_position(node),
+                                control_path,
+                                frozenset({star_origin}),
+                            )
+                        )
                 else:
                     facts.base_origins[bound].add(_ENV_ORIGIN_OTHER)
+                    facts.binding_events[bound].append(
+                        _EnvironmentBindingEvent(
+                            _environment_end_position(node),
+                            control_path,
+                            frozenset({_ENV_ORIGIN_OTHER}),
+                        )
+                    )
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             child_scope = next(
                 (
@@ -1670,12 +1978,27 @@ def _build_environment_scope_index(tree: ast.AST) -> _EnvironmentScopeIndex:
                 )
                 for argument in arguments:
                     child_facts.base_origins[argument.arg].add(_ENV_ORIGIN_OTHER)
+                    child_facts.binding_events[argument.arg].append(
+                        _EnvironmentBindingEvent(
+                            (0, 0), (), frozenset({_ENV_ORIGIN_OTHER})
+                        )
+                    )
                 if node.args.vararg is not None:
                     child_facts.base_origins[node.args.vararg.arg].add(
                         _ENV_ORIGIN_OTHER
                     )
+                    child_facts.binding_events[node.args.vararg.arg].append(
+                        _EnvironmentBindingEvent(
+                            (0, 0), (), frozenset({_ENV_ORIGIN_OTHER})
+                        )
+                    )
                 if node.args.kwarg is not None:
                     child_facts.base_origins[node.args.kwarg.arg].add(_ENV_ORIGIN_OTHER)
+                    child_facts.binding_events[node.args.kwarg.arg].append(
+                        _EnvironmentBindingEvent(
+                            (0, 0), (), frozenset({_ENV_ORIGIN_OTHER})
+                        )
+                    )
 
         targets: set[str] = set()
         value: ast.AST | None = None
@@ -1692,6 +2015,46 @@ def _build_environment_scope_index(tree: ast.AST) -> _EnvironmentScopeIndex:
             value = node.iter
         if targets and value is not None:
             facts.assignments.append((targets, value))
+            if isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+                activation_node = value
+                event_control_path = index.node_control_paths.get(
+                    id(node.target), control_path
+                )
+            else:
+                activation_node = node
+                event_control_path = control_path
+            assignment_event = _EnvironmentBindingEvent(
+                _environment_end_position(activation_node),
+                event_control_path,
+                value=value,
+            )
+            for target_name in targets:
+                facts.binding_events[target_name].append(assignment_event)
+        elif isinstance(node, ast.Delete):
+            for delete_target in node.targets:
+                for name in _target_names(delete_target):
+                    facts.base_origins[name].add(_ENV_ORIGIN_OTHER)
+                    facts.binding_events[name].append(
+                        _EnvironmentBindingEvent(
+                            _environment_end_position(node),
+                            control_path,
+                            frozenset(),
+                        )
+                    )
+        elif isinstance(node, ast.AugAssign):
+            for name in _target_names(node.target):
+                facts.base_origins[name].add(_ENV_ORIGIN_OTHER)
+                facts.binding_events[name].append(
+                    _EnvironmentBindingEvent(
+                        _environment_end_position(node),
+                        control_path,
+                        frozenset({_ENV_ORIGIN_OTHER}),
+                    )
+                )
+
+    for facts in index.scopes:
+        for events in facts.binding_events.values():
+            events.sort(key=lambda event: event.position)
 
     for facts in index.scopes:
         facts.origins = defaultdict(
@@ -1798,22 +2161,7 @@ def _observe_raw_legacy_env_reads(
 def _assigned_string_set(tree: ast.AST, assignment_name: str) -> frozenset[str] | None:
     if not isinstance(tree, ast.Module):
         return None
-    for node in tree.body:
-        bound_names: set[str] = set()
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            bound_names.add(node.name)
-        elif isinstance(node, ast.Assign):
-            bound_names.update(
-                name for target in node.targets for name in _target_names(target)
-            )
-        elif isinstance(node, ast.AnnAssign):
-            bound_names.update(_target_names(node.target))
-        elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            bound_names.update(
-                alias.asname or alias.name.split(".", 1)[0] for alias in node.names
-            )
-        if "frozenset" in bound_names:
-            return None
+    scope_index = _build_environment_scope_index(tree)
     matches: list[ast.AST] = []
     for node in tree.body:
         value: ast.AST | None = None
@@ -1836,6 +2184,8 @@ def _assigned_string_set(tree: ast.AST, assignment_name: str) -> frozenset[str] 
     if len(matches) != 1:
         return None
     value = matches[0]
+    if len(scope_index.scopes[0].binding_events.get(assignment_name, ())) != 1:
+        return None
     if not (
         isinstance(value, ast.Call)
         and isinstance(value.func, ast.Name)
@@ -1843,6 +2193,13 @@ def _assigned_string_set(tree: ast.AST, assignment_name: str) -> frozenset[str] 
         and not value.keywords
         and len(value.args) <= 1
     ):
+        return None
+    # CRITICAL: the registry constructor must resolve to the builtin at this exact use. A
+    # whole-module binding scan both trusted conditionally shadowed callees and rejected safe
+    # assignments that occurred later, breaking registry-policy parity in both directions.
+    if _environment_binding_states_at(scope_index, 0, "frozenset", value.func) != {
+        None
+    }:
         return None
     if not value.args:
         return frozenset()

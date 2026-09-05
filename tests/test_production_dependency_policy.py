@@ -729,6 +729,151 @@ THREE = getenv("MOLTBOT_FLAG")
             "ENV_ALIAS_DIRECT_READ", {finding.rule_id for finding in findings}
         )
 
+    def test_environment_alias_contract_uses_execution_order_and_fails_closed_for_branches(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/dead_branch.py"
+        ] = """import os
+if False:
+    os = client
+VALUE = os.getenv("MOLTBOT_FLAG")
+"""
+        files[
+            "alpha/later_rebind.py"
+        ] = """import os
+VALUE = os.getenv("MOLTBOT_FLAG")
+os = client
+"""
+        files[
+            "alpha/canonical_rebind.py"
+        ] = """os = client
+import os
+VALUE = os.getenv("MOLTBOT_FLAG")
+"""
+        files[
+            "alpha/conditional_origin.py"
+        ] = """if condition:
+    import os as reader
+else:
+    reader = client
+VALUE = reader.getenv("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].extend(
+                [
+                    "alpha/dead_branch.py",
+                    "alpha/later_rebind.py",
+                    "alpha/canonical_rebind.py",
+                    "alpha/conditional_origin.py",
+                ]
+            )
+
+        findings = self._evaluate(files, configure=configure)
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            4,
+        )
+
+    def test_environment_alias_contract_tracks_use_site_aliases_and_try_regions(self):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/use_site.py"
+        ] = """from os import getenv as read_environment
+ONE = read_environment("MOLTBOT_FLAG")
+read_environment = client
+
+import os as operating_system
+environment = operating_system.environ
+operating_system = client
+TWO = environment.get("MOLTBOT_FLAG")
+
+class DeadBranch:
+    import os
+    if False:
+        os = client
+    VALUE = os.getenv("MOLTBOT_FLAG")
+
+class LaterRebind:
+    import os
+    VALUE = os.getenv("MOLTBOT_FLAG")
+    os = client
+
+class CanonicalRebind:
+    os = client
+    import os
+    VALUE = os.getenv("MOLTBOT_FLAG")
+
+try:
+    import os as else_reader
+except ImportError:
+    pass
+else:
+    SIX = else_reader.getenv("MOLTBOT_FLAG")
+
+try:
+    import os as handler_reader
+    might_fail()
+except Exception:
+    SEVEN = handler_reader.getenv("MOLTBOT_FLAG")
+
+import os as deleted_reader
+deleted_reader = client
+del deleted_reader
+UNBOUND = deleted_reader.getenv("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/use_site.py")
+
+        findings = self._evaluate(files, configure=configure)
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            7,
+        )
+
+    def test_environment_alias_contract_tracks_global_import_and_rebinding_order(self):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/api.py"
+        ] = """import os
+
+def read_before_rebind():
+    global os
+    value = os.getenv("MOLTBOT_FLAG")
+    os = client
+    return value
+
+def read_after_rebind():
+    global os
+    os = client
+    return os.getenv("MOLTBOT_FLAG")
+
+def imported_global():
+    global read_environment
+    from os import getenv as read_environment
+    return read_environment("MOLTBOT_FLAG")
+"""
+
+        findings = self._evaluate(
+            files,
+            configure=lambda policy: configure_environment_alias_contract(policy),
+        )
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            2,
+        )
+
     def test_environment_alias_contract_skips_class_namespace_for_method_resolution(
         self,
     ):
@@ -798,6 +943,62 @@ REJECTED_LEGACY_ENV_KEYS = frozenset({"CLAWDBOT_REJECTED"})
             configure=lambda policy: configure_environment_alias_contract(policy),
         )
 
+        self.assertIn(
+            "ENV_ALIAS_REGISTRY_UNREADABLE",
+            [finding.rule_id for finding in findings],
+        )
+
+        files[
+            "alpha/env_aliases.py"
+        ] = """if condition:
+    frozenset = fake
+
+LEGACY_MOLTBOT_ENV_KEYS = frozenset({"MOLTBOT_FLAG"})
+SUPPORTED_CLAWDBOT_ENV_KEYS = frozenset()
+SUPPORTED_DYNAMIC_MOLTBOT_ENV_KEYS = frozenset()
+REJECTED_LEGACY_ENV_KEYS = frozenset({"CLAWDBOT_REJECTED"})
+"""
+        findings = self._evaluate(
+            files,
+            configure=lambda policy: configure_environment_alias_contract(policy),
+        )
+        self.assertIn(
+            "ENV_ALIAS_REGISTRY_UNREADABLE",
+            [finding.rule_id for finding in findings],
+        )
+
+        files[
+            "alpha/env_aliases.py"
+        ] = """LEGACY_MOLTBOT_ENV_KEYS = frozenset({"MOLTBOT_FLAG"})
+SUPPORTED_CLAWDBOT_ENV_KEYS = frozenset()
+SUPPORTED_DYNAMIC_MOLTBOT_ENV_KEYS = frozenset()
+REJECTED_LEGACY_ENV_KEYS = frozenset({"CLAWDBOT_REJECTED"})
+
+frozenset = fake
+"""
+        findings = self._evaluate(
+            files,
+            configure=lambda policy: configure_environment_alias_contract(policy),
+        )
+        self.assertNotIn(
+            "ENV_ALIAS_REGISTRY_UNREADABLE",
+            [finding.rule_id for finding in findings],
+        )
+
+        files[
+            "alpha/env_aliases.py"
+        ] = """LEGACY_MOLTBOT_ENV_KEYS = frozenset({"MOLTBOT_FLAG"})
+SUPPORTED_CLAWDBOT_ENV_KEYS = frozenset()
+SUPPORTED_DYNAMIC_MOLTBOT_ENV_KEYS = frozenset()
+REJECTED_LEGACY_ENV_KEYS = frozenset({"CLAWDBOT_REJECTED"})
+
+if condition:
+    LEGACY_MOLTBOT_ENV_KEYS = frozenset({"MOLTBOT_OTHER"})
+"""
+        findings = self._evaluate(
+            files,
+            configure=lambda policy: configure_environment_alias_contract(policy),
+        )
         self.assertIn(
             "ENV_ALIAS_REGISTRY_UNREADABLE",
             [finding.rule_id for finding in findings],
