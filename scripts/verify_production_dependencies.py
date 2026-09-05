@@ -1752,6 +1752,11 @@ def _environment_event_origins(
                 origins.add(_ENV_ORIGIN_GETENV)
             if _is_env_mapping_expression(source, index, source_scope):
                 origins.add(_ENV_ORIGIN_MAPPING)
+            for builtin_name in _ENV_LAZY_BUILTIN_NAMES:
+                if _is_proven_builtin_callable(
+                    source, builtin_name, index, source_scope
+                ):
+                    origins.add(_builtin_callable_origin(builtin_name))
             if _contains_legacy_env_signal(source, index, source_scope):
                 origins.add(_ENV_ORIGIN_LEGACY_SIGNAL)
         result = frozenset(origins or {_ENV_ORIGIN_OTHER})
@@ -2176,15 +2181,24 @@ def _static_container_selections(
     if not is_static:
         return ()
     if isinstance(node.value, (ast.List, ast.Tuple)):
-        if any(isinstance(element, ast.Starred) for element in node.value.elts):
-            return ()
+        elements = _resolved_static_sequence_elements(
+            node.value, index, scope_id, node.value, resolving
+        )
+        if elements is None:
+            # CRITICAL: an unresolved starred expansion can shift any explicit element into the
+            # selected slot. Dropping the whole container lets `[*unknown, os.getenv][0]` bypass
+            # direct-read governance; retain every visible value as a conservative candidate.
+            return tuple(
+                element.value if isinstance(element, ast.Starred) else element
+                for element in node.value.elts
+            )
         if isinstance(selector, int):
             try:
-                return (node.value.elts[selector],)
+                return (elements[selector],)
             except IndexError:
                 return ()
         if isinstance(selector, slice):
-            sliced_elements = node.value.elts[selector]
+            sliced_elements = list(elements[selector])
             container_type = ast.List if isinstance(node.value, ast.List) else ast.Tuple
             container = container_type(elts=sliced_elements, ctx=ast.Load())
             return (ast.copy_location(container, node),)
@@ -2763,6 +2777,55 @@ def _expression_resolves_to_node(
         return _expression_resolves_to_node(
             node.value, target, index, scope_id, resolving
         )
+    selections = _static_container_selections(node, index, scope_id)
+    if selections:
+        return any(
+            _expression_resolves_to_node(
+                selected,
+                target,
+                index,
+                index.node_scopes.get(id(selected), scope_id),
+                resolving,
+            )
+            for selected in selections
+        )
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        # CRITICAL: consumer provenance crosses runtime containers and starred expansion.
+        # Treating `consume(*[generator])` as the list object hides execution of its walrus body.
+        return any(
+            _expression_resolves_to_node(
+                element.value if isinstance(element, ast.Starred) else element,
+                target,
+                index,
+                index.node_scopes.get(id(element), scope_id),
+                resolving,
+            )
+            for element in node.elts
+        )
+    if isinstance(node, ast.Dict):
+        return any(
+            _expression_resolves_to_node(
+                member,
+                target,
+                index,
+                index.node_scopes.get(id(member), scope_id),
+                resolving,
+            )
+            for member in (
+                *tuple(key for key in node.keys if key is not None),
+                *node.values,
+            )
+        )
+    if isinstance(node, ast.IfExp):
+        return any(
+            _expression_resolves_to_node(part, target, index, scope_id, resolving)
+            for part in (node.body, node.orelse)
+        )
+    if isinstance(node, ast.BoolOp):
+        return any(
+            _expression_resolves_to_node(part, target, index, scope_id, resolving)
+            for part in node.values
+        )
     if not isinstance(node, ast.Name):
         return False
     guard = (scope_id, node.id, id(target))
@@ -2793,6 +2856,20 @@ def _bound_generator_consumer_sources(
         return ((node.value, node.attr),)
     if isinstance(node, ast.NamedExpr):
         return _bound_generator_consumer_sources(node.value, index, scope_id, resolving)
+    selections = _static_container_selections(node, index, scope_id)
+    if selections:
+        # CRITICAL: bound generator methods remain callable when selected from a static
+        # container. Following only direct attributes and names misses `[g.__next__][0]()`.
+        return tuple(
+            source
+            for selected in selections
+            for source in _bound_generator_consumer_sources(
+                selected,
+                index,
+                index.node_scopes.get(id(selected), scope_id),
+                resolving,
+            )
+        )
     if not isinstance(node, ast.Name):
         return ()
     guard = (scope_id, node.id)
@@ -2809,6 +2886,65 @@ def _bound_generator_consumer_sources(
             )
         )
     return tuple(sources)
+
+
+def _effective_static_call_arguments(
+    node: ast.Call,
+    index: _EnvironmentScopeIndex,
+    scope_id: int,
+) -> tuple[tuple[ast.expr, ...], bool, bool | None]:
+    positional: list[ast.expr] = []
+    positional_exact = True
+    for argument in node.args:
+        if not isinstance(argument, ast.Starred):
+            positional.append(argument)
+            continue
+        expanded = _resolved_static_sequence_elements(
+            argument.value, index, scope_id, argument.value
+        )
+        if expanded is None:
+            positional_exact = False
+            continue
+        positional.extend(expanded)
+
+    has_keywords: bool | None = False
+    unknown_keywords = False
+    for keyword in node.keywords:
+        if keyword.arg is not None:
+            has_keywords = True
+            continue
+        if isinstance(keyword.value, ast.Dict) and not keyword.value.keys:
+            continue
+        unknown_keywords = True
+    if has_keywords is False and unknown_keywords:
+        has_keywords = None
+    return tuple(positional), positional_exact, has_keywords
+
+
+def _bound_generator_call_may_activate(
+    method: str,
+    node: ast.Call,
+    index: _EnvironmentScopeIndex,
+    scope_id: int,
+) -> bool:
+    positional, positional_exact, has_keywords = _effective_static_call_arguments(
+        node, index, scope_id
+    )
+    if has_keywords is True:
+        return False
+    if method == "__next__":
+        return not positional
+    if method != "send":
+        return False
+    if not positional:
+        # An opaque expansion may bind exactly one None argument, so it cannot safely suppress
+        # a consumer. Fully resolved non-None or wrong-arity calls remain excluded below.
+        return not positional_exact or has_keywords is None
+    return (
+        len(positional) == 1
+        and isinstance(positional[0], ast.Constant)
+        and positional[0].value is None
+    )
 
 
 def _generator_consumption_sites(
@@ -2838,13 +2974,7 @@ def _generator_consumption_sites(
     for receiver, method in _bound_generator_consumer_sources(
         candidate.func, index, scope_id
     ):
-        if (method == "__next__" and not candidate.args and not candidate.keywords) or (
-            method == "send"
-            and len(candidate.args) == 1
-            and not candidate.keywords
-            and isinstance(candidate.args[0], ast.Constant)
-            and candidate.args[0].value is None
-        ):
+        if _bound_generator_call_may_activate(method, candidate, index, scope_id):
             method_sites.append((receiver, candidate))
         # A fresh generator's throw() and send(non-None) raise before entering its body. They
         # cannot be the first operation that activates a comprehension walrus target.
@@ -2900,7 +3030,7 @@ def _walrus_comprehension_activation(
             if any(part is node for part in ast.walk(condition)):
                 reached_walrus = True
                 break
-            if isinstance(condition, ast.Constant) and condition.value is False:
+            if isinstance(condition, ast.Constant) and not bool(condition.value):
                 return None
             if not (isinstance(condition, ast.Constant) and condition.value is True):
                 definitely_executes = False
@@ -3334,6 +3464,14 @@ def _build_environment_scope_index(tree: ast.AST) -> _EnvironmentScopeIndex:
                         new_origins.add(_ENV_ORIGIN_GETENV)
                     if _is_env_mapping_expression(source, index, source_scope):
                         new_origins.add(_ENV_ORIGIN_MAPPING)
+                    for builtin_name in _ENV_LAZY_BUILTIN_NAMES:
+                        if _is_proven_builtin_callable(
+                            source, builtin_name, index, source_scope
+                        ):
+                            # IMPORTANT: canonical lazy builtins stay lazy through ordinary
+                            # assignment chains. Collapsing `lazy = builtins.iter` to OTHER makes
+                            # a non-consuming wrapper invent generator-walrus activation.
+                            new_origins.add(_builtin_callable_origin(builtin_name))
                     # IMPORTANT: signal propagation is lexical. File-wide name sets made an
                     # unrelated function's `key` inherit a legacy loop target and caused false
                     # policy failures.
@@ -3482,64 +3620,364 @@ def _statement_binds_name(node: ast.AST, name: str) -> bool:
     return _type_alias_bound_name(node) == name
 
 
-def _statement_may_bind_name(node: ast.AST, name: str) -> bool:
+def _static_integer(node: ast.AST) -> int | None:
+    is_static, value = _static_literal_key(node)
+    return value if is_static and isinstance(value, int) else None
+
+
+def _iterable_is_definitely_empty(
+    node: ast.AST,
+    index: _EnvironmentScopeIndex | None,
+    scope_id: int,
+) -> bool:
+    if index is not None:
+        elements = _resolved_static_iterable_elements(node, index, scope_id, node)
+    else:
+        elements = _static_iterable_elements(node)
+    if elements == ():
+        return True
+    if not isinstance(node, ast.Call) or index is None:
+        return False
+    if not _is_proven_builtin_callable(node.func, "range", index, scope_id):
+        return False
+    positional, positional_exact, has_keywords = _effective_static_call_arguments(
+        node, index, scope_id
+    )
+    if (
+        not positional_exact
+        or has_keywords is not False
+        or not 1 <= len(positional) <= 3
+    ):
+        return False
+    values = tuple(_static_integer(argument) for argument in positional)
+    if any(value is None for value in values):
+        return False
+    try:
+        return len(range(*values)) == 0  # type: ignore[arg-type]
+    except (OverflowError, ValueError):
+        return False
+
+
+def _resolved_generator_expressions(
+    node: ast.AST,
+    index: _EnvironmentScopeIndex,
+    scope_id: int,
+    resolving: frozenset[tuple[int, str]] = frozenset(),
+) -> tuple[ast.GeneratorExp, ...]:
+    if isinstance(node, ast.GeneratorExp):
+        return (node,)
+    if isinstance(node, ast.NamedExpr):
+        return _resolved_generator_expressions(node.value, index, scope_id, resolving)
+    selections = _static_container_selections(node, index, scope_id)
+    if selections:
+        return tuple(
+            generator
+            for selected in selections
+            for generator in _resolved_generator_expressions(
+                selected,
+                index,
+                index.node_scopes.get(id(selected), scope_id),
+                resolving,
+            )
+        )
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return tuple(
+            generator
+            for element in node.elts
+            for generator in _resolved_generator_expressions(
+                element.value if isinstance(element, ast.Starred) else element,
+                index,
+                index.node_scopes.get(id(element), scope_id),
+                resolving,
+            )
+        )
+    if isinstance(node, ast.Dict):
+        return tuple(
+            generator
+            for member in (
+                *tuple(key for key in node.keys if key is not None),
+                *node.values,
+            )
+            for generator in _resolved_generator_expressions(
+                member,
+                index,
+                index.node_scopes.get(id(member), scope_id),
+                resolving,
+            )
+        )
+    if isinstance(node, ast.IfExp):
+        return tuple(
+            generator
+            for part in (node.body, node.orelse)
+            for generator in _resolved_generator_expressions(
+                part, index, scope_id, resolving
+            )
+        )
+    if isinstance(node, ast.BoolOp):
+        return tuple(
+            generator
+            for part in node.values
+            for generator in _resolved_generator_expressions(
+                part, index, scope_id, resolving
+            )
+        )
+    if not isinstance(node, ast.Name):
+        return ()
+    guard = (scope_id, node.id)
+    if guard in resolving:
+        return ()
+    return tuple(
+        generator
+        for source in _environment_binding_source_expressions_at(
+            index, scope_id, node.id, node
+        )
+        for generator in _resolved_generator_expressions(
+            source,
+            index,
+            index.node_scopes.get(id(source), scope_id),
+            resolving | {guard},
+        )
+    )
+
+
+def _comprehension_may_bind_name(
+    node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp,
+    name: str,
+    index: _EnvironmentScopeIndex | None,
+    scope_id: int,
+    *,
+    consumed: bool,
+) -> bool:
+    if not node.generators:
+        return False
+    first_iter = node.generators[0].iter
+    if _statement_may_bind_name(first_iter, name, index, scope_id):
+        return True
+    if isinstance(node, ast.GeneratorExp) and not consumed:
+        # Generator construction evaluates only the first iterable. Its filters, nested
+        # iterables, element, and walrus targets remain dormant until a consumer advances it.
+        return False
+    for generator in node.generators:
+        if generator.iter is not first_iter and _statement_may_bind_name(
+            generator.iter, name, index, scope_id
+        ):
+            return True
+        if _iterable_is_definitely_empty(generator.iter, index, scope_id):
+            return False
+        for condition in generator.ifs:
+            if _statement_may_bind_name(condition, name, index, scope_id):
+                return True
+            if _static_truth_value(condition) is False:
+                return False
+    expressions: tuple[ast.AST, ...]
+    if isinstance(node, ast.DictComp):
+        expressions = (node.key, node.value)
+    else:
+        expressions = (node.elt,)
+    return any(
+        _statement_may_bind_name(expression, name, index, scope_id)
+        for expression in expressions
+    )
+
+
+def _static_truth_value(node: ast.AST) -> bool | None:
+    if isinstance(node, ast.Constant):
+        return bool(node.value)
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        elements = _static_iterable_elements(node)
+        return None if elements is None else bool(elements)
+    if isinstance(node, ast.Dict):
+        if any(key is not None for key in node.keys):
+            return True
+        return False if not node.keys else None
+    if isinstance(node, ast.NamedExpr):
+        return _static_truth_value(node.value)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        operand = _static_truth_value(node.operand)
+        return None if operand is None else not operand
+    if isinstance(node, ast.BoolOp):
+        values = tuple(_static_truth_value(value) for value in node.values)
+        if isinstance(node.op, ast.And):
+            if False in values:
+                return False
+            return True if values and all(value is True for value in values) else None
+        if True in values:
+            return True
+        return False if values and all(value is False for value in values) else None
+    if isinstance(node, ast.IfExp):
+        test = _static_truth_value(node.test)
+        if test is not None:
+            return _static_truth_value(node.body if test else node.orelse)
+        body = _static_truth_value(node.body)
+        orelse = _static_truth_value(node.orelse)
+        return body if body is not None and body == orelse else None
+    return None
+
+
+def _definition_outer_scope_expressions(
+    node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda,
+) -> tuple[ast.AST, ...]:
+    if isinstance(node, ast.ClassDef):
+        return (
+            *node.decorator_list,
+            *node.bases,
+            *(keyword.value for keyword in node.keywords),
+            *getattr(node, "type_params", ()),
+        )
+    arguments = node.args
+    annotated = (
+        *arguments.posonlyargs,
+        *arguments.args,
+        *arguments.kwonlyargs,
+        *(() if arguments.vararg is None else (arguments.vararg,)),
+        *(() if arguments.kwarg is None else (arguments.kwarg,)),
+    )
+    annotations = tuple(
+        argument.annotation for argument in annotated if argument.annotation is not None
+    )
+    common = (
+        *arguments.defaults,
+        *(default for default in arguments.kw_defaults if default is not None),
+        *annotations,
+    )
+    if isinstance(node, ast.Lambda):
+        return common
+    return (
+        *node.decorator_list,
+        *common,
+        *(() if node.returns is None else (node.returns,)),
+        *getattr(node, "type_params", ()),
+    )
+
+
+def _scope_declares_global_name(nodes: Iterable[ast.AST], name: str) -> bool:
+    def declares(node: ast.AST) -> bool:
+        if isinstance(node, ast.Global):
+            return name in node.names
+        if isinstance(
+            node,
+            (
+                ast.FunctionDef,
+                ast.AsyncFunctionDef,
+                ast.ClassDef,
+                ast.Lambda,
+                ast.ListComp,
+                ast.SetComp,
+                ast.DictComp,
+                ast.GeneratorExp,
+            ),
+        ):
+            return False
+        return any(declares(child) for child in ast.iter_child_nodes(node))
+
+    return any(declares(node) for node in nodes)
+
+
+def _statement_may_bind_name(
+    node: ast.AST,
+    name: str,
+    index: _EnvironmentScopeIndex | None = None,
+    scope_id: int = 0,
+) -> bool:
     if _statement_binds_name(node, name):
         return True
     if isinstance(node, ast.If):
-        if _statement_may_bind_name(node.test, name):
+        if _statement_may_bind_name(node.test, name, index, scope_id):
             return True
-        if isinstance(node.test, ast.Constant):
-            selected = node.body if bool(node.test.value) else node.orelse
-            return any(_statement_may_bind_name(child, name) for child in selected)
+        test_truth = _static_truth_value(node.test)
+        if test_truth is not None:
+            selected = node.body if test_truth else node.orelse
+            return any(
+                _statement_may_bind_name(child, name, index, scope_id)
+                for child in selected
+            )
         return any(
-            _statement_may_bind_name(child, name)
+            _statement_may_bind_name(child, name, index, scope_id)
             for child in (*node.body, *node.orelse)
         )
     if isinstance(node, (ast.For, ast.AsyncFor)):
-        if _statement_may_bind_name(node.iter, name):
+        if _statement_may_bind_name(node.iter, name, index, scope_id):
             return True
-        elements = _static_iterable_elements(node.iter)
-        if elements == ():
-            return any(_statement_may_bind_name(child, name) for child in node.orelse)
+        if _iterable_is_definitely_empty(node.iter, index, scope_id):
+            return any(
+                _statement_may_bind_name(child, name, index, scope_id)
+                for child in node.orelse
+            )
         return name in _target_names(node.target) or any(
-            _statement_may_bind_name(child, name)
+            _statement_may_bind_name(child, name, index, scope_id)
             for child in (*node.body, *node.orelse)
         )
     if isinstance(node, ast.While):
-        if _statement_may_bind_name(node.test, name):
+        if _statement_may_bind_name(node.test, name, index, scope_id):
             return True
-        if isinstance(node.test, ast.Constant) and not bool(node.test.value):
-            return any(_statement_may_bind_name(child, name) for child in node.orelse)
-    if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
-        if not node.generators:
-            return False
-        first_iter = node.generators[0].iter
-        if _statement_may_bind_name(first_iter, name):
-            return True
-        if isinstance(node, ast.GeneratorExp):
-            # Constructing a generator evaluates its first iterable but defers its body. Keep
-            # later walrus targets conservative because an enclosing consumer may advance it.
+        if _static_truth_value(node.test) is False:
             return any(
-                isinstance(child, ast.NamedExpr) and name in _target_names(child.target)
-                for child in ast.walk(node)
-                if child is not first_iter
+                _statement_may_bind_name(child, name, index, scope_id)
+                for child in node.orelse
             )
-        if _static_iterable_elements(first_iter) == ():
-            return False
-        evaluated: list[ast.AST] = []
-        for generator in node.generators:
-            evaluated.extend((generator.iter, *generator.ifs))
-        if isinstance(node, ast.DictComp):
-            evaluated.extend((node.key, node.value))
-        else:
-            evaluated.append(node.elt)
-        # IMPORTANT: comprehension targets are child-scope locals, while executed walrus targets
-        # bind in the containing scope. A blanket ast.walk both invents target rebindings and
-        # rejects statically empty comprehensions after a proven builtin restoration.
+    if isinstance(node, ast.IfExp):
+        if _statement_may_bind_name(node.test, name, index, scope_id):
+            return True
+        test_truth = _static_truth_value(node.test)
+        candidates = (
+            (node.body if test_truth else node.orelse,)
+            if test_truth is not None
+            else (node.body, node.orelse)
+        )
         return any(
-            isinstance(child, ast.NamedExpr) and name in _target_names(child.target)
-            for expression in evaluated
-            for child in ast.walk(expression)
+            _statement_may_bind_name(child, name, index, scope_id)
+            for child in candidates
+        )
+    if isinstance(node, ast.BoolOp):
+        for value in node.values:
+            if _statement_may_bind_name(value, name, index, scope_id):
+                return True
+            truth = _static_truth_value(value)
+            if (isinstance(node.op, ast.And) and truth is False) or (
+                isinstance(node.op, ast.Or) and truth is True
+            ):
+                return False
+        return False
+    if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+        return _comprehension_may_bind_name(
+            node,
+            name,
+            index,
+            scope_id,
+            consumed=not isinstance(node, ast.GeneratorExp),
+        )
+    if isinstance(node, ast.Call) and index is not None:
+        if _statement_may_bind_name(node.func, name, index, scope_id):
+            return True
+        consumed_generators: list[ast.GeneratorExp] = []
+        if not _is_proven_lazy_builtin_call(node, index, scope_id):
+            for argument in (
+                *(
+                    arg.value if isinstance(arg, ast.Starred) else arg
+                    for arg in node.args
+                ),
+                *(keyword.value for keyword in node.keywords),
+            ):
+                consumed_generators.extend(
+                    _resolved_generator_expressions(argument, index, scope_id)
+                )
+        for receiver, method in _bound_generator_consumer_sources(
+            node.func, index, scope_id
+        ):
+            if _bound_generator_call_may_activate(method, node, index, scope_id):
+                consumed_generators.extend(
+                    _resolved_generator_expressions(receiver, index, scope_id)
+                )
+        if any(
+            _comprehension_may_bind_name(
+                generator, name, index, scope_id, consumed=True
+            )
+            for generator in consumed_generators
+        ):
+            return True
+        return any(
+            _statement_may_bind_name(child, name, index, scope_id)
+            for child in (*node.args, *(keyword.value for keyword in node.keywords))
         )
     if isinstance(
         node, (ast.For, ast.AsyncFor, ast.comprehension)
@@ -3565,14 +4003,33 @@ def _statement_may_bind_name(node: ast.AST, name: str) -> bool:
     if isinstance(
         node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
     ):
-        return False
+        # IMPORTANT: definition bodies have their own binding scope, but decorators, bases,
+        # annotations, and defaults execute in the containing scope. Skipping both sides either
+        # invents nested-body rebindings or misses `lambda x=(frozenset := fake): ...`.
+        if any(
+            _statement_may_bind_name(expression, name, index, scope_id)
+            for expression in _definition_outer_scope_expressions(node)
+        ):
+            return True
+        return (
+            isinstance(node, ast.ClassDef)
+            and _scope_declares_global_name(node.body, name)
+            and any(
+                _statement_may_bind_name(statement, name, index, scope_id)
+                for statement in node.body
+            )
+        )
     return any(
-        _statement_may_bind_name(child, name) for child in ast.iter_child_nodes(node)
+        _statement_may_bind_name(child, name, index, scope_id)
+        for child in ast.iter_child_nodes(node)
     )
 
 
 def _module_try_delete_restores_builtin(
-    tree: ast.Module, name: str, use: ast.AST
+    tree: ast.Module,
+    name: str,
+    use: ast.AST,
+    scope_index: _EnvironmentScopeIndex,
 ) -> bool:
     prior = [
         statement
@@ -3593,9 +4050,15 @@ def _module_try_delete_restores_builtin(
         ):
             continue
         residual_nodes = (*statement.handlers, *statement.orelse, *statement.finalbody)
-        if any(_statement_may_bind_name(child, name) for child in residual_nodes):
+        if any(
+            _statement_may_bind_name(child, name, scope_index, 0)
+            for child in residual_nodes
+        ):
             continue
-        if any(_statement_may_bind_name(later, name) for later in prior[index + 1 :]):
+        if any(
+            _statement_may_bind_name(later, name, scope_index, 0)
+            for later in prior[index + 1 :]
+        ):
             continue
         # IMPORTANT: this proof is intentionally narrow: an immediately preceding unconditional
         # bind makes the sole try-body delete non-raising, no exit arm can rebind the name, and no
@@ -3658,7 +4121,7 @@ def _assigned_string_set(tree: ast.AST, assignment_name: str) -> frozenset[str] 
         {None, _ENV_ORIGIN_UNBOUND}
     )
     if not constructor_is_builtin and not _module_try_delete_restores_builtin(
-        tree, "frozenset", value.func
+        tree, "frozenset", value.func, scope_index
     ):
         return None
     if not value.args:

@@ -1108,6 +1108,100 @@ send_value_generator = ((send_value_reader := os.getenv) for _ in [1])
 send_value_generator.send(1)
 SEND_VALUE_NOT_PROVEN = send_value_reader("MOLTBOT_FLAG")
 
+expanded_next_generator = ((expanded_next_reader := os.getenv) for _ in [1])
+expanded_next_generator.__next__(*[])
+SIX = expanded_next_reader("MOLTBOT_FLAG")
+
+expanded_send_generator = ((expanded_send_reader := os.getenv) for _ in [1])
+expanded_send_step = expanded_send_generator.send
+expanded_send_step(*[None])
+SEVEN = expanded_send_reader("MOLTBOT_FLAG")
+
+selected_next_generator = ((selected_next_reader := os.getenv) for _ in [1])
+selected_steps = [selected_next_generator.__next__]
+selected_steps[0]()
+EIGHT = selected_next_reader("MOLTBOT_FLAG")
+
+selected_alias_generator = ((selected_alias_reader := os.getenv) for _ in [1])
+selected_alias_step = selected_alias_generator.__next__
+selected_alias_steps = [selected_alias_step]
+selected_alias_steps[0]()
+NINE = selected_alias_reader("MOLTBOT_FLAG")
+
+bare_lazy_generator = ((bare_lazy_reader := os.getenv) for _ in [1])
+bare_lazy = iter
+bare_lazy(bare_lazy_generator)
+BARE_LAZY_NOT_PROVEN = bare_lazy_reader("MOLTBOT_FLAG")
+
+qualified_alias_generator = ((qualified_alias_reader := os.getenv) for _ in [1])
+qualified_lazy = builtins.iter
+qualified_lazy(qualified_alias_generator)
+QUALIFIED_ALIAS_LAZY_NOT_PROVEN = qualified_alias_reader("MOLTBOT_FLAG")
+
+imported_alias_generator = ((imported_alias_reader := os.getenv) for _ in [1])
+imported_lazy_alias = lazy_iter
+imported_lazy_alias(imported_alias_generator)
+IMPORTED_ALIAS_LAZY_NOT_PROVEN = imported_alias_reader("MOLTBOT_FLAG")
+
+lazy_alias_chain_generator = ((lazy_alias_chain_reader := os.getenv) for _ in [1])
+lazy_alias_one = iter
+lazy_alias_two = lazy_alias_one
+lazy_alias_two(lazy_alias_chain_generator)
+LAZY_ALIAS_CHAIN_NOT_PROVEN = lazy_alias_chain_reader("MOLTBOT_FLAG")
+
+rebound_lazy_generator = ((rebound_lazy_reader := os.getenv) for _ in [1])
+rebound_lazy = iter
+rebound_lazy = consume
+rebound_lazy(rebound_lazy_generator)
+TEN = rebound_lazy_reader("MOLTBOT_FLAG")
+
+starred_selected_generator = ((starred_selected_reader := os.getenv) for _ in [1])
+starred_selected_steps = [*[starred_selected_generator.__next__]]
+starred_selected_steps[0]()
+ELEVEN = starred_selected_reader("MOLTBOT_FLAG")
+
+opaque_expansion_generator = ((opaque_expansion_reader := os.getenv) for _ in [1])
+opaque_expansion_step = opaque_expansion_generator.__next__
+opaque_expansion_step(*unknown_args)
+TWELVE = opaque_expansion_reader("MOLTBOT_FLAG")
+
+opaque_keyword_generator = ((opaque_keyword_reader := os.getenv) for _ in [1])
+opaque_keyword_generator.__next__(**unknown_kwargs)
+THIRTEEN = opaque_keyword_reader("MOLTBOT_FLAG")
+
+starred_argument_generator = ((starred_argument_reader := os.getenv) for _ in [1])
+consume(*[starred_argument_generator])
+FOURTEEN = starred_argument_reader("MOLTBOT_FLAG")
+
+selected_argument_generator = ((selected_argument_reader := os.getenv) for _ in [1])
+selected_argument_generators = [selected_argument_generator]
+consume(selected_argument_generators[0])
+FIFTEEN = selected_argument_reader("MOLTBOT_FLAG")
+
+keyword_argument_generator = ((keyword_argument_reader := os.getenv) for _ in [1])
+consume(**{"value": keyword_argument_generator})
+SIXTEEN = keyword_argument_reader("MOLTBOT_FLAG")
+
+lazy_starred_generator = ((lazy_starred_reader := os.getenv) for _ in [1])
+iter(*[lazy_starred_generator])
+LAZY_STARRED_NOT_PROVEN = lazy_starred_reader("MOLTBOT_FLAG")
+
+invalid_expansion_generator = ((invalid_expansion_reader := os.getenv) for _ in [1])
+invalid_expansion_generator.__next__(*[1])
+INVALID_EXPANSION_NOT_PROVEN = invalid_expansion_reader("MOLTBOT_FLAG")
+
+guaranteed_invalid_next = ((invalid_next_reader := os.getenv) for _ in [1])
+guaranteed_invalid_next.__next__(*unknown_args, 1)
+INVALID_NEXT_NOT_PROVEN = invalid_next_reader("MOLTBOT_FLAG")
+
+guaranteed_invalid_send = ((invalid_send_reader := os.getenv) for _ in [1])
+guaranteed_invalid_send.send(*unknown_args, 1)
+INVALID_SEND_NOT_PROVEN = invalid_send_reader("MOLTBOT_FLAG")
+
+guaranteed_invalid_keyword = ((invalid_keyword_reader := os.getenv) for _ in [1])
+guaranteed_invalid_keyword.__next__(**unknown_kwargs, named=1)
+INVALID_KEYWORD_NOT_PROVEN = invalid_keyword_reader("MOLTBOT_FLAG")
+
 builtins = client
 shadowed_qualified = ((shadowed_qualified_reader := os.getenv) for _ in [1])
 builtins.iter(shadowed_qualified)
@@ -1127,7 +1221,7 @@ FIVE = shadowed_import_reader("MOLTBOT_FLAG")
 
         self.assertEqual(
             [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
-            5,
+            16,
         )
 
     def test_environment_alias_contract_tracks_keyword_and_explicit_mapping_reads(
@@ -1329,6 +1423,11 @@ dynamic_index = choose_index()
 NOT_PROVEN = matrix[dynamic_index][0]("MOLTBOT_FLAG")
 INVALID_INDEX = readers[99:][0]("MOLTBOT_FLAG")
 NOT_ENVIRONMENT = [[client]][0][0]("MOLTBOT_FLAG")
+FIVE = [*[], os.getenv][0]("MOLTBOT_FLAG")
+SIX = (*(), os.getenv)[0]("MOLTBOT_FLAG")
+SEVEN = [*dynamic_readers, os.getenv][0]("MOLTBOT_FLAG")
+STARRED_NOT_ENVIRONMENT = [*[], client][0]("MOLTBOT_FLAG")
+EIGHT = (*[*(), os.getenv],)[0]("MOLTBOT_FLAG")
 """
 
         def configure(policy):
@@ -1339,7 +1438,7 @@ NOT_ENVIRONMENT = [[client]][0][0]("MOLTBOT_FLAG")
 
         self.assertEqual(
             [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
-            4,
+            8,
         )
 
     def test_environment_alias_contract_tracks_extended_unpack_and_literal_iteration(
@@ -2032,6 +2131,98 @@ except Exception:
     pass
 [(frozenset := fake) for _ in []]
 """,
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+empty = []
+for frozenset in empty:
+    pass
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+for frozenset in range(0):
+    pass
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+g = ((frozenset := fake) for _ in [1])
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+g = ((frozenset := fake) for _ in [1])
+iter(g)
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+[(lambda: (frozenset := fake)) for _ in [1]]
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+[(frozenset := fake) for _ in [1] if False]
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+[(frozenset := fake) for _ in [1] if 0]
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+g = ((frozenset := fake) for _ in [1])
+lazy_one = iter
+lazy_two = lazy_one
+lazy_two(g)
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+False and (frozenset := fake)
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+value = (frozenset := fake) if False else 1
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+[1 for _ in [1] if False and (frozenset := fake)]
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+class Holder:
+    frozenset = fake
+""",
         )
         for prefix in safe_prefixes:
             with self.subTest(prefix=prefix.splitlines()[0]):
@@ -2060,6 +2251,37 @@ try:
 except Exception:
     pass
 finally:
+    frozenset = fake
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+True and (frozenset := fake)
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+callback = lambda value=(frozenset := fake): value
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+def callback(value=(frozenset := fake)):
+    return value
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+class Holder:
+    global frozenset
     frozenset = fake
 """,
         )
@@ -2132,6 +2354,23 @@ except Exception:
     pass
 if (frozenset := fake):
     pass
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+g = ((frozenset := fake) for _ in [1])
+next(g)
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+g = ((frozenset := fake) for _ in [1])
+steps = [*[g.__next__]]
+steps[0](*[])
 """,
         )
         for prefix in unsafe_prefixes:
