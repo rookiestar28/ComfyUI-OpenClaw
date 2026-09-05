@@ -1362,6 +1362,156 @@ NESTED_NAME_SHORT_CIRCUIT_NOT_PROVEN = nested_name_reader("MOLTBOT_FLAG")
             6,
         )
 
+    def test_environment_alias_contract_exposes_executed_starred_iterable_producers(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/starred_iterable_producers.py"
+        ] = """import os
+
+ONE = [*(os.getenv for _ in [1])][0]("MOLTBOT_FLAG")
+TWO = [*[os.getenv for _ in [1]]][0]("MOLTBOT_FLAG")
+THREE = [*{os.getenv for _ in [1]}][0]("MOLTBOT_FLAG")
+FOUR = [*iter([os.getenv])][0]("MOLTBOT_FLAG")
+FIVE = [*{os.getenv: value for value in [1]}][0]("MOLTBOT_FLAG")
+
+g1 = ((r1 := os.getenv) for _ in [1])
+steps1 = [*(g1.__next__ for _ in [1])]
+steps1[0]()
+SIX = r1("MOLTBOT_FLAG")
+
+g2 = ((r2 := os.getenv) for _ in [1])
+steps2 = [*iter([g2.__next__])]
+steps2[0]()
+SEVEN = r2("MOLTBOT_FLAG")
+
+g3 = ((r3 := os.getenv) for _ in [1])
+steps3 = [*{g3.__next__: value for value in [1]}]
+steps3[0]()
+EIGHT = r3("MOLTBOT_FLAG")
+
+EMPTY = [*(os.getenv for _ in [])]
+FILTERED = [*(os.getenv for _ in [1] if False)]
+empty_values = []
+EMPTY_ALIAS = [*(os.getenv for _ in empty_values)]
+false_filter = False
+FILTERED_ALIAS = [*(os.getenv for _ in [1] if false_filter)]
+
+TWO_ARGUMENT_ITER = [*iter(os.getenv, sentinel)][0]("MOLTBOT_FLAG")
+iter = consume
+SHADOWED_ITER = [*iter([os.getenv])][0]("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/starred_iterable_producers.py")
+
+        findings = self._evaluate(files, configure=configure)
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            8,
+        )
+
+    def test_environment_alias_contract_preserves_starred_display_truth_constraints(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/starred_truth_constraints.py"
+        ] = """import os
+
+members = [os.getenv]
+
+NEGATIVE = ([*members] and [client])[0]("MOLTBOT_FLAG")
+ONE = ([*members] or [client])[0]("MOLTBOT_FLAG")
+
+g1 = ((r1 := os.getenv) for _ in [1])
+members1 = [g1.__next__]
+([*members1] and [client])[0]()
+NEGATIVE_BOUND = r1("MOLTBOT_FLAG")
+
+g2 = ((r2 := os.getenv) for _ in [1])
+members2 = [g2.__next__]
+([*members2] or [client])[0]()
+TWO = r2("MOLTBOT_FLAG")
+
+dynamic_members = choose()
+THREE = ([*dynamic_members] and [os.getenv])[0]("MOLTBOT_FLAG")
+FOUR = ([*dynamic_members] or [os.getenv])[0]("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/starred_truth_constraints.py")
+
+        findings = self._evaluate(files, configure=configure)
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            4,
+        )
+
+    def test_environment_alias_contract_resolves_exact_boolean_name_aliases(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/exact_boolean_aliases.py"
+        ] = """import os
+
+false_flag = False
+values = [os.getenv] if false_flag else [client]
+NEGATIVE_ONE = values[0]("MOLTBOT_FLAG")
+
+true_flag = True
+values2 = [client] if true_flag else [os.getenv]
+NEGATIVE_TWO = values2[0]("MOLTBOT_FLAG")
+
+unknown_flag = choose()
+values3 = [os.getenv] if unknown_flag else [client]
+ONE = values3[0]("MOLTBOT_FLAG")
+
+rebound_flag = False
+rebound_flag = choose()
+values4 = [os.getenv] if rebound_flag else [client]
+TWO = values4[0]("MOLTBOT_FLAG")
+
+if choose():
+    branch_flag = False
+else:
+    branch_flag = True
+values5 = [os.getenv] if branch_flag else [client]
+THREE = values5[0]("MOLTBOT_FLAG")
+
+dead_g1 = ((dead_r1 := os.getenv) for _ in [1])
+(dead_g1.__next__ if false_flag else client)()
+NEGATIVE_BOUND_ONE = dead_r1("MOLTBOT_FLAG")
+
+dead_g2 = ((dead_r2 := os.getenv) for _ in [1])
+(client if true_flag else dead_g2.__next__)()
+NEGATIVE_BOUND_TWO = dead_r2("MOLTBOT_FLAG")
+
+live_g = ((live_reader := os.getenv) for _ in [1])
+(live_g.__next__ if unknown_flag else client)()
+FOUR = live_reader("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/exact_boolean_aliases.py")
+
+        findings = self._evaluate(files, configure=configure)
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            4,
+        )
+
     def test_environment_alias_contract_tracks_keyword_and_explicit_mapping_reads(
         self,
     ):

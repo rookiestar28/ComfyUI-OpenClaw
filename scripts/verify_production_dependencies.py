@@ -2169,13 +2169,188 @@ def _is_proven_lazy_builtin_call(
     )
 
 
+def _resolved_static_truth_value(
+    node: ast.expr,
+    index: _EnvironmentScopeIndex,
+    scope_id: int,
+    use: ast.AST,
+    resolving: frozenset[tuple[int, str]] = frozenset(),
+) -> bool | None:
+    static_truth = _static_truth_value(node)
+    if static_truth is not None:
+        return static_truth
+    if isinstance(node, ast.Name):
+        guard = (scope_id, node.id)
+        if guard in resolving:
+            return None
+        sources = _environment_binding_source_expressions_at(
+            index, scope_id, node.id, use
+        )
+        # IMPORTANT: constant-name pruning is safe only for one exact, dominating source at the
+        # use site. Treating branch unions, deletes, or later/rebound values as one Boolean can
+        # erase a reachable environment read from a conditional container.
+        if len(sources) != 1:
+            return None
+        source = sources[0]
+        source_scope = index.node_scopes.get(id(source), scope_id)
+        return _resolved_static_truth_value(
+            source, index, source_scope, source, resolving | {guard}
+        )
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        unknown_cardinality = False
+        for element in node.elts:
+            if not isinstance(element, ast.Starred):
+                return True
+            cardinality = _iterable_cardinality_truth(
+                element.value, index, scope_id, element.value, resolving
+            )
+            if cardinality is True:
+                return True
+            if cardinality is None:
+                unknown_cardinality = True
+        return None if unknown_cardinality else False
+    if isinstance(node, ast.Dict):
+        unknown_cardinality = False
+        for key, value in zip(node.keys, node.values, strict=True):
+            if key is not None:
+                return True
+            cardinality = _iterable_cardinality_truth(
+                value, index, scope_id, value, resolving
+            )
+            if cardinality is True:
+                return True
+            if cardinality is None:
+                unknown_cardinality = True
+        return None if unknown_cardinality else False
+    if isinstance(node, ast.NamedExpr):
+        return _resolved_static_truth_value(
+            node.value, index, scope_id, node.value, resolving
+        )
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        operand = _resolved_static_truth_value(
+            node.operand, index, scope_id, node.operand, resolving
+        )
+        return None if operand is None else not operand
+    if isinstance(node, ast.BoolOp):
+        values = tuple(
+            _resolved_static_truth_value(value, index, scope_id, value, resolving)
+            for value in node.values
+        )
+        if isinstance(node.op, ast.And):
+            if False in values:
+                return False
+            return True if values and all(value is True for value in values) else None
+        if True in values:
+            return True
+        return False if values and all(value is False for value in values) else None
+    if isinstance(node, ast.IfExp):
+        test = _resolved_static_truth_value(
+            node.test, index, scope_id, node.test, resolving
+        )
+        if test is not None:
+            selected = node.body if test else node.orelse
+            return _resolved_static_truth_value(
+                selected,
+                index,
+                index.node_scopes.get(id(selected), scope_id),
+                selected,
+                resolving,
+            )
+        body = _resolved_static_truth_value(
+            node.body, index, scope_id, node.body, resolving
+        )
+        orelse = _resolved_static_truth_value(
+            node.orelse, index, scope_id, node.orelse, resolving
+        )
+        return body if body is not None and body == orelse else None
+    return None
+
+
+def _comprehension_cardinality_truth(
+    node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp,
+    index: _EnvironmentScopeIndex,
+    scope_id: int,
+) -> bool | None:
+    definitely_nonempty = True
+    for generator in node.generators:
+        generator_scope = index.node_scopes.get(id(generator), scope_id)
+        iterable_scope = index.node_scopes.get(id(generator.iter), generator_scope)
+        iterable_truth = _iterable_cardinality_truth(
+            generator.iter, index, iterable_scope, generator.iter
+        )
+        if iterable_truth is False:
+            return False
+        if iterable_truth is None:
+            definitely_nonempty = False
+        for condition in generator.ifs:
+            condition_scope = index.node_scopes.get(id(condition), generator_scope)
+            condition_truth = _resolved_static_truth_value(
+                condition, index, condition_scope, condition
+            )
+            if condition_truth is False:
+                return False
+            if condition_truth is None:
+                definitely_nonempty = False
+    return True if definitely_nonempty and node.generators else None
+
+
+def _iterable_cardinality_truth(
+    node: ast.expr,
+    index: _EnvironmentScopeIndex,
+    scope_id: int,
+    use: ast.AST,
+    resolving: frozenset[tuple[int, str]] = frozenset(),
+) -> bool | None:
+    if isinstance(node, ast.Name):
+        guard = (scope_id, node.id)
+        if guard in resolving:
+            return None
+        sources = _environment_binding_source_expressions_at(
+            index, scope_id, node.id, use
+        )
+        if len(sources) != 1:
+            return None
+        source = sources[0]
+        source_scope = index.node_scopes.get(id(source), scope_id)
+        return _iterable_cardinality_truth(
+            source, index, source_scope, source, resolving | {guard}
+        )
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set, ast.Dict)):
+        return _resolved_static_truth_value(node, index, scope_id, use, resolving)
+    if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+        return _comprehension_cardinality_truth(node, index, scope_id)
+    if isinstance(node, ast.Call) and _is_proven_builtin_callable(
+        node.func, "iter", index, scope_id
+    ):
+        positional, positional_exact, has_keywords = _effective_static_call_arguments(
+            node, index, scope_id
+        )
+        if positional_exact and has_keywords is False and len(positional) == 1:
+            argument = positional[0]
+            return _iterable_cardinality_truth(
+                argument,
+                index,
+                index.node_scopes.get(id(argument), scope_id),
+                argument,
+                resolving,
+            )
+    return None
+
+
 def _possible_runtime_results(
-    node: ast.expr, required_truth: bool | None = None
+    node: ast.expr,
+    required_truth: bool | None = None,
+    index: _EnvironmentScopeIndex | None = None,
+    scope_id: int = 0,
 ) -> tuple[tuple[ast.expr, bool | None], ...]:
     if isinstance(node, ast.NamedExpr):
-        return _possible_runtime_results(node.value, required_truth)
+        return _possible_runtime_results(node.value, required_truth, index, scope_id)
     if isinstance(node, ast.IfExp):
-        test_truth = _static_truth_value(node.test)
+        test_truth = (
+            _resolved_static_truth_value(node.test, index, scope_id, node.test)
+            if index is not None
+            else _static_truth_value(node.test)
+        )
         candidates = (
             (node.body if test_truth else node.orelse,)
             if test_truth is not None
@@ -2184,27 +2359,57 @@ def _possible_runtime_results(
         return tuple(
             result
             for candidate in candidates
-            for result in _possible_runtime_results(candidate, required_truth)
+            for result in _possible_runtime_results(
+                candidate,
+                required_truth,
+                index,
+                (
+                    index.node_scopes.get(id(candidate), scope_id)
+                    if index is not None
+                    else scope_id
+                ),
+            )
         )
     if isinstance(node, ast.BoolOp):
         results: list[tuple[ast.expr, bool | None]] = []
         for position, value in enumerate(node.values):
             last = position == len(node.values) - 1
-            truth = _static_truth_value(value)
+            value_scope = (
+                index.node_scopes.get(id(value), scope_id)
+                if index is not None
+                else scope_id
+            )
+            truth = (
+                _resolved_static_truth_value(value, index, value_scope, value)
+                if index is not None
+                else _static_truth_value(value)
+            )
             if isinstance(node.op, ast.And):
                 result_truth = required_truth if last else False
                 if last or required_truth in (None, False):
-                    results.extend(_possible_runtime_results(value, result_truth))
+                    results.extend(
+                        _possible_runtime_results(
+                            value, result_truth, index, value_scope
+                        )
+                    )
                 if truth is False:
                     break
             else:
                 result_truth = required_truth if last else True
                 if last or required_truth in (None, True):
-                    results.extend(_possible_runtime_results(value, result_truth))
+                    results.extend(
+                        _possible_runtime_results(
+                            value, result_truth, index, value_scope
+                        )
+                    )
                 if truth is True:
                     break
         return tuple(results)
-    truth = _static_truth_value(node)
+    truth = (
+        _resolved_static_truth_value(node, index, scope_id, node)
+        if index is not None
+        else _static_truth_value(node)
+    )
     if required_truth is not None and truth is not None and truth != required_truth:
         return ()
     return ((node, required_truth),)
@@ -2218,7 +2423,9 @@ def _possible_iterable_member_expressions(
     required_truth: bool | None = None,
 ) -> tuple[ast.expr, ...]:
     members: list[ast.expr] = []
-    for result, result_truth in _possible_runtime_results(node, required_truth):
+    for result, result_truth in _possible_runtime_results(
+        node, required_truth, index, scope_id
+    ):
         result_scope = index.node_scopes.get(id(result), scope_id)
         if isinstance(result, (ast.List, ast.Tuple, ast.Set)):
             for element in result.elts:
@@ -2231,6 +2438,36 @@ def _possible_iterable_member_expressions(
                 else:
                     members.append(element)
             continue
+        if isinstance(
+            result, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+        ):
+            if _comprehension_cardinality_truth(result, index, result_scope) is False:
+                continue
+            # CRITICAL: star expansion executes comprehensions and materializes the yielded
+            # member. Treating the comprehension object as the selected callable hides an
+            # environment reader or bound generator method carried by its element expression.
+            members.append(
+                result.key if isinstance(result, ast.DictComp) else result.elt
+            )
+            continue
+        if isinstance(result, ast.Call) and _is_proven_builtin_callable(
+            result.func, "iter", index, result_scope
+        ):
+            positional, positional_exact, has_keywords = (
+                _effective_static_call_arguments(result, index, result_scope)
+            )
+            if positional_exact and has_keywords is False and len(positional) == 1:
+                argument = positional[0]
+                members.extend(
+                    _possible_iterable_member_expressions(
+                        argument,
+                        index,
+                        index.node_scopes.get(id(argument), result_scope),
+                        resolving,
+                        result_truth,
+                    )
+                )
+                continue
         if isinstance(result, ast.Dict):
             for key, value in zip(result.keys, result.values, strict=True):
                 if key is not None:
@@ -2277,7 +2514,9 @@ def _static_container_selections(
     is_static, selector = _static_subscript_selector(node.slice)
     if not is_static:
         return ()
-    static_value_truth = _static_truth_value(node.value)
+    static_value_truth = _resolved_static_truth_value(
+        node.value, index, scope_id, node.value
+    )
     if (
         value_truth is not None
         and static_value_truth is not None
@@ -2285,6 +2524,11 @@ def _static_container_selections(
     ):
         return ()
     if isinstance(node.value, (ast.List, ast.Tuple)):
+        # CRITICAL: a list/tuple that reaches a Boolean result under a required false value is
+        # empty, so no static index can retrieve a starred member from it. Dropping this outer
+        # truth constraint invents `os.getenv` or `g.__next__` calls discarded by `and`.
+        if value_truth is False:
+            return ()
         elements = _resolved_static_sequence_elements(
             node.value, index, scope_id, node.value, resolving
         )
@@ -2329,7 +2573,9 @@ def _static_container_selections(
         # container. Ignoring that result boundary lets `([client] if flag else [os.getenv])[0]`
         # bypass governance; recurse through every reachable result, not statically dead arms.
         result_selections: list[ast.expr] = []
-        for result, result_truth in _possible_runtime_results(node.value, value_truth):
+        for result, result_truth in _possible_runtime_results(
+            node.value, value_truth, index, scope_id
+        ):
             result_scope = index.node_scopes.get(id(result), scope_id)
             synthetic = ast.copy_location(
                 ast.Subscript(value=result, slice=node.slice, ctx=ast.Load()), node
@@ -3015,7 +3261,9 @@ def _bound_generator_consumer_sources(
         # exclude an inner truthy method/container that an outer short circuit necessarily drops.
         return tuple(
             source
-            for result, result_truth in _possible_runtime_results(node, required_truth)
+            for result, result_truth in _possible_runtime_results(
+                node, required_truth, index, scope_id
+            )
             for source in _bound_generator_consumer_sources(
                 result,
                 index,
