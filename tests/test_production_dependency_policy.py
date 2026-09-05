@@ -1055,6 +1055,81 @@ NINE = shadowed_reader("MOLTBOT_FLAG")
             9,
         )
 
+    def test_environment_alias_contract_models_bound_and_non_consuming_generator_calls(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/walrus_generator_bound_calls.py"
+        ] = """import builtins
+import os
+from builtins import iter as lazy_iter
+
+send_generator = ((send_reader := os.getenv) for _ in [1])
+send_step = send_generator.send
+send_step(None)
+ONE = send_reader("MOLTBOT_FLAG")
+
+next_generator = ((next_reader := os.getenv) for _ in [1])
+next_step = next_generator.__next__
+next_step()
+TWO = next_reader("MOLTBOT_FLAG")
+
+chained_generator = ((chained_reader := os.getenv) for _ in [1])
+first_step = chained_generator.__next__
+second_step = first_step
+second_step()
+THREE = chained_reader("MOLTBOT_FLAG")
+
+dead_generator = ((dead_reader := os.getenv) for _ in [1])
+dead_step = dead_generator.__next__
+DEAD_NOT_PROVEN = dead_reader("MOLTBOT_FLAG")
+
+rebound_generator = ((rebound_reader := os.getenv) for _ in [1])
+rebound_step = rebound_generator.__next__
+rebound_step = client
+rebound_step()
+REBOUND_NOT_PROVEN = rebound_reader("MOLTBOT_FLAG")
+
+qualified_lazy_generator = ((qualified_lazy_reader := os.getenv) for _ in [1])
+builtins.iter(qualified_lazy_generator)
+QUALIFIED_LAZY_NOT_PROVEN = qualified_lazy_reader("MOLTBOT_FLAG")
+
+imported_lazy_generator = ((imported_lazy_reader := os.getenv) for _ in [1])
+lazy_iter(imported_lazy_generator)
+IMPORTED_LAZY_NOT_PROVEN = imported_lazy_reader("MOLTBOT_FLAG")
+
+throw_generator = ((throw_reader := os.getenv) for _ in [1])
+throw_generator.throw(RuntimeError)
+THROW_NOT_PROVEN = throw_reader("MOLTBOT_FLAG")
+
+send_value_generator = ((send_value_reader := os.getenv) for _ in [1])
+send_value_generator.send(1)
+SEND_VALUE_NOT_PROVEN = send_value_reader("MOLTBOT_FLAG")
+
+builtins = client
+shadowed_qualified = ((shadowed_qualified_reader := os.getenv) for _ in [1])
+builtins.iter(shadowed_qualified)
+FOUR = shadowed_qualified_reader("MOLTBOT_FLAG")
+
+lazy_iter = consume
+shadowed_import = ((shadowed_import_reader := os.getenv) for _ in [1])
+lazy_iter(shadowed_import)
+FIVE = shadowed_import_reader("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/walrus_generator_bound_calls.py")
+
+        findings = self._evaluate(files, configure=configure)
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            5,
+        )
+
     def test_environment_alias_contract_tracks_keyword_and_explicit_mapping_reads(
         self,
     ):
@@ -1229,6 +1304,42 @@ ALSO_NOT_ENVIRONMENT = ({"k": os.getenv, **{"k": client}})["k"](
         self.assertEqual(
             [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
             5,
+        )
+
+    def test_environment_alias_contract_resolves_nested_and_sliced_static_containers(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/nested_static_selection.py"
+        ] = """import os
+
+matrix = [[os.getenv]]
+ONE = matrix[0][0]("MOLTBOT_FLAG")
+
+mappings = {"outer": {"k": os.getenv}}
+TWO = mappings["outer"]["k"]("MOLTBOT_FLAG")
+
+readers = [client, os.getenv]
+THREE = readers[1:][0]("MOLTBOT_FLAG")
+FOUR = readers[::-1][0]("MOLTBOT_FLAG")
+
+dynamic_index = choose_index()
+NOT_PROVEN = matrix[dynamic_index][0]("MOLTBOT_FLAG")
+INVALID_INDEX = readers[99:][0]("MOLTBOT_FLAG")
+NOT_ENVIRONMENT = [[client]][0][0]("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/nested_static_selection.py")
+
+        findings = self._evaluate(files, configure=configure)
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            4,
         )
 
     def test_environment_alias_contract_tracks_extended_unpack_and_literal_iteration(
@@ -1890,6 +2001,36 @@ except Exception:
     pass
 def nested():
     frozenset = fake
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+if False:
+    frozenset = fake
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+for frozenset in []:
+    pass
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+[frozenset for frozenset in []]
+""",
+            """frozenset = fake
+try:
+    del frozenset
+except Exception:
+    pass
+[(frozenset := fake) for _ in []]
 """,
         )
         for prefix in safe_prefixes:
