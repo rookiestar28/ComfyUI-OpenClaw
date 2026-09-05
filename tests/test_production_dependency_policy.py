@@ -1224,6 +1224,144 @@ FIVE = shadowed_import_reader("MOLTBOT_FLAG")
             16,
         )
 
+    def test_environment_alias_contract_exposes_members_of_unresolved_starred_iterables(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/unresolved_starred_members.py"
+        ] = """import os
+
+flag = choose()
+unknown = []
+
+ONE = [*(unknown or [os.getenv])][0]("MOLTBOT_FLAG")
+
+values = [os.getenv] if flag else []
+TWO = [*values][0]("MOLTBOT_FLAG")
+
+values2 = flag and [os.getenv]
+THREE = [*values2][0]("MOLTBOT_FLAG")
+
+FOUR = ([client] if flag else [os.getenv])[0]("MOLTBOT_FLAG")
+FIVE = (flag and [os.getenv])[0]("MOLTBOT_FLAG")
+
+client_values = [client] if flag else []
+NOT_ENVIRONMENT = [*client_values][0]("MOLTBOT_FLAG")
+
+dead_values = [os.getenv] if False else [client]
+DEAD_NOT_ENVIRONMENT = [*dead_values][0]("MOLTBOT_FLAG")
+DEAD_SELECTION = ([os.getenv] if False else [client])[0]("MOLTBOT_FLAG")
+NESTED_SHORT_CIRCUIT_NOT_ENVIRONMENT = (
+    (flag and [os.getenv]) and [client]
+)[0]("MOLTBOT_FLAG")
+nested_name_values = flag and [os.getenv]
+NESTED_NAME_SHORT_CIRCUIT_NOT_ENVIRONMENT = (
+    nested_name_values and [client]
+)[0]("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/unresolved_starred_members.py")
+
+        findings = self._evaluate(files, configure=configure)
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            5,
+        )
+
+    def test_environment_alias_contract_tracks_conditional_bound_generator_consumers(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/conditional_bound_consumers.py"
+        ] = """import os
+
+flag = choose()
+
+g1 = ((r1 := os.getenv) for _ in [1])
+(flag and g1.__next__)()
+ONE = r1("MOLTBOT_FLAG")
+
+g2 = ((r2 := os.getenv) for _ in [1])
+(g2.__next__ if flag else client)()
+TWO = r2("MOLTBOT_FLAG")
+
+g3 = ((r3 := os.getenv) for _ in [1])
+step = g3.__next__ if flag else client
+step()
+THREE = r3("MOLTBOT_FLAG")
+
+g4 = ((r4 := os.getenv) for _ in [1])
+steps = [*(flag and [g4.__next__])]
+steps[0]()
+FOUR = r4("MOLTBOT_FLAG")
+
+g5 = ((r5 := os.getenv) for _ in [1])
+([g5.__next__] if flag else [client])[0]()
+FIVE = r5("MOLTBOT_FLAG")
+
+g6 = ((r6 := os.getenv) for _ in [1])
+(flag and [g6.__next__])[0]()
+SIX = r6("MOLTBOT_FLAG")
+
+dead = ((dead_reader := os.getenv) for _ in [1])
+dead_step = dead.__next__ if False else client
+dead_step()
+DEAD_NOT_PROVEN = dead_reader("MOLTBOT_FLAG")
+
+dead_container = ((dead_container_reader := os.getenv) for _ in [1])
+([dead_container.__next__] if False else [client])[0]()
+DEAD_CONTAINER_NOT_PROVEN = dead_container_reader("MOLTBOT_FLAG")
+
+invalid = ((invalid_reader := os.getenv) for _ in [1])
+invalid_step = invalid.send if flag else client
+invalid_step(1)
+INVALID_NOT_PROVEN = invalid_reader("MOLTBOT_FLAG")
+
+lazy = ((lazy_reader := os.getenv) for _ in [1])
+lazy_step = iter if flag else iter
+lazy_step(lazy)
+LAZY_NOT_PROVEN = lazy_reader("MOLTBOT_FLAG")
+
+not_callable = ((not_callable_reader := os.getenv) for _ in [1])
+method_container = [not_callable.__next__]
+method_container()
+CONTAINER_NOT_PROVEN = not_callable_reader("MOLTBOT_FLAG")
+
+conditional_not_callable = ((conditional_container_reader := os.getenv) for _ in [1])
+conditional_method_container = (
+    [conditional_not_callable.__next__] if flag else [client]
+)
+conditional_method_container()
+CONDITIONAL_CONTAINER_NOT_PROVEN = conditional_container_reader("MOLTBOT_FLAG")
+
+nested_short_circuit = ((nested_reader := os.getenv) for _ in [1])
+((flag and [nested_short_circuit.__next__]) and [client])[0]()
+NESTED_SHORT_CIRCUIT_NOT_PROVEN = nested_reader("MOLTBOT_FLAG")
+
+nested_name = ((nested_name_reader := os.getenv) for _ in [1])
+nested_method_values = flag and [nested_name.__next__]
+(nested_method_values and [client])[0]()
+NESTED_NAME_SHORT_CIRCUIT_NOT_PROVEN = nested_name_reader("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/conditional_bound_consumers.py")
+
+        findings = self._evaluate(files, configure=configure)
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            6,
+        )
+
     def test_environment_alias_contract_tracks_keyword_and_explicit_mapping_reads(
         self,
     ):

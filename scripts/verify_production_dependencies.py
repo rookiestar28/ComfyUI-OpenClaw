@@ -2169,16 +2169,120 @@ def _is_proven_lazy_builtin_call(
     )
 
 
+def _possible_runtime_results(
+    node: ast.expr, required_truth: bool | None = None
+) -> tuple[tuple[ast.expr, bool | None], ...]:
+    if isinstance(node, ast.NamedExpr):
+        return _possible_runtime_results(node.value, required_truth)
+    if isinstance(node, ast.IfExp):
+        test_truth = _static_truth_value(node.test)
+        candidates = (
+            (node.body if test_truth else node.orelse,)
+            if test_truth is not None
+            else (node.body, node.orelse)
+        )
+        return tuple(
+            result
+            for candidate in candidates
+            for result in _possible_runtime_results(candidate, required_truth)
+        )
+    if isinstance(node, ast.BoolOp):
+        results: list[tuple[ast.expr, bool | None]] = []
+        for position, value in enumerate(node.values):
+            last = position == len(node.values) - 1
+            truth = _static_truth_value(value)
+            if isinstance(node.op, ast.And):
+                result_truth = required_truth if last else False
+                if last or required_truth in (None, False):
+                    results.extend(_possible_runtime_results(value, result_truth))
+                if truth is False:
+                    break
+            else:
+                result_truth = required_truth if last else True
+                if last or required_truth in (None, True):
+                    results.extend(_possible_runtime_results(value, result_truth))
+                if truth is True:
+                    break
+        return tuple(results)
+    truth = _static_truth_value(node)
+    if required_truth is not None and truth is not None and truth != required_truth:
+        return ()
+    return ((node, required_truth),)
+
+
+def _possible_iterable_member_expressions(
+    node: ast.expr,
+    index: _EnvironmentScopeIndex,
+    scope_id: int,
+    resolving: frozenset[tuple[int, str]] = frozenset(),
+    required_truth: bool | None = None,
+) -> tuple[ast.expr, ...]:
+    members: list[ast.expr] = []
+    for result, result_truth in _possible_runtime_results(node, required_truth):
+        result_scope = index.node_scopes.get(id(result), scope_id)
+        if isinstance(result, (ast.List, ast.Tuple, ast.Set)):
+            for element in result.elts:
+                if isinstance(element, ast.Starred):
+                    members.extend(
+                        _possible_iterable_member_expressions(
+                            element.value, index, result_scope, resolving
+                        )
+                    )
+                else:
+                    members.append(element)
+            continue
+        if isinstance(result, ast.Dict):
+            for key, value in zip(result.keys, result.values, strict=True):
+                if key is not None:
+                    members.append(key)
+                else:
+                    members.extend(
+                        _possible_iterable_member_expressions(
+                            value, index, result_scope, resolving
+                        )
+                    )
+            continue
+        if isinstance(result, ast.Name):
+            guard = (result_scope, result.id)
+            if guard in resolving:
+                continue
+            sources = _environment_binding_source_expressions_at(
+                index, result_scope, result.id, result
+            )
+            if sources:
+                for source in sources:
+                    members.extend(
+                        _possible_iterable_member_expressions(
+                            source,
+                            index,
+                            index.node_scopes.get(id(source), result_scope),
+                            resolving | {guard},
+                            result_truth,
+                        )
+                    )
+                continue
+        members.append(result)
+    return tuple(members)
+
+
 def _static_container_selections(
     node: ast.AST,
     index: _EnvironmentScopeIndex,
     scope_id: int,
     resolving: frozenset[tuple[int, str]] = frozenset(),
+    value_truth: bool | None = None,
 ) -> tuple[ast.expr, ...]:
     if not isinstance(node, ast.Subscript):
         return ()
     is_static, selector = _static_subscript_selector(node.slice)
     if not is_static:
+        return ()
+    static_value_truth = _static_truth_value(node.value)
+    if (
+        value_truth is not None
+        and static_value_truth is not None
+        and static_value_truth != value_truth
+    ):
         return ()
     if isinstance(node.value, (ast.List, ast.Tuple)):
         elements = _resolved_static_sequence_elements(
@@ -2186,11 +2290,19 @@ def _static_container_selections(
         )
         if elements is None:
             # CRITICAL: an unresolved starred expansion can shift any explicit element into the
-            # selected slot. Dropping the whole container lets `[*unknown, os.getenv][0]` bypass
-            # direct-read governance; retain every visible value as a conservative candidate.
+            # selected slot. Retaining only the container expression still lets
+            # `[*(flag and [os.getenv])][0]` hide its callable member; expose all reachable
+            # iterable members while preserving statically dead short-circuit arms.
             return tuple(
-                element.value if isinstance(element, ast.Starred) else element
+                candidate
                 for element in node.value.elts
+                for candidate in (
+                    _possible_iterable_member_expressions(
+                        element.value, index, scope_id, resolving
+                    )
+                    if isinstance(element, ast.Starred)
+                    else (element,)
+                )
             )
         if isinstance(selector, int):
             try:
@@ -2212,6 +2324,22 @@ def _static_container_selections(
             )
             or ()
         )
+    if isinstance(node.value, (ast.NamedExpr, ast.IfExp, ast.BoolOp)):
+        # CRITICAL: static selection applies after a conditional/boolean expression chooses its
+        # container. Ignoring that result boundary lets `([client] if flag else [os.getenv])[0]`
+        # bypass governance; recurse through every reachable result, not statically dead arms.
+        result_selections: list[ast.expr] = []
+        for result, result_truth in _possible_runtime_results(node.value, value_truth):
+            result_scope = index.node_scopes.get(id(result), scope_id)
+            synthetic = ast.copy_location(
+                ast.Subscript(value=result, slice=node.slice, ctx=ast.Load()), node
+            )
+            result_selections.extend(
+                _static_container_selections(
+                    synthetic, index, result_scope, resolving, result_truth
+                )
+            )
+        return tuple(result_selections)
     if isinstance(node.value, ast.Subscript):
         # CRITICAL: selection provenance is recursive. Resolving only the outermost subscript
         # lets nested dictionaries/lists and statically sliced aliases hide a direct env reader.
@@ -2241,7 +2369,11 @@ def _static_container_selections(
             )
             bound_selections.extend(
                 _static_container_selections(
-                    synthetic, index, source_scope, resolving | {guard}
+                    synthetic,
+                    index,
+                    source_scope,
+                    resolving | {guard},
+                    value_truth,
                 )
             )
         return tuple(bound_selections)
@@ -2847,15 +2979,20 @@ def _bound_generator_consumer_sources(
     index: _EnvironmentScopeIndex,
     scope_id: int,
     resolving: frozenset[tuple[int, str]] = frozenset(),
+    required_truth: bool | None = None,
 ) -> tuple[tuple[ast.expr, str], ...]:
     if isinstance(node, ast.Attribute) and node.attr in {
         "__next__",
         "send",
         "throw",
     }:
+        if required_truth is False:
+            return ()
         return ((node.value, node.attr),)
     if isinstance(node, ast.NamedExpr):
-        return _bound_generator_consumer_sources(node.value, index, scope_id, resolving)
+        return _bound_generator_consumer_sources(
+            node.value, index, scope_id, resolving, required_truth
+        )
     selections = _static_container_selections(node, index, scope_id)
     if selections:
         # CRITICAL: bound generator methods remain callable when selected from a static
@@ -2868,8 +3005,28 @@ def _bound_generator_consumer_sources(
                 index,
                 index.node_scopes.get(id(selected), scope_id),
                 resolving,
+                required_truth,
             )
         )
+    if isinstance(node, (ast.IfExp, ast.BoolOp)):
+        # CRITICAL: a bound generator method remains executable through conditional/boolean
+        # selection. Following only direct attributes or aliases misses a reachable `__next__`
+        # and leaves its generator-body walrus binding ungoverned; truth constraints must also
+        # exclude an inner truthy method/container that an outer short circuit necessarily drops.
+        return tuple(
+            source
+            for result, result_truth in _possible_runtime_results(node, required_truth)
+            for source in _bound_generator_consumer_sources(
+                result,
+                index,
+                index.node_scopes.get(id(result), scope_id),
+                resolving,
+                result_truth,
+            )
+        )
+    # IMPORTANT: only selection/star expansion may turn a container member into the callable.
+    # Unwrapping a bare list/tuple/set/dict here falsely treats `methods()` as `methods[0]()`.
+    # `_static_container_selections()` already exposes every reachable selected member above.
     if not isinstance(node, ast.Name):
         return ()
     guard = (scope_id, node.id)
@@ -2882,7 +3039,11 @@ def _bound_generator_consumer_sources(
         source_scope = index.node_scopes.get(id(source), scope_id)
         sources.extend(
             _bound_generator_consumer_sources(
-                source, index, source_scope, resolving | {guard}
+                source,
+                index,
+                source_scope,
+                resolving | {guard},
+                required_truth,
             )
         )
     return tuple(sources)
