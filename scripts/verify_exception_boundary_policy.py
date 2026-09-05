@@ -671,6 +671,28 @@ class _BroadCatchVisitor(ast.NodeVisitor):
             return 0
         return None
 
+    def _resolved_import_origin(
+        self, binding_index: int, name: str, node: ast.AST
+    ) -> str | None:
+        deferred_context = self._deferred_context_after(binding_index)
+        if deferred_context is not None:
+            return self._deferred_binding_origin(binding_index, name, *deferred_context)
+        if any(
+            frame.kind in {"function", "lambda"}
+            for frame in self._frames[binding_index + 1 :]
+        ):
+            origins = {
+                event.origin
+                for event in self._frames[binding_index].binding_events.get(name, ())
+            }
+            if len(origins) == 1:
+                return next(iter(origins))
+            return _AMBIGUOUS_ORIGIN if origins else None
+        # CRITICAL: symbol.is_assigned() is whole-scope metadata. Canonical import
+        # aliases need use-site provenance or a dead branch/zero loop can hide a
+        # real builtins.print or builtins.Exception policy boundary.
+        return self._active_binding_origin(binding_index, name, node)
+
     def _canonical_import_symbol(self, name: str, node: ast.AST) -> str | None:
         binding_index = self._binding_index(name, node)
         if binding_index is None:
@@ -680,10 +702,10 @@ class _BroadCatchVisitor(ast.NodeVisitor):
         if table is None:
             return None
         symbol = table.lookup(name)
-        if not symbol.is_imported() or symbol.is_assigned():
-            return None
         canonical = frame.imports.builtin_symbols.get(name)
-        if self._resolved_binding_origin(binding_index, name, node) not in {
+        if not symbol.is_imported() or canonical is None:
+            return None
+        if self._resolved_import_origin(binding_index, name, node) not in {
             f"symbol:{canonical}",
             _AMBIGUOUS_ORIGIN,
         }:
@@ -713,10 +735,9 @@ class _BroadCatchVisitor(ast.NodeVisitor):
         if table is None:
             return False
         symbol = table.lookup(name)
-        resolved_origin = self._resolved_binding_origin(binding_index, name, node)
+        resolved_origin = self._resolved_import_origin(binding_index, name, node)
         return bool(
             symbol.is_imported()
-            and not symbol.is_assigned()
             and name in frame.imports.builtin_modules
             and resolved_origin in {"module:builtins", _AMBIGUOUS_ORIGIN}
         )

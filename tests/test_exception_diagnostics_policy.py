@@ -541,6 +541,89 @@ class TestExceptionDiagnosticsPolicy(unittest.TestCase):
                 validate_exception_boundary_policy(repo, self._minimal_policy()), []
             )
 
+    def test_policy_resolves_conditional_builtin_import_alias_reassignment(self):
+        from scripts.verify_exception_boundary_policy import (
+            validate_exception_boundary_policy,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "api").mkdir()
+            (repo / "selected.py").write_text("value = 1\n", encoding="utf-8")
+            source = repo / "api" / "runtime.py"
+
+            source.write_text(
+                "import builtins\n"
+                "if False:\n    builtins = object()\n"
+                "builtins.print('module-dead-branch')\n"
+                "try:\n    raise ValueError\n"
+                "except builtins.Exception:\n    pass\n",
+                encoding="utf-8",
+            )
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertEqual(
+                sum("unowned runtime print" in item for item in failures), 1
+            )
+            self.assertEqual(sum("unowned pass-only" in item for item in failures), 1)
+
+            source.write_text(
+                "import builtins\n"
+                "for builtins in ():\n    pass\n"
+                "builtins.print('module-zero-iteration')\n"
+                "from builtins import print as emit\n"
+                "if False:\n    emit = lambda *args: args\n"
+                "emit('symbol-dead-branch')\n",
+                encoding="utf-8",
+            )
+            policy = self._minimal_policy()
+            policy["stdout_contract"]["allowed"].append(
+                self._entry("api/runtime.py", "<module>", count=2)
+            )
+            self.assertEqual(validate_exception_boundary_policy(repo, policy), [])
+
+            source.write_text(
+                "class Runtime:\n"
+                "    import builtins\n"
+                "    if False:\n        builtins = object()\n"
+                "    builtins.print('class-module-dead-branch')\n"
+                "    from builtins import Exception as Error\n"
+                "    if False:\n        Error = ValueError\n"
+                "    try:\n        raise ValueError\n"
+                "    except Error:\n        pass\n"
+                "def runtime():\n"
+                "    import builtins as builtin_module\n"
+                "    if False:\n        builtin_module = object()\n"
+                "    builtin_module.print('function-module-dead-branch')\n"
+                "    from builtins import print as emit\n"
+                "    if False:\n        emit = lambda *args: args\n"
+                "    emit('function-symbol-dead-branch')\n"
+                "    from builtins import Exception as Error\n"
+                "    if False:\n        Error = ValueError\n"
+                "    try:\n        raise ValueError\n"
+                "    except Error:\n        pass\n",
+                encoding="utf-8",
+            )
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertEqual(
+                sum("unowned runtime print" in item for item in failures), 2
+            )
+            self.assertEqual(sum("unowned pass-only" in item for item in failures), 2)
+
+            source.write_text(
+                "import builtins\n"
+                "from builtins import print as emit\n"
+                "class Holder:\n"
+                "    def print(self, *args):\n        return args\n"
+                "builtins = Holder()\n"
+                "emit = lambda *args: args\n"
+                "builtins.print('module-owner-reassigned')\n"
+                "emit('symbol-reassigned')\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                validate_exception_boundary_policy(repo, self._minimal_policy()), []
+            )
+
     def test_policy_resolves_lambda_and_comprehension_print_bindings(self):
         from scripts.verify_exception_boundary_policy import (
             validate_exception_boundary_policy,
