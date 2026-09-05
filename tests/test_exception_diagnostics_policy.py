@@ -578,6 +578,139 @@ class TestExceptionDiagnosticsPolicy(unittest.TestCase):
             failures = validate_exception_boundary_policy(repo, self._minimal_policy())
             self.assertTrue(any("unowned runtime print" in item for item in failures))
 
+    def test_policy_models_comprehension_scope_independent_of_python_version(self):
+        from scripts.verify_exception_boundary_policy import (
+            validate_exception_boundary_policy,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "api").mkdir()
+            (repo / "selected.py").write_text("value = 1\n", encoding="utf-8")
+            source = repo / "api" / "runtime.py"
+
+            source.write_text(
+                "def runtime():\n"
+                "    return [print for print in print('outer-iterable')]\n",
+                encoding="utf-8",
+            )
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertTrue(any("unowned runtime print" in item for item in failures))
+
+            source.write_text(
+                "def runtime(callbacks):\n"
+                "    a = [print(value) for print in callbacks for value in (1,)]\n"
+                "    b = {print(value) for print in callbacks for value in (1,)}\n"
+                "    c = {value: print(value) for print in callbacks for value in (1,)}\n"
+                "    d = (print(value) for print in callbacks for value in (1,))\n"
+                "    return a, b, c, d\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                validate_exception_boundary_policy(repo, self._minimal_policy()), []
+            )
+
+            source.write_text(
+                "def runtime(callback):\n"
+                "    [(print := callback) for _ in ()]\n"
+                "    print('walrus-shadow')\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                validate_exception_boundary_policy(repo, self._minimal_policy()), []
+            )
+
+            source.write_text(
+                "class Runtime:\n"
+                "    print = staticmethod(lambda *args: args)\n"
+                "    a = [print(value) for value in range(1)]\n"
+                "    b = {print(value) for value in range(1)}\n"
+                "    c = {value: print(value) for value in range(1)}\n"
+                "    d = (print(value) for value in range(1))\n",
+                encoding="utf-8",
+            )
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertTrue(any("unowned runtime print" in item for item in failures))
+
+    def test_policy_uses_module_binding_execution_order_for_builtins(self):
+        from scripts.verify_exception_boundary_policy import (
+            validate_exception_boundary_policy,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "api").mkdir()
+            (repo / "selected.py").write_text("value = 1\n", encoding="utf-8")
+            source = repo / "api" / "runtime.py"
+
+            source.write_text(
+                "print('builtin-before-shadow')\n"
+                "try:\n    raise ValueError\n"
+                "except Exception:\n    pass\n"
+                "print = lambda *args: args\n"
+                "class Exception:\n    pass\n",
+                encoding="utf-8",
+            )
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertTrue(any("unowned runtime print" in item for item in failures))
+            self.assertTrue(any("unowned pass-only" in item for item in failures))
+
+            source.write_text(
+                "print = lambda *args: args\n"
+                "class Exception:\n    pass\n"
+                "print('shadow-after-binding')\n"
+                "try:\n    raise ValueError\n"
+                "except Exception:\n    pass\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                validate_exception_boundary_policy(repo, self._minimal_policy()), []
+            )
+
+            source.write_text(
+                "print = lambda *args: args\n"
+                "del print\n"
+                "print('builtin-after-delete')\n"
+                "try:\n    raise ValueError\n"
+                "except ValueError as Exception:\n    pass\n"
+                "try:\n    raise ValueError\n"
+                "except Exception:\n    pass\n",
+                encoding="utf-8",
+            )
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertTrue(any("unowned runtime print" in item for item in failures))
+            self.assertTrue(any("unowned pass-only" in item for item in failures))
+
+    def test_policy_uses_class_binding_execution_order_for_builtins(self):
+        from scripts.verify_exception_boundary_policy import (
+            validate_exception_boundary_policy,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "api").mkdir()
+            (repo / "selected.py").write_text("value = 1\n", encoding="utf-8")
+            (repo / "api" / "runtime.py").write_text(
+                "class Runtime:\n"
+                "    print('builtin-before-shadow')\n"
+                "    try:\n        raise ValueError\n"
+                "    except Exception:\n        pass\n"
+                "    print = staticmethod(lambda *args: args)\n"
+                "    class Exception:\n        pass\n"
+                "    print('shadow-after-binding')\n"
+                "    try:\n        raise ValueError\n"
+                "    except Exception:\n        pass\n",
+                encoding="utf-8",
+            )
+            policy = self._minimal_policy()
+            policy["stdout_contract"]["allowed"].append(
+                self._entry("api/runtime.py", "Runtime")
+            )
+            policy["pass_only_contract"]["grandfathered"].append(
+                self._entry("api/runtime.py", "Runtime")
+            )
+            self.assertEqual(validate_exception_boundary_policy(repo, policy), [])
+
     def test_policy_rejects_qualified_exception_pass_only_boundary(self):
         from scripts.verify_exception_boundary_policy import (
             validate_exception_boundary_policy,

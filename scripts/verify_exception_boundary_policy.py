@@ -48,6 +48,21 @@ class _ScopeImports:
     builtin_symbols: dict[str, str]
 
 
+@dataclass(frozen=True)
+class _BindingEvent:
+    position: tuple[int, int]
+    origin: str | None
+
+
+@dataclass(frozen=True)
+class _ScopeFrame:
+    kind: str
+    table: symtable.SymbolTable | None
+    imports: _ScopeImports
+    binding_events: dict[str, tuple[_BindingEvent, ...]]
+    virtual_locals: frozenset[str] = frozenset()
+
+
 class _ImportOriginCollector(ast.NodeVisitor):
     def __init__(self) -> None:
         self.origins: dict[str, set[str]] = {}
@@ -104,6 +119,200 @@ def _scope_imports(body: Iterable[ast.stmt]) -> _ScopeImports:
     return _ScopeImports(frozenset(builtin_modules), builtin_symbols)
 
 
+def _end_position(node: ast.AST) -> tuple[int, int]:
+    return (
+        int(getattr(node, "end_lineno", getattr(node, "lineno", 0))),
+        int(getattr(node, "end_col_offset", getattr(node, "col_offset", 0))),
+    )
+
+
+def _bound_target_names(node: ast.AST | None) -> set[str]:
+    if node is None:
+        return set()
+    if isinstance(node, ast.Name):
+        return {node.id}
+    if isinstance(node, (ast.Tuple, ast.List)):
+        names: set[str] = set()
+        for item in node.elts:
+            names.update(_bound_target_names(item))
+        return names
+    if isinstance(node, ast.Starred):
+        return _bound_target_names(node.value)
+    return set()
+
+
+class _BindingEventCollector(ast.NodeVisitor):
+    """Collect binding activation points without crossing lexical-scope boundaries."""
+
+    def __init__(self) -> None:
+        self.events: dict[str, list[_BindingEvent]] = {}
+
+    def _record(
+        self,
+        names: Iterable[str],
+        activation_node: ast.AST,
+        origin: str | None = "other",
+    ) -> None:
+        event = _BindingEvent(_end_position(activation_node), origin)
+        for name in names:
+            self.events.setdefault(name, []).append(event)
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        self.visit(node.value)
+        for target in node.targets:
+            self._record(_bound_target_names(target), node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        self.visit(node.annotation)
+        if node.value is not None:
+            self.visit(node.value)
+        self._record(_bound_target_names(node.target), node)
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+        self.visit(node.value)
+        self._record(_bound_target_names(node.target), node)
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
+        self.visit(node.value)
+        self._record(_bound_target_names(node.target), node)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            local_name = alias.asname or alias.name.split(".", 1)[0]
+            origin = "module:builtins" if alias.name == "builtins" else "other"
+            self._record((local_name,), node, origin)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        for alias in node.names:
+            local_name = alias.asname or alias.name
+            if node.module == "builtins" and alias.name in {
+                "print",
+                "Exception",
+                "BaseException",
+            }:
+                origin = f"symbol:{alias.name}"
+            else:
+                origin = "other"
+            self._record((local_name,), node, origin)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._record((node.name,), node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._record((node.name,), node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._record((node.name,), node)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        return
+
+    def _visit_for(self, node: ast.For | ast.AsyncFor) -> None:
+        self.visit(node.iter)
+        self._record(_bound_target_names(node.target), node.iter)
+        for statement in (*node.body, *node.orelse):
+            self.visit(statement)
+
+    def visit_For(self, node: ast.For) -> None:
+        self._visit_for(node)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        self._visit_for(node)
+
+    def _visit_with(self, node: ast.With | ast.AsyncWith) -> None:
+        for item in node.items:
+            self.visit(item.context_expr)
+            self._record(_bound_target_names(item.optional_vars), item.context_expr)
+        for statement in node.body:
+            self.visit(statement)
+
+    def visit_With(self, node: ast.With) -> None:
+        self._visit_with(node)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        self._visit_with(node)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if node.type is not None:
+            self.visit(node.type)
+        if node.name:
+            self._record((node.name,), node.type or node)
+        for statement in node.body:
+            self.visit(statement)
+        if node.name:
+            # CPython clears the exception target when the handler exits.
+            self._record((node.name,), node, None)
+
+    def visit_Delete(self, node: ast.Delete) -> None:
+        for target in node.targets:
+            self._record(_bound_target_names(target), node, None)
+
+    def _visit_single_value_comp(
+        self, node: ast.ListComp | ast.SetComp | ast.GeneratorExp
+    ) -> None:
+        self.visit(node.elt)
+        for generator in node.generators:
+            self.visit(generator.iter)
+            for condition in generator.ifs:
+                self.visit(condition)
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._visit_single_value_comp(node)
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._visit_single_value_comp(node)
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self.visit(node.key)
+        self.visit(node.value)
+        for generator in node.generators:
+            self.visit(generator.iter)
+            for condition in generator.ifs:
+                self.visit(condition)
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        self._visit_single_value_comp(node)
+
+
+def _scope_binding_events(
+    body: Iterable[ast.stmt],
+) -> dict[str, tuple[_BindingEvent, ...]]:
+    collector = _BindingEventCollector()
+    for statement in body:
+        collector.visit(statement)
+    return {
+        name: tuple(sorted(events, key=lambda event: event.position))
+        for name, events in collector.events.items()
+    }
+
+
+def _argument_names(arguments: ast.arguments) -> set[str]:
+    return {
+        argument.arg
+        for argument in (
+            *arguments.posonlyargs,
+            *arguments.args,
+            *arguments.kwonlyargs,
+            *(() if arguments.vararg is None else (arguments.vararg,)),
+            *(() if arguments.kwarg is None else (arguments.kwarg,)),
+        )
+    }
+
+
+def _function_lexical_locals(
+    table: symtable.SymbolTable,
+    arguments: ast.arguments,
+    binding_events: dict[str, tuple[_BindingEvent, ...]],
+) -> frozenset[str]:
+    candidates = _argument_names(arguments) | set(binding_events)
+    return frozenset(
+        name
+        for name in candidates
+        if name not in table.get_identifiers()
+        or (not table.lookup(name).is_global() and not table.lookup(name).is_nonlocal())
+    )
+
+
 class _BroadCatchVisitor(ast.NodeVisitor):
     def __init__(self, path: Path, source: str, tree: ast.Module):
         self.path = path.as_posix()
@@ -112,17 +321,31 @@ class _BroadCatchVisitor(ast.NodeVisitor):
         self.pass_only_catches: list[BroadCatch] = []
         self.print_calls: list[ScopedCall] = []
         module_table = symtable.symtable(source, str(path), "exec")
-        self._table_stack = [module_table]
-        self._imports_stack = [_scope_imports(tree.body)]
+        self._frames = [
+            _ScopeFrame(
+                kind="module",
+                table=module_table,
+                imports=_scope_imports(tree.body),
+                binding_events=_scope_binding_events(tree.body),
+            )
+        ]
         self._child_tables: dict[symtable.SymbolTable, list[symtable.SymbolTable]] = {}
 
-    def _take_child_table(self, name: str, line: int) -> symtable.SymbolTable:
-        parent = self._table_stack[-1]
+    def _take_child_table(
+        self, names: str | tuple[str, ...], line: int, *, required: bool = True
+    ) -> symtable.SymbolTable | None:
+        expected_names = (names,) if isinstance(names, str) else names
+        parent = next(
+            frame.table for frame in reversed(self._frames) if frame.table is not None
+        )
         children = self._child_tables.setdefault(parent, list(parent.get_children()))
         for index, child in enumerate(children):
-            if child.get_name() == name and child.get_lineno() == line:
+            if child.get_name() in expected_names and child.get_lineno() == line:
                 return children.pop(index)
-        raise RuntimeError(f"missing symbol table for {name} at line {line}")
+        if required:
+            joined = "/".join(expected_names)
+            raise RuntimeError(f"missing symbol table for {joined} at line {line}")
+        return None
 
     @staticmethod
     def _has_binding(table: symtable.SymbolTable, name: str) -> bool:
@@ -139,48 +362,134 @@ class _BroadCatchVisitor(ast.NodeVisitor):
             )
         )
 
-    def _binding_index(self, name: str) -> int | None:
-        current = self._table_stack[-1]
-        if name not in current.get_identifiers():
-            return None
+    @staticmethod
+    def _node_position(node: ast.AST) -> tuple[int, int]:
+        return (
+            int(getattr(node, "lineno", 0)),
+            int(getattr(node, "col_offset", 0)),
+        )
+
+    def _uses_direct_execution_order(self, frame_index: int) -> bool:
+        return all(
+            frame.kind in {"class", "comprehension"}
+            for frame in self._frames[frame_index + 1 :]
+        )
+
+    def _active_binding_origin(
+        self, frame_index: int, name: str, node: ast.AST
+    ) -> str | None:
+        frame = self._frames[frame_index]
+        active: str | None = None
+        for event in frame.binding_events.get(name, ()):
+            if event.position > self._node_position(node):
+                break
+            active = event.origin
+        return active
+
+    def _resolved_binding_origin(
+        self, frame_index: int, name: str, node: ast.AST
+    ) -> str | None:
+        if self._uses_direct_execution_order(frame_index):
+            return self._active_binding_origin(frame_index, name, node)
+        origins = {
+            event.origin
+            for event in self._frames[frame_index].binding_events.get(name, ())
+        }
+        if len(origins) == 1:
+            return next(iter(origins))
+        return None
+
+    def _frame_has_binding(self, frame_index: int, name: str, node: ast.AST) -> bool:
+        frame = self._frames[frame_index]
+        if name in frame.virtual_locals:
+            return True
+        if frame.kind in {"function", "lambda", "comprehension"}:
+            return False
+        if frame.table is None:
+            return False
+        if frame.kind in {"module", "class"} and self._uses_direct_execution_order(
+            frame_index
+        ):
+            return self._active_binding_origin(frame_index, name, node) is not None
+        return self._has_binding(frame.table, name)
+
+    def _find_enclosing_binding(
+        self, name: str, node: ast.AST, start_index: int
+    ) -> int | None:
+        for index in range(start_index, -1, -1):
+            frame = self._frames[index]
+            # Python closure/free-name lookup intentionally skips class namespaces.
+            if frame.kind == "class":
+                continue
+            if self._frame_has_binding(index, name, node):
+                return index
+        return None
+
+    def _binding_index(self, name: str, node: ast.AST) -> int | None:
+        current_index = len(self._frames) - 1
+        current_frame = self._frames[current_index]
+
+        if current_frame.kind == "comprehension" and current_frame.table is None:
+            if name in current_frame.virtual_locals:
+                return current_index
+            return self._find_enclosing_binding(name, node, current_index - 1)
+
+        current = current_frame.table
+        if current is None or name not in current.get_identifiers():
+            return self._find_enclosing_binding(name, node, current_index - 1)
         symbol = current.lookup(name)
-        if self._has_binding(current, name):
-            return len(self._table_stack) - 1
+        if self._frame_has_binding(current_index, name, node):
+            return current_index
+        if current_frame.kind == "class":
+            return self._find_enclosing_binding(name, node, current_index - 1)
         if symbol.is_free() or symbol.is_nonlocal():
-            for index in range(len(self._table_stack) - 2, -1, -1):
-                if self._has_binding(self._table_stack[index], name):
-                    return index
-            return None
-        if symbol.is_global() and self._has_binding(self._table_stack[0], name):
+            return self._find_enclosing_binding(name, node, current_index - 1)
+        if symbol.is_global() and self._frame_has_binding(0, name, node):
             return 0
         return None
 
-    def _canonical_import_symbol(self, name: str) -> str | None:
-        binding_index = self._binding_index(name)
+    def _canonical_import_symbol(self, name: str, node: ast.AST) -> str | None:
+        binding_index = self._binding_index(name, node)
         if binding_index is None:
             return None
-        table = self._table_stack[binding_index]
+        frame = self._frames[binding_index]
+        table = frame.table
+        if table is None:
+            return None
         symbol = table.lookup(name)
         if not symbol.is_imported() or symbol.is_assigned():
             return None
-        return self._imports_stack[binding_index].builtin_symbols.get(name)
+        canonical = frame.imports.builtin_symbols.get(name)
+        if (
+            self._resolved_binding_origin(binding_index, name, node)
+            != f"symbol:{canonical}"
+        ):
+            return None
+        return canonical
 
-    def _resolves_to_builtin_symbol(self, name: str, expected: str) -> bool:
-        binding_index = self._binding_index(name)
+    def _resolves_to_builtin_symbol(
+        self, name: str, expected: str, node: ast.AST
+    ) -> bool:
+        binding_index = self._binding_index(name, node)
         if binding_index is None:
             return name == expected
-        return self._canonical_import_symbol(name) == expected
+        return self._canonical_import_symbol(name, node) == expected
 
-    def _resolves_to_builtin_module(self, name: str) -> bool:
-        binding_index = self._binding_index(name)
+    def _resolves_to_builtin_module(self, name: str, node: ast.AST) -> bool:
+        binding_index = self._binding_index(name, node)
         if binding_index is None:
             return False
-        table = self._table_stack[binding_index]
+        frame = self._frames[binding_index]
+        table = frame.table
+        if table is None:
+            return False
         symbol = table.lookup(name)
         return bool(
             symbol.is_imported()
             and not symbol.is_assigned()
-            and name in self._imports_stack[binding_index].builtin_modules
+            and name in frame.imports.builtin_modules
+            and self._resolved_binding_origin(binding_index, name, node)
+            == "module:builtins"
         )
 
     def _catch_type_name(self, node: ast.expr | None) -> str:
@@ -188,7 +497,7 @@ class _BroadCatchVisitor(ast.NodeVisitor):
             return "bare"
         if isinstance(node, ast.Name):
             for expected in ("BaseException", "Exception"):
-                if self._resolves_to_builtin_symbol(node.id, expected):
+                if self._resolves_to_builtin_symbol(node.id, expected, node):
                     return expected
             if node.id in {"BaseException", "Exception"}:
                 return ""
@@ -197,7 +506,7 @@ class _BroadCatchVisitor(ast.NodeVisitor):
             isinstance(node, ast.Attribute)
             and isinstance(node.value, ast.Name)
             and node.attr in {"Exception", "BaseException"}
-            and self._resolves_to_builtin_module(node.value.id)
+            and self._resolves_to_builtin_module(node.value.id, node)
         ):
             return node.attr
         if isinstance(node, ast.Tuple):
@@ -239,13 +548,26 @@ class _BroadCatchVisitor(ast.NodeVisitor):
     def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         self._visit_outer_function_expressions(node)
         child = self._take_child_table(node.name, node.lineno)
+        if child is None:
+            raise RuntimeError(
+                f"missing symbol table for {node.name} at line {node.lineno}"
+            )
+        binding_events = _scope_binding_events(node.body)
         self.scope_stack.append(node.name)
-        self._table_stack.append(child)
-        self._imports_stack.append(_scope_imports(node.body))
+        self._frames.append(
+            _ScopeFrame(
+                kind="function",
+                table=child,
+                imports=_scope_imports(node.body),
+                binding_events=binding_events,
+                virtual_locals=_function_lexical_locals(
+                    child, node.args, binding_events
+                ),
+            )
+        )
         for statement in node.body:
             self.visit(statement)
-        self._imports_stack.pop()
-        self._table_stack.pop()
+        self._frames.pop()
         self.scope_stack.pop()
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
@@ -258,13 +580,22 @@ class _BroadCatchVisitor(ast.NodeVisitor):
         for type_parameter in getattr(node, "type_params", ()):
             self.visit(type_parameter)
         child = self._take_child_table(node.name, node.lineno)
+        if child is None:
+            raise RuntimeError(
+                f"missing symbol table for {node.name} at line {node.lineno}"
+            )
         self.scope_stack.append(node.name)
-        self._table_stack.append(child)
-        self._imports_stack.append(_scope_imports(node.body))
+        self._frames.append(
+            _ScopeFrame(
+                kind="class",
+                table=child,
+                imports=_scope_imports(node.body),
+                binding_events=_scope_binding_events(node.body),
+            )
+        )
         for statement in node.body:
             self.visit(statement)
-        self._imports_stack.pop()
-        self._table_stack.pop()
+        self._frames.pop()
         self.scope_stack.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -276,11 +607,82 @@ class _BroadCatchVisitor(ast.NodeVisitor):
     def visit_Lambda(self, node: ast.Lambda) -> None:
         self._visit_outer_function_expressions(node)
         child = self._take_child_table("lambda", node.lineno)
-        self._table_stack.append(child)
-        self._imports_stack.append(_ScopeImports(frozenset(), {}))
+        if child is None:
+            raise RuntimeError(f"missing symbol table for lambda at line {node.lineno}")
+        collector = _BindingEventCollector()
+        collector.visit(node.body)
+        binding_events = {
+            name: tuple(sorted(events, key=lambda event: event.position))
+            for name, events in collector.events.items()
+        }
+        self._frames.append(
+            _ScopeFrame(
+                kind="lambda",
+                table=child,
+                imports=_ScopeImports(frozenset(), {}),
+                binding_events=binding_events,
+                virtual_locals=_function_lexical_locals(
+                    child, node.args, binding_events
+                ),
+            )
+        )
         self.visit(node.body)
-        self._imports_stack.pop()
-        self._table_stack.pop()
+        self._frames.pop()
+
+    def _visit_comprehension_scope(
+        self,
+        node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp,
+        values: tuple[ast.expr, ...],
+        table_names: tuple[str, ...],
+    ) -> None:
+        generators = node.generators
+        if not generators:
+            for value in values:
+                self.visit(value)
+            return
+
+        # CRITICAL: the first iterable executes in the enclosing scope, while
+        # targets/body use an isolated scope that skips class locals. Keeping an
+        # explicit frame makes this invariant independent of PEP 709 symtable layout.
+        self.visit(generators[0].iter)
+        target_names: set[str] = set()
+        for generator in generators:
+            target_names.update(_bound_target_names(generator.target))
+        child = self._take_child_table(table_names, node.lineno, required=False)
+        self._frames.append(
+            _ScopeFrame(
+                kind="comprehension",
+                table=child,
+                imports=_ScopeImports(frozenset(), {}),
+                binding_events={},
+                virtual_locals=frozenset(target_names),
+            )
+        )
+        self.visit(generators[0].target)
+        for condition in generators[0].ifs:
+            self.visit(condition)
+        for generator in generators[1:]:
+            self.visit(generator.iter)
+            self.visit(generator.target)
+            for condition in generator.ifs:
+                self.visit(condition)
+        for value in values:
+            self.visit(value)
+        self._frames.pop()
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._visit_comprehension_scope(node, (node.elt,), ("listcomp", "<listcomp>"))
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._visit_comprehension_scope(node, (node.elt,), ("setcomp", "<setcomp>"))
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self._visit_comprehension_scope(
+            node, (node.key, node.value), ("dictcomp", "<dictcomp>")
+        )
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        self._visit_comprehension_scope(node, (node.elt,), ("genexpr", "<genexpr>"))
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
         catch_type = self._catch_type_name(node.type)
@@ -305,12 +707,12 @@ class _BroadCatchVisitor(ast.NodeVisitor):
         # builtins.print bypass the ratchet and mistakes shadowed helpers for stdout.
         is_runtime_print = (
             isinstance(node.func, ast.Name)
-            and self._resolves_to_builtin_symbol(node.func.id, "print")
+            and self._resolves_to_builtin_symbol(node.func.id, "print", node.func)
         ) or (
             isinstance(node.func, ast.Attribute)
             and isinstance(node.func.value, ast.Name)
             and node.func.attr == "print"
-            and self._resolves_to_builtin_module(node.func.value.id)
+            and self._resolves_to_builtin_module(node.func.value.id, node.func)
         )
         if is_runtime_print:
             self.print_calls.append(
