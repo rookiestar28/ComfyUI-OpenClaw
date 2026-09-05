@@ -806,6 +806,88 @@ class TestExceptionDiagnosticsPolicy(unittest.TestCase):
                 validate_exception_boundary_policy(repo, self._minimal_policy()), []
             )
 
+    def test_policy_models_try_body_prefix_effects_across_regions(self):
+        from scripts.verify_exception_boundary_policy import (
+            validate_exception_boundary_policy,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "api").mkdir()
+            (repo / "selected.py").write_text("value = 1\n", encoding="utf-8")
+            source = repo / "api" / "runtime.py"
+
+            source.write_text(
+                "print = lambda *args: args\n"
+                "class Exception:\n    pass\n"
+                "try:\n"
+                "    del print\n"
+                "    del Exception\n"
+                "except KeyError:\n    pass\n"
+                "else:\n"
+                "    print('builtin-else')\n"
+                "    try:\n        raise ValueError\n"
+                "    except Exception:\n        pass\n",
+                encoding="utf-8",
+            )
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertEqual(
+                sum("unowned runtime print" in item for item in failures), 1
+            )
+            self.assertEqual(sum("unowned pass-only" in item for item in failures), 1)
+
+            source.write_text(
+                "print = lambda *args: args\n"
+                "try:\n"
+                "    del print\n"
+                "    raise ValueError\n"
+                "except ValueError:\n"
+                "    print('builtin-handler')\n",
+                encoding="utf-8",
+            )
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertTrue(any("unowned runtime print" in item for item in failures))
+
+            source.write_text(
+                "print = lambda *args: args\n"
+                "enabled = unknown_flag\n"
+                "try:\n"
+                "    if enabled:\n"
+                "        del print\n"
+                "except KeyError:\n    pass\n"
+                "else:\n"
+                "    print('ambiguous-else')\n",
+                encoding="utf-8",
+            )
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertTrue(any("unowned runtime print" in item for item in failures))
+
+            source.write_text(
+                "print = lambda *args: args\n"
+                "try:\n    value = 1\n"
+                "except ValueError:\n"
+                "    del print\n"
+                "else:\n"
+                "    print('handler-is-exclusive')\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                validate_exception_boundary_policy(repo, self._minimal_policy()), []
+            )
+
+            source.write_text(
+                "print = lambda *args: args\n"
+                "try:\n    raise ValueError\n"
+                "except TypeError:\n"
+                "    del print\n"
+                "except ValueError:\n"
+                "    print('sibling-handler-is-exclusive')\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                validate_exception_boundary_policy(repo, self._minimal_policy()), []
+            )
+
     def test_policy_recognizes_structural_pattern_capture_shadows(self):
         from scripts.verify_exception_boundary_policy import (
             validate_exception_boundary_policy,

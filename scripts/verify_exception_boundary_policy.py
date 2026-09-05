@@ -303,10 +303,10 @@ class _BindingEventCollector(ast.NodeVisitor):
         self._visit_region(node, "else", node.orelse)
 
     def visit_Try(self, node: ast.Try) -> None:
-        self._visit_region(node, "body", node.body)
+        self._visit_region(node, "try-body", node.body)
         for index, handler in enumerate(node.handlers):
-            self._visit_region(node, f"handler:{index}", (handler,))
-        self._visit_region(node, "else", node.orelse)
+            self._visit_region(node, f"try-handler:{index}", (handler,))
+        self._visit_region(node, "try-else", node.orelse)
         for statement in node.finalbody:
             self.visit(statement)
 
@@ -487,17 +487,46 @@ class _BroadCatchVisitor(ast.NodeVisitor):
         )
 
     @staticmethod
-    def _control_paths_compatible(left: _ControlPath, right: _ControlPath) -> bool:
+    def _control_region_labels_compatible(left: str, right: str) -> bool:
+        if left == right:
+            return True
+        if left == "try-body":
+            return right == "try-else" or right.startswith("try-handler:")
+        if right == "try-body":
+            return left == "try-else" or left.startswith("try-handler:")
+        return False
+
+    @classmethod
+    def _control_paths_compatible(cls, left: _ControlPath, right: _ControlPath) -> bool:
         left_regions = dict(left)
         right_regions = dict(right)
         return all(
-            right_regions.get(owner, label) == label
+            owner not in right_regions
+            or cls._control_region_labels_compatible(label, right_regions[owner])
             for owner, label in left_regions.items()
         )
 
-    @staticmethod
-    def _control_path_dominates(event: _ControlPath, use: _ControlPath) -> bool:
-        return len(event) <= len(use) and use[: len(event)] == event
+    @classmethod
+    def _control_path_dominates(cls, event: _ControlPath, use: _ControlPath) -> bool:
+        if len(event) > len(use):
+            return False
+        for index, (event_owner, event_label) in enumerate(event):
+            use_owner, use_label = use[index]
+            if event_owner != use_owner:
+                return False
+            if event_label == use_label:
+                continue
+            # CRITICAL: entering a try-else proves its top-level try body completed,
+            # but a body prefix may only have run before a handler. Keep body->else
+            # dominant and body->handler ambiguous or builtin uses can be hidden.
+            if (
+                index == len(event) - 1
+                and event_label == "try-body"
+                and use_label == "try-else"
+            ):
+                continue
+            return False
+        return True
 
     def _binding_origin_at(
         self,
@@ -768,10 +797,10 @@ class _BroadCatchVisitor(ast.NodeVisitor):
         self._visit_with(node)
 
     def visit_Try(self, node: ast.Try) -> None:
-        self._visit_control_region(node, "body", node.body)
+        self._visit_control_region(node, "try-body", node.body)
         for index, handler in enumerate(node.handlers):
-            self._visit_control_region(node, f"handler:{index}", (handler,))
-        self._visit_control_region(node, "else", node.orelse)
+            self._visit_control_region(node, f"try-handler:{index}", (handler,))
+        self._visit_control_region(node, "try-else", node.orelse)
         for statement in node.finalbody:
             self.visit(statement)
 
