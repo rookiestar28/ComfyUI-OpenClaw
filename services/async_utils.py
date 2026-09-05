@@ -31,16 +31,26 @@ _WAIT_BUCKET_MS = 250
 
 
 def _parse_worker_count(
-    env_keys: Iterable[str], default: int, *, minimum: int, maximum: int
+    env_key_families: Iterable[tuple[str, tuple[str, ...]]],
+    default: int,
+    *,
+    minimum: int,
+    maximum: int,
 ) -> int:
-    ordered_keys = tuple(env_keys)
-    if not ordered_keys:
+    resolution = None
+    for canonical, aliases in env_key_families:
+        # IMPORTANT: resolve each canonical/legacy pair separately. Flattening a fallback
+        # canonical into aliases mislabels it as legacy and emits a false deprecation warning.
+        resolution = resolve_env(canonical, aliases=aliases)
+        if resolution.selected_key is not None:
+            break
+    if resolution is None:
         return default
-    resolution = resolve_env(ordered_keys[0], aliases=ordered_keys[1:])
     raw = resolution.value
     if raw is None or str(raw).strip() == "":
         return default
-    selected_key = resolution.selected_key or ordered_keys[0]
+    selected_key = resolution.selected_key
+    assert selected_key is not None
     try:
         parsed = int(str(raw).strip())
     except Exception:
@@ -66,21 +76,16 @@ def _parse_worker_count(
 
 _LLM_WORKERS = _parse_worker_count(
     (
-        "OPENCLAW_LLM_EXECUTOR_WORKERS",
-        "MOLTBOT_LLM_EXECUTOR_WORKERS",
+        ("OPENCLAW_LLM_EXECUTOR_WORKERS", ("MOLTBOT_LLM_EXECUTOR_WORKERS",)),
         # Backward-compatible global fallback for older local env setups.
-        "OPENCLAW_THREAD_POOL_WORKERS",
-        "MOLTBOT_THREAD_POOL_WORKERS",
+        ("OPENCLAW_THREAD_POOL_WORKERS", ("MOLTBOT_THREAD_POOL_WORKERS",)),
     ),
     _DEFAULT_LLM_WORKERS,
     minimum=_MIN_WORKERS,
     maximum=_MAX_LLM_WORKERS,
 )
 _IO_WORKERS = _parse_worker_count(
-    (
-        "OPENCLAW_IO_EXECUTOR_WORKERS",
-        "MOLTBOT_IO_EXECUTOR_WORKERS",
-    ),
+    (("OPENCLAW_IO_EXECUTOR_WORKERS", ("MOLTBOT_IO_EXECUTOR_WORKERS",)),),
     _DEFAULT_IO_WORKERS,
     minimum=_MIN_WORKERS,
     maximum=_MAX_IO_WORKERS,

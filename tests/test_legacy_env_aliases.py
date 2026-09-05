@@ -341,10 +341,8 @@ class TestLegacyEnvironmentAliasResolver(unittest.TestCase):
             )
 
         worker_keys = (
-            "OPENCLAW_LLM_EXECUTOR_WORKERS",
-            "MOLTBOT_LLM_EXECUTOR_WORKERS",
-            "OPENCLAW_THREAD_POOL_WORKERS",
-            "MOLTBOT_THREAD_POOL_WORKERS",
+            ("OPENCLAW_LLM_EXECUTOR_WORKERS", ("MOLTBOT_LLM_EXECUTOR_WORKERS",)),
+            ("OPENCLAW_THREAD_POOL_WORKERS", ("MOLTBOT_THREAD_POOL_WORKERS",)),
         )
         with patch.dict(
             os.environ,
@@ -359,6 +357,36 @@ class TestLegacyEnvironmentAliasResolver(unittest.TestCase):
                 _parse_worker_count(worker_keys, 6, minimum=1, maximum=12),
                 7,
             )
+
+        with patch.dict(
+            os.environ,
+            {"OPENCLAW_THREAD_POOL_WORKERS": "9"},
+            clear=True,
+        ):
+            with self.assertNoLogs(
+                "ComfyUI-OpenClaw.services.env_aliases", level="WARNING"
+            ):
+                self.assertEqual(
+                    _parse_worker_count(worker_keys, 6, minimum=1, maximum=12),
+                    9,
+                )
+
+        with patch.dict(
+            os.environ,
+            {"MOLTBOT_THREAD_POOL_WORKERS": "10"},
+            clear=True,
+        ):
+            with self.assertLogs(
+                "ComfyUI-OpenClaw.services.env_aliases", level="WARNING"
+            ) as captured:
+                self.assertEqual(
+                    _parse_worker_count(worker_keys, 6, minimum=1, maximum=12),
+                    10,
+                )
+        warning = "\n".join(captured.output)
+        self.assertIn("legacy=MOLTBOT_THREAD_POOL_WORKERS", warning)
+        self.assertIn("canonical=OPENCLAW_THREAD_POOL_WORKERS", warning)
+        self.assertNotIn("canonical=OPENCLAW_LLM_EXECUTOR_WORKERS", warning)
 
     def test_security_telemetry_process_legacy_lookup_uses_central_warning_contract(
         self,

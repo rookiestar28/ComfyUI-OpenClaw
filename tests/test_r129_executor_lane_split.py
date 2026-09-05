@@ -69,7 +69,7 @@ class TestR129ExecutorLaneSplit(unittest.IsolatedAsyncioTestCase):
 
         with patch.dict("os.environ", {"OPENCLAW_LLM_EXECUTOR_WORKERS": "abc"}):
             parsed = async_utils._parse_worker_count(
-                ("OPENCLAW_LLM_EXECUTOR_WORKERS",),
+                (("OPENCLAW_LLM_EXECUTOR_WORKERS", ()),),
                 6,
                 minimum=1,
                 maximum=12,
@@ -78,7 +78,7 @@ class TestR129ExecutorLaneSplit(unittest.IsolatedAsyncioTestCase):
 
         with patch.dict("os.environ", {"OPENCLAW_LLM_EXECUTOR_WORKERS": "99"}):
             parsed = async_utils._parse_worker_count(
-                ("OPENCLAW_LLM_EXECUTOR_WORKERS",),
+                (("OPENCLAW_LLM_EXECUTOR_WORKERS", ()),),
                 6,
                 minimum=1,
                 maximum=12,
