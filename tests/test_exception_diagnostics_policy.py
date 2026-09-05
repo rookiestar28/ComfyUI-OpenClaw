@@ -624,6 +624,139 @@ class TestExceptionDiagnosticsPolicy(unittest.TestCase):
                 validate_exception_boundary_policy(repo, self._minimal_policy()), []
             )
 
+    def test_policy_resolves_competing_import_origins_at_use_site(self):
+        from scripts.verify_exception_boundary_policy import (
+            iter_broad_catches,
+            validate_exception_boundary_policy,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "api").mkdir()
+            (repo / "selected.py").write_text("value = 1\n", encoding="utf-8")
+            source = repo / "api" / "runtime.py"
+
+            for owner_imports in (
+                "import json as owner\nimport builtins as owner\n",
+                "import builtins as owner\n",
+            ):
+                trailing_import = (
+                    ""
+                    if owner_imports.startswith("import json")
+                    else "import json as owner\n"
+                )
+                source.write_text(
+                    owner_imports
+                    + "owner.print('builtin')\n"
+                    + "try:\n    raise ValueError\n"
+                    + "except owner.Exception:\n    pass\n"
+                    + trailing_import,
+                    encoding="utf-8",
+                )
+                failures = validate_exception_boundary_policy(
+                    repo, self._minimal_policy()
+                )
+                self.assertEqual(
+                    sum("unowned runtime print" in item for item in failures), 1
+                )
+                self.assertEqual(
+                    sum("unowned pass-only" in item for item in failures), 1
+                )
+
+            for symbol_imports in (
+                "from json import dumps as emit\n"
+                "from builtins import print as emit\n",
+                "from builtins import print as emit\n",
+            ):
+                trailing_import = (
+                    ""
+                    if symbol_imports.startswith("from json")
+                    else "from json import dumps as emit\n"
+                )
+                source.write_text(
+                    symbol_imports + "emit('builtin')\n" + trailing_import,
+                    encoding="utf-8",
+                )
+                failures = validate_exception_boundary_policy(
+                    repo, self._minimal_policy()
+                )
+                self.assertEqual(
+                    sum("unowned runtime print" in item for item in failures), 1
+                )
+
+            source.write_text(
+                "class Runtime:\n"
+                "    import json as owner\n"
+                "    import builtins as owner\n"
+                "    owner.print('class-builtin')\n"
+                "    from json import JSONDecodeError as Error\n"
+                "    from builtins import Exception as Error\n"
+                "    try:\n        raise ValueError\n"
+                "    except Error:\n        pass\n"
+                "def runtime():\n"
+                "    from json import dumps as emit\n"
+                "    from builtins import print as emit\n"
+                "    emit('function-builtin')\n",
+                encoding="utf-8",
+            )
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertEqual(
+                sum("unowned runtime print" in item for item in failures), 2
+            )
+            self.assertEqual(sum("unowned pass-only" in item for item in failures), 1)
+
+            source.write_text(
+                "from json import JSONDecodeError as Error\n"
+                "from builtins import BaseException as Error\n"
+                "try:\n    raise ValueError\n"
+                "except Error:\n    pass\n",
+                encoding="utf-8",
+            )
+            catches = list(iter_broad_catches(source))
+            self.assertEqual([catch.catch_type for catch in catches], ["BaseException"])
+
+            source.write_text(
+                "if value:\n"
+                "    from builtins import print as shared\n"
+                "else:\n"
+                "    from builtins import Exception as shared\n"
+                "shared('ambiguous-builtin')\n"
+                "try:\n    raise ValueError\n"
+                "except shared:\n    pass\n",
+                encoding="utf-8",
+            )
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertEqual(
+                sum("unowned runtime print" in item for item in failures), 1
+            )
+            self.assertEqual(sum("unowned pass-only" in item for item in failures), 1)
+
+            source.write_text(
+                "import builtins as owner\n"
+                "import json as owner\n"
+                "owner.print('custom-owner')\n"
+                "from builtins import print as emit\n"
+                "from json import dumps as emit\n"
+                "emit('custom-symbol')\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                validate_exception_boundary_policy(repo, self._minimal_policy()), []
+            )
+
+            source.write_text(
+                "if value:\n"
+                "    import json as owner\n"
+                "else:\n"
+                "    import os as owner\n"
+                "owner.print('custom-ambiguous-owner')\n"
+                "import builtins as owner\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                validate_exception_boundary_policy(repo, self._minimal_policy()), []
+            )
+
     def test_policy_resolves_lambda_and_comprehension_print_bindings(self):
         from scripts.verify_exception_boundary_policy import (
             validate_exception_boundary_policy,

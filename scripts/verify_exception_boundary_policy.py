@@ -45,12 +45,6 @@ class ScopedCall:
 
 
 @dataclass(frozen=True)
-class _ScopeImports:
-    builtin_modules: frozenset[str]
-    builtin_symbols: dict[str, str]
-
-
-@dataclass(frozen=True)
 class _BindingEvent:
     position: tuple[int, int]
     origin: str | None
@@ -61,67 +55,10 @@ class _BindingEvent:
 class _ScopeFrame:
     kind: str
     table: symtable.SymbolTable | None
-    imports: _ScopeImports
     binding_events: dict[str, tuple[_BindingEvent, ...]]
     virtual_locals: frozenset[str] = frozenset()
     deferred_anchor: tuple[int, int] | None = None
     deferred_outer_paths: tuple[_ControlPath, ...] = ()
-
-
-class _ImportOriginCollector(ast.NodeVisitor):
-    def __init__(self) -> None:
-        self.origins: dict[str, set[str]] = {}
-
-    def _record(self, local_name: str, origin: str) -> None:
-        self.origins.setdefault(local_name, set()).add(origin)
-
-    def visit_Import(self, node: ast.Import) -> None:
-        for alias in node.names:
-            local_name = alias.asname or alias.name.split(".", 1)[0]
-            origin = "module:builtins" if alias.name == "builtins" else "other"
-            self._record(local_name, origin)
-
-    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        for alias in node.names:
-            local_name = alias.asname or alias.name
-            if node.module == "builtins" and alias.name in {
-                "print",
-                "Exception",
-                "BaseException",
-            }:
-                origin = f"symbol:{alias.name}"
-            else:
-                origin = "other"
-            self._record(local_name, origin)
-
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        return
-
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        return
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        return
-
-    def visit_Lambda(self, node: ast.Lambda) -> None:
-        return
-
-
-def _scope_imports(body: Iterable[ast.stmt]) -> _ScopeImports:
-    collector = _ImportOriginCollector()
-    for statement in body:
-        collector.visit(statement)
-    builtin_modules = {
-        name
-        for name, origins in collector.origins.items()
-        if origins == {"module:builtins"}
-    }
-    builtin_symbols = {
-        name: next(iter(origins)).removeprefix("symbol:")
-        for name, origins in collector.origins.items()
-        if len(origins) == 1 and next(iter(origins)).startswith("symbol:")
-    }
-    return _ScopeImports(frozenset(builtin_modules), builtin_symbols)
 
 
 def _end_position(node: ast.AST) -> tuple[int, int]:
@@ -435,7 +372,6 @@ class _BroadCatchVisitor(ast.NodeVisitor):
             _ScopeFrame(
                 kind="module",
                 table=module_table,
-                imports=_scope_imports(tree.body),
                 binding_events=_scope_binding_events(tree.body),
             )
         ]
@@ -528,13 +464,13 @@ class _BroadCatchVisitor(ast.NodeVisitor):
             return False
         return True
 
-    def _binding_origin_at(
+    def _binding_origins_at(
         self,
         frame_index: int,
         name: str,
         position: tuple[int, int],
         control_path: _ControlPath,
-    ) -> str | None:
+    ) -> set[str | None]:
         # CRITICAL: source-earlier conditional bindings may never execute. Only a
         # dominating region may replace state; compatible alternatives stay ambiguous
         # so dead branches and zero-iteration loops cannot hide a runtime builtin.
@@ -548,6 +484,16 @@ class _BroadCatchVisitor(ast.NodeVisitor):
                 states = {event.origin}
             else:
                 states.add(event.origin)
+        return states
+
+    def _binding_origin_at(
+        self,
+        frame_index: int,
+        name: str,
+        position: tuple[int, int],
+        control_path: _ControlPath,
+    ) -> str | None:
+        states = self._binding_origins_at(frame_index, name, position, control_path)
         if len(states) == 1:
             return next(iter(states))
         return _AMBIGUOUS_ORIGIN
@@ -565,6 +511,23 @@ class _BroadCatchVisitor(ast.NodeVisitor):
             return frame.deferred_anchor, frame.deferred_outer_paths[frame_index]
         return None
 
+    def _deferred_binding_origins(
+        self,
+        frame_index: int,
+        name: str,
+        anchor: tuple[int, int],
+        control_path: _ControlPath,
+    ) -> set[str | None]:
+        # CRITICAL: generator bodies resolve enclosing names when consumed, not when
+        # created. Any compatible later mutation is ambiguous and must fail closed.
+        states = self._binding_origins_at(frame_index, name, anchor, control_path)
+        for event in self._frames[frame_index].binding_events.get(name, ()):
+            if event.position <= anchor:
+                continue
+            if self._control_paths_compatible(event.control_path, control_path):
+                states.add(event.origin)
+        return states
+
     def _deferred_binding_origin(
         self,
         frame_index: int,
@@ -572,14 +535,7 @@ class _BroadCatchVisitor(ast.NodeVisitor):
         anchor: tuple[int, int],
         control_path: _ControlPath,
     ) -> str | None:
-        # CRITICAL: generator bodies resolve enclosing names when consumed, not when
-        # created. Any compatible later mutation is ambiguous and must fail closed.
-        states = {self._binding_origin_at(frame_index, name, anchor, control_path)}
-        for event in self._frames[frame_index].binding_events.get(name, ()):
-            if event.position <= anchor:
-                continue
-            if self._control_paths_compatible(event.control_path, control_path):
-                states.add(event.origin)
+        states = self._deferred_binding_origins(frame_index, name, anchor, control_path)
         if len(states) == 1:
             return next(iter(states))
         return _AMBIGUOUS_ORIGIN
@@ -671,12 +627,14 @@ class _BroadCatchVisitor(ast.NodeVisitor):
             return 0
         return None
 
-    def _resolved_import_origin(
+    def _resolved_import_origins(
         self, binding_index: int, name: str, node: ast.AST
-    ) -> str | None:
+    ) -> set[str | None]:
         deferred_context = self._deferred_context_after(binding_index)
         if deferred_context is not None:
-            return self._deferred_binding_origin(binding_index, name, *deferred_context)
+            return self._deferred_binding_origins(
+                binding_index, name, *deferred_context
+            )
         if any(
             frame.kind in {"function", "lambda"}
             for frame in self._frames[binding_index + 1 :]
@@ -685,32 +643,34 @@ class _BroadCatchVisitor(ast.NodeVisitor):
                 event.origin
                 for event in self._frames[binding_index].binding_events.get(name, ())
             }
-            if len(origins) == 1:
-                return next(iter(origins))
-            return _AMBIGUOUS_ORIGIN if origins else None
+            return origins or {None}
         # CRITICAL: symbol.is_assigned() is whole-scope metadata. Canonical import
         # aliases need use-site provenance or a dead branch/zero loop can hide a
         # real builtins.print or builtins.Exception policy boundary.
-        return self._active_binding_origin(binding_index, name, node)
+        return self._binding_origins_at(
+            binding_index,
+            name,
+            self._node_position(node),
+            tuple(self._frame_control_paths[binding_index]),
+        )
 
-    def _canonical_import_symbol(self, name: str, node: ast.AST) -> str | None:
+    def _canonical_import_symbols(self, name: str, node: ast.AST) -> frozenset[str]:
         binding_index = self._binding_index(name, node)
         if binding_index is None:
-            return None
-        frame = self._frames[binding_index]
-        table = frame.table
-        if table is None:
-            return None
-        symbol = table.lookup(name)
-        canonical = frame.imports.builtin_symbols.get(name)
-        if not symbol.is_imported() or canonical is None:
-            return None
-        if self._resolved_import_origin(binding_index, name, node) not in {
-            f"symbol:{canonical}",
-            _AMBIGUOUS_ORIGIN,
-        }:
-            return None
-        return canonical
+            return frozenset()
+        # CRITICAL: retain only canonical origins that can reach this use. A
+        # whole-scope import inventory lets an unrelated earlier/later import hide
+        # builtins, or makes a later builtin import contaminate an earlier custom use.
+        return frozenset(
+            origin.removeprefix("symbol:")
+            for origin in self._resolved_import_origins(binding_index, name, node)
+            if origin
+            in {
+                "symbol:print",
+                "symbol:Exception",
+                "symbol:BaseException",
+            }
+        )
 
     def _resolves_to_builtin_symbol(
         self, name: str, expected: str, node: ast.AST
@@ -724,22 +684,14 @@ class _BroadCatchVisitor(ast.NodeVisitor):
             and name == expected
         ):
             return True
-        return self._canonical_import_symbol(name, node) == expected
+        return expected in self._canonical_import_symbols(name, node)
 
     def _resolves_to_builtin_module(self, name: str, node: ast.AST) -> bool:
         binding_index = self._binding_index(name, node)
         if binding_index is None:
             return False
-        frame = self._frames[binding_index]
-        table = frame.table
-        if table is None:
-            return False
-        symbol = table.lookup(name)
-        resolved_origin = self._resolved_import_origin(binding_index, name, node)
-        return bool(
-            symbol.is_imported()
-            and name in frame.imports.builtin_modules
-            and resolved_origin in {"module:builtins", _AMBIGUOUS_ORIGIN}
+        return "module:builtins" in self._resolved_import_origins(
+            binding_index, name, node
         )
 
     def _catch_type_name(self, node: ast.expr | None) -> str:
@@ -892,7 +844,6 @@ class _BroadCatchVisitor(ast.NodeVisitor):
             _ScopeFrame(
                 kind="function",
                 table=child,
-                imports=_scope_imports(node.body),
                 binding_events=binding_events,
                 virtual_locals=_function_lexical_locals(
                     child, node.args, binding_events
@@ -925,7 +876,6 @@ class _BroadCatchVisitor(ast.NodeVisitor):
             _ScopeFrame(
                 kind="class",
                 table=child,
-                imports=_scope_imports(node.body),
                 binding_events=_scope_binding_events(node.body),
             )
         )
@@ -957,7 +907,6 @@ class _BroadCatchVisitor(ast.NodeVisitor):
             _ScopeFrame(
                 kind="lambda",
                 table=child,
-                imports=_ScopeImports(frozenset(), {}),
                 binding_events=binding_events,
                 virtual_locals=_function_lexical_locals(
                     child, node.args, binding_events
@@ -998,7 +947,6 @@ class _BroadCatchVisitor(ast.NodeVisitor):
             _ScopeFrame(
                 kind=frame_kind,
                 table=child,
-                imports=_ScopeImports(frozenset(), {}),
                 binding_events={},
                 virtual_locals=frozenset(target_names),
                 deferred_anchor=(
