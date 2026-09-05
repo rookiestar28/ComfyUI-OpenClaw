@@ -3603,7 +3603,7 @@ def _statement_sequence_guarantees_exit(
         ):
             return True
         if not loop_controls_exit_sequence and _statement_may_exit_current_loop(
-            statement
+            statement, index
         ):
             # A break/continue path can bypass a later return. It exits the loop-body sequence,
             # but only return/raise can prove an exact finite loop never reaches its successor.
@@ -3611,30 +3611,44 @@ def _statement_sequence_guarantees_exit(
     return False
 
 
-def _statement_may_exit_current_loop(statement: ast.stmt) -> bool:
+def _statement_truth_at_use(
+    expression: ast.expr, index: _EnvironmentScopeIndex | None
+) -> bool | None:
+    if index is None:
+        return _static_truth_value(expression)
+    scope_id = index.node_scopes.get(id(expression), 0)
+    return _resolved_static_truth_value(expression, index, scope_id, expression)
+
+
+def _statement_may_exit_current_loop(
+    statement: ast.stmt, index: _EnvironmentScopeIndex | None = None
+) -> bool:
     if isinstance(statement, (ast.Break, ast.Continue)):
         return True
     if isinstance(statement, ast.If):
-        if isinstance(statement.test, ast.Constant):
-            selected = (
-                statement.body if bool(statement.test.value) else statement.orelse
+        test_truth = _statement_truth_at_use(statement.test, index)
+        if test_truth is not None:
+            selected = statement.body if test_truth else statement.orelse
+            return any(
+                _statement_may_exit_current_loop(part, index) for part in selected
             )
-            return any(_statement_may_exit_current_loop(part) for part in selected)
         return any(
-            _statement_may_exit_current_loop(part)
+            _statement_may_exit_current_loop(part, index)
             for branch in (statement.body, statement.orelse)
             for part in branch
         )
     if isinstance(statement, ast.Match):
         return any(
-            _statement_may_exit_current_loop(part)
+            _statement_may_exit_current_loop(part, index)
             for case in statement.cases
+            if case.guard is None
+            or _statement_truth_at_use(case.guard, index) is not False
             for part in case.body
         )
     if isinstance(statement, ast.Try) or type(statement).__name__ == "TryStar":
         try_statement: Any = statement
         return any(
-            _statement_may_exit_current_loop(part)
+            _statement_may_exit_current_loop(part, index)
             for branch in (
                 try_statement.body,
                 try_statement.orelse,
@@ -3644,6 +3658,73 @@ def _statement_may_exit_current_loop(statement: ast.stmt) -> bool:
             for part in branch
         )
     # Loop-local controls nested inside another loop are consumed by that loop.
+    return False
+
+
+def _statement_sequence_may_break_current_loop(
+    statements: Sequence[ast.stmt], index: _EnvironmentScopeIndex | None = None
+) -> bool:
+    for statement in statements:
+        if _statement_may_break_current_loop(statement, index):
+            return True
+        if _statement_guarantees_sequence_exit(statement, index):
+            return False
+    return False
+
+
+def _statement_may_break_current_loop(
+    statement: ast.stmt, index: _EnvironmentScopeIndex | None = None
+) -> bool:
+    if isinstance(statement, ast.Break):
+        return True
+    if isinstance(statement, (ast.Continue, ast.Return, ast.Raise)):
+        return False
+    if isinstance(statement, ast.If):
+        test_truth = _statement_truth_at_use(statement.test, index)
+        branches = (
+            (statement.body if test_truth else statement.orelse,)
+            if test_truth is not None
+            else (statement.body, statement.orelse)
+        )
+        return any(
+            _statement_sequence_may_break_current_loop(branch, index)
+            for branch in branches
+        )
+    if isinstance(statement, ast.Match):
+        for case in statement.cases:
+            guard_truth = (
+                None
+                if case.guard is None
+                else _statement_truth_at_use(case.guard, index)
+            )
+            if guard_truth is False:
+                continue
+            if _statement_sequence_may_break_current_loop(case.body, index):
+                return True
+            if guard_truth is True and _pattern_is_irrefutable(case.pattern):
+                return False
+        return False
+    if isinstance(statement, ast.Try) or type(statement).__name__ == "TryStar":
+        try_statement: Any = statement
+        if try_statement.finalbody:
+            if _statement_sequence_may_break_current_loop(
+                try_statement.finalbody, index
+            ):
+                return True
+            if _statement_sequence_guarantees_exit(try_statement.finalbody, index):
+                # A return, raise, or continue from finally replaces a pending break.
+                return False
+        return any(
+            _statement_sequence_may_break_current_loop(branch, index)
+            for branch in (
+                try_statement.body,
+                try_statement.orelse,
+                *(handler.body for handler in try_statement.handlers),
+            )
+        )
+    if isinstance(statement, (ast.With, ast.AsyncWith)):
+        return _statement_sequence_may_break_current_loop(statement.body, index)
+    # Breaks in nested loops and definition scopes are consumed outside the current loop.
     return False
 
 
@@ -3658,10 +3739,9 @@ def _statement_guarantees_sequence_exit(
     if isinstance(statement, (ast.Break, ast.Continue)):
         return loop_controls_exit_sequence
     if isinstance(statement, ast.If):
-        if isinstance(statement.test, ast.Constant):
-            selected = (
-                statement.body if bool(statement.test.value) else statement.orelse
-            )
+        test_truth = _statement_truth_at_use(statement.test, index)
+        if test_truth is not None:
+            selected = statement.body if test_truth else statement.orelse
             return _statement_sequence_guarantees_exit(
                 selected,
                 index,
@@ -3676,6 +3756,18 @@ def _statement_guarantees_sequence_exit(
             for branch in (statement.body, statement.orelse)
         )
     if isinstance(statement, (ast.For, ast.AsyncFor)):
+        orelse_exits = bool(statement.orelse) and _statement_sequence_guarantees_exit(
+            statement.orelse,
+            index,
+            loop_controls_exit_sequence=loop_controls_exit_sequence,
+        )
+        # CRITICAL: loop else runs after exhaustion and after continue, but not after break.
+        # Keep break detection separate from generic loop controls or a later policy read can be
+        # hidden after `break`, or falsely revived after `continue`/normal exhaustion.
+        if orelse_exits and not _statement_sequence_may_break_current_loop(
+            statement.body, index
+        ):
+            return True
         iterable_elements = (
             _resolved_static_iterable_elements(
                 statement.iter,
@@ -3692,18 +3784,29 @@ def _statement_guarantees_sequence_exit(
             loop_controls_exit_sequence=False,
         )
     if isinstance(statement, ast.While):
-        return (
-            isinstance(statement.test, ast.Constant)
-            and bool(statement.test.value)
-            and _statement_sequence_guarantees_exit(
-                statement.body,
-                index,
-                loop_controls_exit_sequence=False,
-            )
+        orelse_exits = bool(statement.orelse) and _statement_sequence_guarantees_exit(
+            statement.orelse,
+            index,
+            loop_controls_exit_sequence=loop_controls_exit_sequence,
+        )
+        if orelse_exits and not _statement_sequence_may_break_current_loop(
+            statement.body, index
+        ):
+            return True
+        test_truth = _statement_truth_at_use(statement.test, index)
+        return test_truth is True and _statement_sequence_guarantees_exit(
+            statement.body,
+            index,
+            loop_controls_exit_sequence=False,
         )
     if isinstance(statement, ast.Match):
         for case in statement.cases:
-            if isinstance(case.guard, ast.Constant) and not bool(case.guard.value):
+            guard_truth = (
+                None
+                if case.guard is None
+                else _statement_truth_at_use(case.guard, index)
+            )
+            if guard_truth is False:
                 continue
             if not _statement_sequence_guarantees_exit(
                 case.body,
@@ -3711,9 +3814,10 @@ def _statement_guarantees_sequence_exit(
                 loop_controls_exit_sequence=loop_controls_exit_sequence,
             ):
                 return False
-            guard_is_unconditional = case.guard is None or (
-                isinstance(case.guard, ast.Constant) and bool(case.guard.value)
-            )
+            # IMPORTANT: guards must use exact use-site provenance. Syntax-only constants miss
+            # dominating Boolean aliases, while optimistic alias folding can hide live reads
+            # after rebound, deleted, shadowed, branch-union, or otherwise unknown guards.
+            guard_is_unconditional = case.guard is None or guard_truth is True
             if guard_is_unconditional and _pattern_is_irrefutable(case.pattern):
                 return True
         return False

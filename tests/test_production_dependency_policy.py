@@ -3066,6 +3066,341 @@ def live_after_guarded_wildcard(value, flag):
             ),
         )
 
+    def test_environment_alias_contract_resolves_exact_match_guard_aliases_at_use_site(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/exact_match_guard_aliases.py"
+        ] = """import os
+
+ALWAYS = True
+NEVER = False
+
+def exact_module_true(value):
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    match value:
+        case _ if ALWAYS:
+            return None
+    inner()
+
+def exact_module_false(value):
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    match value:
+        case _ if NEVER:
+            return None
+    inner()
+
+def exact_function_true(value):
+    local_always = True
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    match value:
+        case _ if local_always:
+            return None
+    inner()
+
+class_true_source = ((class_true_reader := os.getenv) for _ in [1])
+class ExactClassTrue:
+    class_always = True
+    match 1:
+        case _ if class_always:
+            raise RuntimeError
+    class_true_source.__next__()
+    VALUE = class_true_reader("MOLTBOT_FLAG")
+
+class_false_source = ((class_false_reader := os.getenv) for _ in [1])
+class ExactClassFalse:
+    class_never = False
+    match 1:
+        case _ if class_never:
+            raise RuntimeError
+    class_false_source.__next__()
+    VALUE = class_false_reader("MOLTBOT_FLAG")
+
+def exact_boolean_expression(value):
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    match value:
+        case _ if ALWAYS and not NEVER:
+            return None
+    inner()
+
+def rebound_guard(value):
+    guard = True
+    guard = False
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    match value:
+        case _ if guard:
+            return None
+    inner()
+
+def deleted_guard(value):
+    guard = True
+    del guard
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    match value:
+        case _ if guard:
+            return None
+    inner()
+
+def branch_union_guard(value, flag):
+    guard = True
+    if flag:
+        guard = False
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    match value:
+        case _ if guard:
+            return None
+    inner()
+
+def unknown_guard(value, guard):
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    match value:
+        case _ if guard:
+            return None
+    inner()
+
+def shadowed_guard(value, ALWAYS):
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    match value:
+        case _ if ALWAYS:
+            return None
+    inner()
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/exact_match_guard_aliases.py")
+
+        findings = self._evaluate(files, configure=configure)
+        direct_reads = [
+            finding
+            for finding in findings
+            if finding.rule_id == "ENV_ALIAS_DIRECT_READ"
+        ]
+
+        self.assertEqual(
+            len(direct_reads),
+            7,
+            msg="\n".join(
+                f"{finding.path}:{finding.line}: {finding.subject}"
+                for finding in direct_reads
+            ),
+        )
+
+    def test_environment_alias_contract_honors_break_sensitive_loop_else_exits(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/loop_else_exits.py"
+        ] = """import os
+
+def after_for_pass_else_return():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    for _ in [1]:
+        pass
+    else:
+        return None
+    inner()
+
+def after_for_continue_else_return():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    for _ in [1]:
+        continue
+    else:
+        return None
+    inner()
+
+def live_after_for_break_else_return():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    for _ in [1]:
+        break
+    else:
+        return None
+    inner()
+
+def after_empty_for_else_return():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    for _ in []:
+        pass
+    else:
+        return None
+    inner()
+
+def after_unknown_for_else_return(items):
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    for _ in items:
+        pass
+    else:
+        return None
+    inner()
+
+def after_false_while_else_return():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    while False:
+        pass
+    else:
+        return None
+    inner()
+
+def after_unknown_while_else_return(flag):
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    while flag:
+        pass
+    else:
+        return None
+    inner()
+
+def live_after_unknown_while_break_else_return(flag):
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    while flag:
+        break
+    else:
+        return None
+    inner()
+
+def after_nested_loop_break_else_return():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    for _ in [1]:
+        for _ in [1]:
+            break
+    else:
+        return None
+    inner()
+
+def after_break_suppressed_by_finally_return():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    for _ in [1]:
+        try:
+            break
+        finally:
+            return None
+    else:
+        return None
+    inner()
+
+def after_break_suppressed_by_finally_continue():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    for _ in [1]:
+        try:
+            break
+        finally:
+            continue
+    else:
+        return None
+    inner()
+
+def live_after_break_preserved_by_finally_pass():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    for _ in [1]:
+        try:
+            break
+        finally:
+            pass
+    else:
+        return None
+    inner()
+
+def live_after_finally_break():
+    source = ((reader := os.getenv) for _ in [1])
+    def inner():
+        source.__next__()
+        return reader("MOLTBOT_FLAG")
+    for _ in [1]:
+        try:
+            continue
+        finally:
+            break
+    else:
+        return None
+    inner()
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/loop_else_exits.py")
+
+        findings = self._evaluate(files, configure=configure)
+        direct_reads = [
+            finding
+            for finding in findings
+            if finding.rule_id == "ENV_ALIAS_DIRECT_READ"
+        ]
+
+        self.assertEqual(
+            len(direct_reads),
+            4,
+            msg="\n".join(
+                f"{finding.path}:{finding.line}: {finding.subject}"
+                for finding in direct_reads
+            ),
+        )
+
     def test_environment_alias_contract_tracks_keyword_and_explicit_mapping_reads(
         self,
     ):
