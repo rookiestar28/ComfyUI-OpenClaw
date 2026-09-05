@@ -19,6 +19,7 @@ from .audit_pipeline import (
     read_last_entry_hash_from_chain,
 )
 from .audit_pipeline import verify_audit_chain as verify_audit_chain_impl
+from .env_aliases import get_env_value
 from .redaction import redact_json, stable_redaction_tag
 
 logger = logging.getLogger("ComfyUI-OpenClaw.services.audit")
@@ -43,24 +44,18 @@ def _default_audit_log_path() -> str:
     return "audit.log"
 
 
-AUDIT_LOG_PATH = (
-    os.environ.get("OPENCLAW_AUDIT_LOG_PATH")
-    or os.environ.get("MOLTBOT_AUDIT_LOG_PATH")
-    or _default_audit_log_path()
-)
+AUDIT_LOG_PATH = get_env_value("OPENCLAW_AUDIT_LOG_PATH") or _default_audit_log_path()
 
 
 def _default_audit_chain_key_path() -> str:
-    override = os.environ.get("OPENCLAW_AUDIT_CHAIN_KEY_PATH") or os.environ.get(
-        "MOLTBOT_AUDIT_CHAIN_KEY_PATH"
-    )
+    override = get_env_value("OPENCLAW_AUDIT_CHAIN_KEY_PATH")
     if override:
         return override
     return f"{AUDIT_LOG_PATH}.key"
 
 
 def _env_int(primary: str, legacy: str, default: int) -> int:
-    raw = os.environ.get(primary) or os.environ.get(legacy)
+    raw = get_env_value(primary, aliases=(legacy,))
     if raw is None:
         return default
     try:
@@ -121,9 +116,7 @@ def _sanitize_audit_details(details: Optional[Dict[str, Any]]) -> Any:
 def _get_audit_chain_key() -> bytes:
     global _AUDIT_CHAIN_KEY
     if _AUDIT_CHAIN_KEY is None:
-        raw = os.environ.get("OPENCLAW_AUDIT_CHAIN_KEY") or os.environ.get(
-            "MOLTBOT_AUDIT_CHAIN_KEY"
-        )
+        raw = get_env_value("OPENCLAW_AUDIT_CHAIN_KEY")
         if raw:
             _AUDIT_CHAIN_KEY = raw.encode("utf-8")
             return _AUDIT_CHAIN_KEY

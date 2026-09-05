@@ -134,6 +134,31 @@ def configure_import_fallback_contract(
     }
 
 
+def configure_environment_alias_contract(
+    policy: dict,
+    *,
+    supported: list[str] | None = None,
+    rejected: list[str] | None = None,
+    exceptions: list[dict] | None = None,
+) -> None:
+    policy["environment_alias_contract"] = {
+        "production_roots": ["alpha", "beta"],
+        "central_owner": "alpha/env_aliases.py",
+        "supported_legacy_keys": supported or ["MOLTBOT_FLAG"],
+        "rejected_legacy_keys": rejected or ["CLAWDBOT_REJECTED"],
+        "direct_read_exceptions": exceptions or [],
+    }
+    policy["domains"]["alpha"].append("alpha/env_aliases.py")
+
+
+def environment_alias_owner_source() -> str:
+    return (
+        "LEGACY_MOLTBOT_ENV_KEYS = frozenset({'MOLTBOT_FLAG'})\n"
+        "SUPPORTED_CLAWDBOT_ENV_KEYS = frozenset()\n"
+        "REJECTED_LEGACY_ENV_KEYS = frozenset({'CLAWDBOT_REJECTED'})\n"
+    )
+
+
 class TestProductionDependencyPolicy(unittest.TestCase):
     def _base_files(self) -> dict[str, str]:
         return {
@@ -566,6 +591,110 @@ def load(name):
         self.assertEqual(exit_code, 1)
         self.assertEqual(len(lines), verifier.MAX_FINDINGS + 1)
         self.assertTrue(lines[-1].startswith("FINDINGS_TRUNCATED - "))
+
+    def test_environment_alias_contract_rejects_literal_getenv_subscript_and_dynamic_reads(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/api.py"
+        ] = """import os
+legacy = "OPENCLAW_FLAG".replace("OPENCLAW_", "MOLTBOT_", 1)
+KEYS = ("OPENCLAW_FLAG", "MOLTBOT_FLAG")
+ONE = os.environ.get("MOLTBOT_FLAG")
+TWO = os.getenv("MOLTBOT_UNKNOWN")
+THREE = os.environ["MOLTBOT_FLAG"]
+FOUR = os.environ.get(legacy)
+for key in KEYS:
+    FIVE = os.environ.get(key)
+"""
+
+        findings = self._evaluate(
+            files,
+            configure=lambda policy: configure_environment_alias_contract(policy),
+        )
+        codes = [finding.rule_id for finding in findings]
+
+        self.assertEqual(codes.count("ENV_ALIAS_DIRECT_READ"), 3)
+        self.assertEqual(codes.count("ENV_ALIAS_DYNAMIC_READ"), 2)
+        self.assertEqual(codes.count("ENV_ALIAS_UNKNOWN_KEY"), 1)
+
+    def test_environment_alias_contract_matches_static_registry_without_importing_it(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = (
+            environment_alias_owner_source()
+            + 'raise RuntimeError("must not import production registry")\n'
+        )
+
+        findings = self._evaluate(
+            files,
+            configure=lambda policy: configure_environment_alias_contract(policy),
+            bom_paths={"alpha/env_aliases.py"},
+        )
+
+        self.assertEqual(findings, [])
+
+    def test_environment_alias_contract_fails_closed_on_registry_drift(self):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+
+        findings = self._evaluate(
+            files,
+            configure=lambda policy: configure_environment_alias_contract(
+                policy,
+                supported=["MOLTBOT_FLAG", "CLAWDBOT_MISSING"],
+                rejected=["CLAWDBOT_DIFFERENT"],
+            ),
+        )
+        codes = {finding.rule_id for finding in findings}
+
+        self.assertIn("ENV_ALIAS_REGISTRY_MISSING", codes)
+        self.assertIn("ENV_ALIAS_REJECTED_DRIFT", codes)
+
+    def test_environment_alias_direct_read_exception_must_be_exact_and_live(self):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files["alpha/api.py"] = 'import os\nVALUE = os.getenv("MOLTBOT_FLAG")\n'
+        exception = {"path": "alpha/api.py", **metadata("reviewed raw-read fixture")}
+
+        configured = lambda policy: configure_environment_alias_contract(
+            policy, exceptions=[exception]
+        )
+        self.assertEqual(self._evaluate(files, configure=configured), [])
+
+        files["alpha/api.py"] = "VALUE = 1\n"
+        findings = self._evaluate(files, configure=configured)
+        self.assertCodes(findings, "ENV_ALIAS_EXCEPTION_STALE")
+
+    def test_environment_alias_contract_rejects_unknown_fields_and_unsafe_ownership(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+
+        def invalid(policy):
+            configure_environment_alias_contract(policy)
+            contract = policy["environment_alias_contract"]
+            contract["unexpected"] = True
+            contract["production_roots"].append("missing")
+            contract["central_owner"] = "../outside.py"
+            contract["supported_legacy_keys"].append("MOLTBOT_FLAG")
+
+        codes = {
+            finding.rule_id for finding in self._evaluate(files, configure=invalid)
+        }
+
+        self.assertTrue(
+            {
+                "POLICY_UNKNOWN_KEY",
+                "ENV_ALIAS_ROOTS_INVALID",
+                "ENV_ALIAS_OWNER_INVALID",
+                "ENV_ALIAS_KEY_DUPLICATE",
+            }.issubset(codes)
+        )
 
 
 class TestRepositoryProductionDependencyPolicy(unittest.TestCase):

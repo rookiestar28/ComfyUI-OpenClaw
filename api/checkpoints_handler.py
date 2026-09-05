@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Any, Dict
 
 try:
@@ -24,6 +23,7 @@ if __package__ and "." in __package__:
         get_checkpoint,
         list_checkpoints,
     )
+    from ..services.env_aliases import get_env_value
     from ..services.rate_limit import build_rate_limit_payload, check_rate_limit
     from ..services.request_ip import get_client_ip
 else:  # pragma: no cover (test-only import mode)
@@ -35,6 +35,7 @@ else:  # pragma: no cover (test-only import mode)
         get_checkpoint,
         list_checkpoints,
     )
+    from services.env_aliases import get_env_value
     from services.rate_limit import (  # type: ignore
         build_rate_limit_payload,
         check_rate_limit,
@@ -68,13 +69,7 @@ def _json_resp(data: Dict[str, Any], status: int = 200) -> web.Response:
 
 def _remote_admin_allowed() -> bool:
     val = (
-        (
-            os.environ.get("OPENCLAW_ALLOW_REMOTE_ADMIN")
-            or os.environ.get("MOLTBOT_ALLOW_REMOTE_ADMIN")
-            or ""
-        )
-        .strip()
-        .lower()
+        (get_env_value("OPENCLAW_ALLOW_REMOTE_ADMIN", default="") or "").strip().lower()
     )
     return val in ("1", "true", "yes", "on")
 

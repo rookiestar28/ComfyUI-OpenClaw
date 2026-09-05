@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tokenize
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path, PurePosixPath
@@ -33,6 +33,7 @@ _TOP_LEVEL_KEYS = {
     "accepted_cycles",
     "dynamic_imports",
     "import_fallback_contract",
+    "environment_alias_contract",
 }
 _REVIEW_KEYS = {
     "owner",
@@ -92,6 +93,20 @@ _IMPORT_FALLBACK_CLASSIFICATIONS = {
     "approved_alternate_dependency",
     "migrated",
 }
+_ENV_ALIAS_CONTRACT_KEYS = {
+    "production_roots",
+    "central_owner",
+    "supported_legacy_keys",
+    "rejected_legacy_keys",
+    "direct_read_exceptions",
+}
+_ENV_ALIAS_EXCEPTION_KEYS = {
+    "path",
+    "owner",
+    "rationale",
+    "review_condition",
+}
+_LEGACY_ENV_PREFIXES = ("MOLTBOT_", "CLAWDBOT_")
 _CANONICAL_DUAL_IMPORT_HELPER_MODULE = "services.import_fallback"
 _CANONICAL_DUAL_IMPORT_HELPERS = frozenset({"import_attrs_dual", "import_module_dual"})
 _DYNAMIC_IMPORT_CALLEES = frozenset(
@@ -172,6 +187,15 @@ class ImportFallbackContract:
     inventory: Mapping[str, ImportFallbackEntry]
 
 
+@dataclass(frozen=True)
+class EnvironmentAliasContract:
+    production_roots: tuple[str, ...]
+    central_owner: str
+    supported_legacy_keys: frozenset[str]
+    rejected_legacy_keys: frozenset[str]
+    direct_read_exceptions: frozenset[str]
+
+
 @dataclass(frozen=True, order=True)
 class ImportFallbackSite:
     path: str
@@ -201,6 +225,7 @@ class _PolicyContext:
     accepted_cycles: set[frozenset[str]]
     dynamic_imports: dict[tuple[str, str, str, str, str], Mapping[str, Any]]
     import_fallback_contract: ImportFallbackContract | None
+    environment_alias_contract: EnvironmentAliasContract | None
 
 
 def _finding(
@@ -494,6 +519,101 @@ def _validate_import_fallback_contract(
     )
 
 
+def _validate_environment_alias_contract(
+    raw_contract: Any,
+    *,
+    valid_roots: Sequence[str],
+    owned_paths: set[str],
+    findings: list[Finding],
+) -> EnvironmentAliasContract | None:
+    if raw_contract is None:
+        return None
+    if not isinstance(raw_contract, Mapping):
+        findings.append(_finding("ENV_ALIAS_CONTRACT_INVALID"))
+        return None
+    for key in sorted(set(raw_contract) - _ENV_ALIAS_CONTRACT_KEYS):
+        findings.append(
+            _finding("POLICY_UNKNOWN_KEY", subject=f"environment_alias_contract.{key}")
+        )
+
+    roots_value = raw_contract.get("production_roots")
+    roots: list[str] = []
+    if not isinstance(roots_value, list) or not roots_value:
+        findings.append(_finding("ENV_ALIAS_ROOTS_INVALID"))
+    else:
+        for index, value in enumerate(roots_value):
+            subject = f"environment_alias_contract.production_roots[{index}]"
+            if not _safe_relative_path(value) or value not in valid_roots:
+                findings.append(_finding("ENV_ALIAS_ROOTS_INVALID", subject=subject))
+                continue
+            if value in roots:
+                findings.append(_finding("ENV_ALIAS_ROOT_DUPLICATE", path=value))
+                continue
+            roots.append(value)
+
+    central_value = raw_contract.get("central_owner")
+    central_owner = str(central_value) if _safe_relative_path(central_value) else ""
+    if not central_owner or central_owner not in owned_paths:
+        findings.append(_finding("ENV_ALIAS_OWNER_INVALID", path=central_owner or "."))
+
+    def legacy_key_set(field: str, *, required: bool) -> frozenset[str]:
+        value = raw_contract.get(field)
+        if not isinstance(value, list) or (required and not value):
+            findings.append(_finding("ENV_ALIAS_KEYS_INVALID", subject=field))
+            return frozenset()
+        accepted: set[str] = set()
+        for index, item in enumerate(value):
+            subject = f"environment_alias_contract.{field}[{index}]"
+            if (
+                not isinstance(item, str)
+                or not item.startswith(_LEGACY_ENV_PREFIXES)
+                or item in {"MOLTBOT_", "CLAWDBOT_"}
+            ):
+                findings.append(_finding("ENV_ALIAS_KEYS_INVALID", subject=subject))
+                continue
+            if item in accepted:
+                findings.append(_finding("ENV_ALIAS_KEY_DUPLICATE", subject=item))
+            accepted.add(item)
+        return frozenset(accepted)
+
+    supported = legacy_key_set("supported_legacy_keys", required=True)
+    rejected = legacy_key_set("rejected_legacy_keys", required=False)
+    for key in sorted(supported & rejected):
+        findings.append(_finding("ENV_ALIAS_KEY_CONFLICT", subject=key))
+
+    exception_entries = raw_contract.get("direct_read_exceptions", [])
+    exceptions: set[str] = set()
+    if not isinstance(exception_entries, list):
+        findings.append(_finding("ENV_ALIAS_EXCEPTIONS_INVALID"))
+        exception_entries = []
+    for index, entry in enumerate(exception_entries):
+        subject = f"environment_alias_contract.direct_read_exceptions[{index}]"
+        if not isinstance(entry, Mapping):
+            findings.append(_finding("ENV_ALIAS_EXCEPTIONS_INVALID", subject=subject))
+            continue
+        for key in sorted(set(entry) - _ENV_ALIAS_EXCEPTION_KEYS):
+            findings.append(_finding("POLICY_UNKNOWN_KEY", subject=f"{subject}.{key}"))
+        _validate_review_metadata(entry, path=subject, findings=findings)
+        path_value = entry.get("path")
+        if not _safe_relative_path(path_value) or path_value not in owned_paths:
+            findings.append(
+                _finding("ENV_ALIAS_EXCEPTION_PATH_INVALID", subject=subject)
+            )
+            continue
+        path = str(path_value)
+        if path == central_owner or path in exceptions:
+            findings.append(_finding("ENV_ALIAS_EXCEPTION_DUPLICATE", path=path))
+        exceptions.add(path)
+
+    return EnvironmentAliasContract(
+        production_roots=tuple(roots),
+        central_owner=central_owner,
+        supported_legacy_keys=supported,
+        rejected_legacy_keys=rejected,
+        direct_read_exceptions=frozenset(exceptions),
+    )
+
+
 def _validate_policy(
     repo_root: Path,
     policy: Mapping[str, Any],
@@ -780,6 +900,12 @@ def _validate_policy(
         owned_paths=owned_paths,
         findings=findings,
     )
+    environment_alias_contract = _validate_environment_alias_contract(
+        policy.get("environment_alias_contract"),
+        valid_roots=valid_roots,
+        owned_paths=owned_paths,
+        findings=findings,
+    )
 
     context = _PolicyContext(
         tracked_files=discovered,
@@ -793,6 +919,7 @@ def _validate_policy(
         accepted_cycles=accepted_cycles,
         dynamic_imports=dynamic_imports,
         import_fallback_contract=import_fallback_contract,
+        environment_alias_contract=environment_alias_contract,
     )
     return context, findings
 
@@ -1257,6 +1384,222 @@ def _strongly_connected_components(
     return tuple(sorted(components))
 
 
+def _is_os_environ(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "environ"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "os"
+    )
+
+
+def _is_raw_env_call(node: ast.Call) -> bool:
+    func = node.func
+    if not isinstance(func, ast.Attribute):
+        return False
+    if func.attr == "get" and _is_os_environ(func.value):
+        return True
+    return (
+        func.attr == "getenv"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "os"
+    )
+
+
+def _contains_legacy_env_signal(
+    node: ast.AST,
+    signal_names: Collection[str] = frozenset(),
+) -> bool:
+    for part in ast.walk(node):
+        if (
+            isinstance(part, ast.Constant)
+            and isinstance(part.value, str)
+            and part.value.startswith(_LEGACY_ENV_PREFIXES)
+        ):
+            return True
+        if isinstance(part, ast.Name) and (
+            "legacy" in part.id.lower() or part.id in signal_names
+        ):
+            return True
+    return False
+
+
+def _target_names(node: ast.AST) -> set[str]:
+    if isinstance(node, ast.Name):
+        return {node.id}
+    if isinstance(node, (ast.List, ast.Tuple)):
+        return {name for element in node.elts for name in _target_names(element)}
+    return set()
+
+
+def _legacy_env_signal_names(tree: ast.AST) -> frozenset[str]:
+    signals: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            targets: set[str] = set()
+            value: ast.AST | None = None
+            if isinstance(node, ast.Assign):
+                targets = {
+                    name for target in node.targets for name in _target_names(target)
+                }
+                value = node.value
+            elif isinstance(node, ast.AnnAssign):
+                targets = _target_names(node.target)
+                value = node.value
+            elif isinstance(node, (ast.For, ast.comprehension)):
+                targets = _target_names(node.target)
+                value = node.iter
+            if not targets or value is None:
+                continue
+            # IMPORTANT: propagate legacy-bearing collections into neutral loop targets. Checking
+            # identifier spelling alone misses raw reads such as `for key in ENV_KEYS`.
+            if _contains_legacy_env_signal(value, signals):
+                new_targets = targets - signals
+                if new_targets:
+                    signals.update(new_targets)
+                    changed = True
+    return frozenset(signals)
+
+
+def _legacy_key_from_expression(node: ast.AST) -> str | None:
+    if (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node.value.startswith(_LEGACY_ENV_PREFIXES)
+    ):
+        return node.value
+    return None
+
+
+def _observe_raw_legacy_env_reads(
+    path: str,
+    tree: ast.AST,
+    contract: EnvironmentAliasContract,
+) -> tuple[Finding, ...]:
+    if path == contract.central_owner:
+        return ()
+    findings: list[Finding] = []
+    known = contract.supported_legacy_keys | contract.rejected_legacy_keys
+    legacy_signal_names = _legacy_env_signal_names(tree)
+    for node in ast.walk(tree):
+        key_node: ast.AST | None = None
+        if isinstance(node, ast.Call) and _is_raw_env_call(node) and node.args:
+            key_node = node.args[0]
+        elif isinstance(node, ast.Subscript) and _is_os_environ(node.value):
+            key_node = node.slice
+        if key_node is None:
+            continue
+        key = _legacy_key_from_expression(key_node)
+        if key is not None:
+            findings.append(
+                _finding(
+                    "ENV_ALIAS_DIRECT_READ",
+                    path=path,
+                    line=getattr(node, "lineno", 0),
+                    subject=key,
+                )
+            )
+            if key not in known:
+                findings.append(
+                    _finding(
+                        "ENV_ALIAS_UNKNOWN_KEY",
+                        path=path,
+                        line=getattr(node, "lineno", 0),
+                        subject=key,
+                    )
+                )
+        elif _contains_legacy_env_signal(key_node, legacy_signal_names):
+            findings.append(
+                _finding(
+                    "ENV_ALIAS_DYNAMIC_READ",
+                    path=path,
+                    line=getattr(node, "lineno", 0),
+                    subject=type(key_node).__name__,
+                )
+            )
+    return tuple(findings)
+
+
+def _assigned_string_set(tree: ast.AST, assignment_name: str) -> frozenset[str] | None:
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        if not any(
+            isinstance(target, ast.Name) and target.id == assignment_name
+            for target in targets
+        ):
+            continue
+        value = node.value
+        if value is None:
+            return frozenset()
+        return frozenset(
+            part.value
+            for part in ast.walk(value)
+            if isinstance(part, ast.Constant) and isinstance(part.value, str)
+        )
+    return None
+
+
+def _validate_live_environment_aliases(
+    contract: EnvironmentAliasContract,
+    source_trees: Mapping[str, ast.AST],
+) -> tuple[Finding, ...]:
+    findings: list[Finding] = []
+    observed_exception_paths: set[str] = set()
+    for path, tree in sorted(source_trees.items()):
+        if not any(_within_root(path, root) for root in contract.production_roots):
+            continue
+        observed = _observe_raw_legacy_env_reads(path, tree, contract)
+        if path in contract.direct_read_exceptions and observed:
+            observed_exception_paths.add(path)
+            continue
+        findings.extend(observed)
+
+    for path in sorted(contract.direct_read_exceptions - observed_exception_paths):
+        findings.append(_finding("ENV_ALIAS_EXCEPTION_STALE", path=path))
+
+    central_tree = source_trees.get(contract.central_owner)
+    if central_tree is None:
+        findings.append(
+            _finding("ENV_ALIAS_OWNER_MISSING", path=contract.central_owner)
+        )
+        return tuple(findings)
+    moltbot = _assigned_string_set(central_tree, "LEGACY_MOLTBOT_ENV_KEYS")
+    clawdbot = _assigned_string_set(central_tree, "SUPPORTED_CLAWDBOT_ENV_KEYS")
+    rejected = _assigned_string_set(central_tree, "REJECTED_LEGACY_ENV_KEYS")
+    if moltbot is None or clawdbot is None or rejected is None:
+        findings.append(
+            _finding("ENV_ALIAS_REGISTRY_UNREADABLE", path=contract.central_owner)
+        )
+        return tuple(findings)
+
+    observed_supported = moltbot | clawdbot
+    for key in sorted(contract.supported_legacy_keys - observed_supported):
+        findings.append(
+            _finding(
+                "ENV_ALIAS_REGISTRY_MISSING", path=contract.central_owner, subject=key
+            )
+        )
+    for key in sorted(observed_supported - contract.supported_legacy_keys):
+        findings.append(
+            _finding(
+                "ENV_ALIAS_REGISTRY_UNREGISTERED",
+                path=contract.central_owner,
+                subject=key,
+            )
+        )
+    for key in sorted(contract.rejected_legacy_keys ^ rejected):
+        findings.append(
+            _finding(
+                "ENV_ALIAS_REJECTED_DRIFT", path=contract.central_owner, subject=key
+            )
+        )
+    return tuple(findings)
+
+
 def analyze_repository(
     repo_root: Path,
     policy: Mapping[str, Any],
@@ -1270,6 +1613,7 @@ def analyze_repository(
     edges: set[tuple[str, str]] = set()
     dynamic_imports: list[DynamicImport] = []
     import_fallback_sites: list[ImportFallbackSite] = []
+    source_trees: dict[str, ast.AST] = {}
     for path in sorted(context.owned_paths):
         source_path = repo_root / path
         if not source_path.is_file() or path not in context.path_modules:
@@ -1284,6 +1628,7 @@ def analyze_repository(
                 _finding("SOURCE_PARSE", path=path, subject=type(exc).__name__)
             )
             continue
+        source_trees[path] = tree
         visitor = _SourceVisitor(
             path=path,
             module=context.path_modules[path],
@@ -1407,6 +1752,14 @@ def analyze_repository(
             _validate_live_import_fallbacks(
                 context.import_fallback_contract,
                 import_fallback_sites,
+            )
+        )
+
+    if context.environment_alias_contract is not None:
+        findings.extend(
+            _validate_live_environment_aliases(
+                context.environment_alias_contract,
+                source_trees,
             )
         )
 

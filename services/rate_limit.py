@@ -7,13 +7,13 @@ machine-readable diagnostics while preserving the legacy bool-only helper.
 
 from __future__ import annotations
 
-import os
 import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Mapping, Optional, Tuple
 
+from .env_aliases import get_env_value
 from .request_ip import get_client_ip
 
 try:
@@ -366,7 +366,7 @@ class RateLimiter:
         if not env_name:
             return None
         legacy_env = env_name.replace("OPENCLAW_", "MOLTBOT_", 1)
-        raw = (os.environ.get(env_name) or os.environ.get(legacy_env) or "").strip()
+        raw = (get_env_value(env_name, aliases=(legacy_env,), default="") or "").strip()
         if not raw:
             return None
         try:

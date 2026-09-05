@@ -5,10 +5,11 @@ Parses ComfyUI /history/{prompt_id} responses and extracts image output metadata
 
 import json
 import logging
-import os
 import unicodedata
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
+
+from .env_aliases import get_env_value
 
 try:
     from urllib.error import HTTPError, URLError
@@ -18,11 +19,7 @@ except ImportError:
 
 logger = logging.getLogger("ComfyUI-OpenClaw.services.comfyui_history")
 
-COMFYUI_URL = (
-    os.environ.get("OPENCLAW_COMFYUI_URL")
-    or os.environ.get("MOLTBOT_COMFYUI_URL")
-    or "http://127.0.0.1:8188"
-)
+COMFYUI_URL = get_env_value("OPENCLAW_COMFYUI_URL") or "http://127.0.0.1:8188"
 HISTORY_TIMEOUT = 5
 PREVIEWABLE_MEDIA_TYPES = ("images", "video", "audio", "3d", "text")
 THREE_D_EXTENSIONS = (

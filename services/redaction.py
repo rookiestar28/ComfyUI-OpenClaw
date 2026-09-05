@@ -8,11 +8,12 @@ Prevents sensitive data leakage in observability outputs.
 from __future__ import annotations
 
 import logging
-import os
 import re
 import secrets
 import threading
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+from .env_aliases import get_env_value
 
 logger = logging.getLogger("ComfyUI-OpenClaw.services.redaction")
 _REDACTION_TAG_KEY: Optional[bytes] = None
@@ -127,9 +128,7 @@ def stable_redaction_tag(value: Any, *, label: str = "value") -> str:
 def _get_redaction_tag_key() -> bytes:
     global _REDACTION_TAG_KEY
     if _REDACTION_TAG_KEY is None:
-        raw = os.environ.get("OPENCLAW_REDACTION_TAG_KEY") or os.environ.get(
-            "MOLTBOT_REDACTION_TAG_KEY"
-        )
+        raw = get_env_value("OPENCLAW_REDACTION_TAG_KEY")
         _REDACTION_TAG_KEY = raw.encode("utf-8") if raw else secrets.token_bytes(32)
     return _REDACTION_TAG_KEY
 

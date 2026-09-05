@@ -4,10 +4,10 @@ High-level operations for approval workflow.
 """
 
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from ..env_aliases import get_env_value
 from ..tenant_context import (
     DEFAULT_TENANT_ID,
     get_current_tenant_id,
@@ -21,8 +21,7 @@ logger = logging.getLogger("ComfyUI-OpenClaw.services.approvals")
 
 # Default TTL for approval requests (1 hour)
 DEFAULT_TTL_SEC = int(
-    os.environ.get("OPENCLAW_APPROVAL_TTL_SEC")
-    or os.environ.get("MOLTBOT_APPROVAL_TTL_SEC", "3600")
+    get_env_value("OPENCLAW_APPROVAL_TTL_SEC", default="3600") or "3600"
 )
 
 

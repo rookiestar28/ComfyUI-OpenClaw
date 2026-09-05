@@ -36,6 +36,13 @@ Removal requires all of these conditions:
 
 The historical `moltbot` node category is no longer the current display category. Current shipped nodes use `openclaw`; legacy workflow compatibility is preserved through the `Moltbot*` class aliases rather than through legacy category metadata.
 
+Environment compatibility is resolved through one audited registry. A legacy key that wins a
+process lookup emits one content-free warning per key per process; canonical winners, absent keys,
+and explicitly supplied environment mappings are silent. Compatibility lookup mode is
+setting-specific so empty-value behavior remains stable. For the generic LLM credential, the order
+is `OPENCLAW_LLM_API_KEY`, `MOLTBOT_LLM_API_KEY`, then `CLAWDBOT_LLM_API_KEY`.
+`CLAWDBOT_GATEWAY_TOKEN` is not a supported environment alias.
+
 ## Operator Visibility
 
 Legacy API path requests expose deprecation response headers when the response type supports headers:

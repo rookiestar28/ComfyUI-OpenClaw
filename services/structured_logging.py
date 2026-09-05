@@ -9,36 +9,21 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+
+from .env_aliases import get_env_value
 
 _CONFIGURED_LOGGERS: set[str] = set()
 _LOCK = threading.RLock()
 
 
 def is_structured_logging_enabled() -> bool:
-    value = (
-        (
-            os.environ.get("OPENCLAW_LOG_FORMAT")
-            or os.environ.get("MOLTBOT_LOG_FORMAT")
-            or ""
-        )
-        .strip()
-        .lower()
-    )
+    value = (get_env_value("OPENCLAW_LOG_FORMAT", default="") or "").strip().lower()
     if value == "json":
         return True
-    flag = (
-        (
-            os.environ.get("OPENCLAW_STRUCTURED_LOGS")
-            or os.environ.get("MOLTBOT_STRUCTURED_LOGS")
-            or ""
-        )
-        .strip()
-        .lower()
-    )
+    flag = (get_env_value("OPENCLAW_STRUCTURED_LOGS", default="") or "").strip().lower()
     return flag in {"1", "true", "yes", "on"}
 
 

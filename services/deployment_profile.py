@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, Mapping, Optional
 
+from .env_aliases import EnvLookupMode, resolve_env
+
 try:
     from .connector_allowlist_posture import evaluate_connector_allowlist_posture
 except Exception:
@@ -109,11 +111,15 @@ def _env_get(
     legacy: Optional[str] = None,
     default: str = "",
 ) -> str:
-    if primary in env:
-        return str(env.get(primary, default))
-    if legacy and legacy in env:
-        return str(env.get(legacy, default))
-    return default
+    resolution = resolve_env(
+        primary,
+        aliases=(legacy,) if legacy else (),
+        mode=EnvLookupMode.PRESENCE,
+        default=default,
+        env=env,
+        warn_legacy=False,
+    )
+    return str(resolution.value)
 
 
 def _is_enabled(

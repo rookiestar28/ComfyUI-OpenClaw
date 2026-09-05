@@ -15,6 +15,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover (optional for unit tests)
     web = None  # type: ignore
 
+from ..env_aliases import EnvLookupMode, get_env_value
 from .bridge_contract import BridgeScope
 
 try:
@@ -58,11 +59,15 @@ def _cert_tag(cert_hash: Optional[str]) -> str:
 
 def _env_get(primary: str, legacy: str, default: str = "") -> str:
     """Get env var value (prefers new names, falls back to legacy). Respects empty-string overrides."""
-    if primary in os.environ:
-        return os.environ.get(primary, default)
-    if legacy in os.environ:
-        return os.environ.get(legacy, default)
-    return default
+    return (
+        get_env_value(
+            primary,
+            aliases=(legacy,),
+            mode=EnvLookupMode.PRESENCE,
+            default=default,
+        )
+        or ""
+    )
 
 
 def is_bridge_enabled() -> bool:

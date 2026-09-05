@@ -11,19 +11,17 @@ Provides deterministic API-key resolution via pluggable providers:
 from __future__ import annotations
 
 import logging
-import os
 import re
 import subprocess
 from pathlib import Path
 from typing import Optional, Protocol
 
+from .env_aliases import get_env_value
+
 try:
-    from .config_layers import GENERIC_LLM_API_KEY_ENV_KEYS, get_preferred_env_value
+    from .config_layers import GENERIC_LLM_API_KEY_ENV_KEYS
 except ImportError:
-    from services.config_layers import (  # type: ignore
-        GENERIC_LLM_API_KEY_ENV_KEYS,
-        get_preferred_env_value,
-    )
+    from services.config_layers import GENERIC_LLM_API_KEY_ENV_KEYS  # type: ignore
 
 try:
     from .providers.catalog import get_provider_info
@@ -63,10 +61,7 @@ def _is_truthy(value: Optional[str]) -> bool:
 def _env_value(
     primary: str, legacy: str, default: Optional[str] = None
 ) -> Optional[str]:
-    value, _used_legacy = get_preferred_env_value(primary, legacy)
-    if value is None:
-        return default
-    return value
+    return get_env_value(primary, aliases=(legacy,), default=default)
 
 
 class SecretProvider(Protocol):
@@ -91,17 +86,19 @@ class EnvSecretProvider:
 
     def get_secret(self, provider: str, tenant_id: str) -> Optional[str]:
         # Provider-specific first
-        for env_name in self._provider_env_candidates(provider):
-            value = os.environ.get(env_name)
+        provider_candidates = self._provider_env_candidates(provider)
+        if provider_candidates:
+            value = get_env_value(
+                provider_candidates[0], aliases=provider_candidates[1:]
+            )
             if value:
                 return value
 
         # Generic fallback
-        for env_name in GENERIC_LLM_API_KEY_ENV_KEYS:
-            value = os.environ.get(env_name)
-            if value:
-                return value
-        return None
+        return get_env_value(
+            GENERIC_LLM_API_KEY_ENV_KEYS[0],
+            aliases=GENERIC_LLM_API_KEY_ENV_KEYS[1:],
+        )
 
 
 class OnePasswordSecretProvider:

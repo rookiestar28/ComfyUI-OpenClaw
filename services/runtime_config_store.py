@@ -9,6 +9,8 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
+from .env_aliases import get_env_value
+
 try:
     from .runtime_guardrails import strip_runtime_only_config_fields
 except ImportError:
@@ -144,9 +146,5 @@ def save_file_config(
 
 
 def _allow_tenant_config_fallback() -> bool:
-    value = (
-        os.environ.get("OPENCLAW_MULTI_TENANT_ALLOW_CONFIG_FALLBACK")
-        or os.environ.get("MOLTBOT_MULTI_TENANT_ALLOW_CONFIG_FALLBACK")
-        or "0"
-    )
+    value = get_env_value("OPENCLAW_MULTI_TENANT_ALLOW_CONFIG_FALLBACK", default="0")
     return str(value).strip().lower() in ("1", "true", "yes", "on")

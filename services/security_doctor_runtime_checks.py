@@ -8,6 +8,7 @@ import stat
 import sys
 from pathlib import Path
 
+from .env_aliases import get_env_value
 from .security_doctor_report import (
     SecurityCheckResult,
     SecurityReport,
@@ -27,9 +28,7 @@ def check_state_dir_permissions(report: SecurityReport) -> None:
 
             state_dir = get_state_dir()
         except Exception:
-            state_dir = os.environ.get("OPENCLAW_STATE_DIR") or os.environ.get(
-                "MOLTBOT_STATE_DIR"
-            )
+            state_dir = get_env_value("OPENCLAW_STATE_DIR")
 
     if not state_dir:
         report.add(

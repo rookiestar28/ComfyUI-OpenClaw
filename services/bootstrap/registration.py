@@ -13,6 +13,8 @@ import threading
 import time
 from collections.abc import Callable
 
+from ..env_aliases import get_env_value
+
 _routes_registered = False
 _registration_condition = threading.Condition(threading.RLock())
 _registration_inflight = False
@@ -25,11 +27,7 @@ _REGISTRATION_INITIAL_DELAY_SEC = 2.0
 
 
 def _resolve_optional_warmup_timeout_sec() -> float:
-    raw = (
-        os.environ.get("OPENCLAW_STARTUP_WARMUP_TIMEOUT_SEC")
-        or os.environ.get("MOLTBOT_STARTUP_WARMUP_TIMEOUT_SEC")
-        or "5"
-    )
+    raw = get_env_value("OPENCLAW_STARTUP_WARMUP_TIMEOUT_SEC", default="5") or "5"
     try:
         return max(0.1, min(float(raw), 60.0))
     except (TypeError, ValueError):

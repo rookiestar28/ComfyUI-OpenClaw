@@ -18,7 +18,6 @@ Endpoints:
 from __future__ import annotations
 
 import logging
-import os
 from typing import Optional
 
 # Import discipline:
@@ -30,6 +29,7 @@ if __package__ and "." in __package__:
     from ..services.aiohttp_compat import import_aiohttp_web
     from ..services.audit import emit_audit_event
     from ..services.csrf_protection import require_same_origin_if_no_token
+    from ..services.env_aliases import get_env_value
     from ..services.metrics import metrics
     from ..services.rate_limit import build_rate_limit_response, check_rate_limit
     from ..services.request_ip import get_client_ip
@@ -42,6 +42,7 @@ else:  # pragma: no cover (test-only import mode)
     from services.aiohttp_compat import import_aiohttp_web  # type: ignore
     from services.audit import emit_audit_event  # type: ignore
     from services.csrf_protection import require_same_origin_if_no_token  # type: ignore
+    from services.env_aliases import get_env_value
     from services.metrics import metrics  # type: ignore
     from services.rate_limit import (  # type: ignore
         build_rate_limit_response,
@@ -77,9 +78,7 @@ _TRUTHY = ("1", "true", "yes", "on")
 
 def _deny_if_remote_admin_not_allowed(request: web.Request) -> Optional[web.Response]:
     allow_remote = (
-        os.environ.get("OPENCLAW_ALLOW_REMOTE_ADMIN")
-        or os.environ.get("MOLTBOT_ALLOW_REMOTE_ADMIN")
-        or ""
+        get_env_value("OPENCLAW_ALLOW_REMOTE_ADMIN", default="") or ""
     ).lower()
     if allow_remote in _TRUTHY:
         return None

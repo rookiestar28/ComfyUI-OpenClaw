@@ -28,6 +28,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .env_aliases import EnvLookupMode, get_env_value
+
 # ---------------------------------------------------------------------------
 # Result types
 # ---------------------------------------------------------------------------
@@ -483,8 +485,11 @@ def check_compatibility_matrix_governance(
 
 def check_state_dir(report: DoctorReport) -> None:
     """Check state directory accessibility."""
-    state_dir = os.environ.get("MOLTBOT_STATE_DIR") or os.environ.get(
-        "OPENCLAW_STATE_DIR"
+    # IMPORTANT: canonical must be evaluated before the legacy alias. Reversing this order makes
+    # doctor inspect a different directory than runtime when both variables are configured.
+    state_dir = get_env_value(
+        "OPENCLAW_STATE_DIR",
+        mode=EnvLookupMode.NONEMPTY,
     )
     if not state_dir:
         report.add(
@@ -527,12 +532,8 @@ def check_state_dir(report: DoctorReport) -> None:
 
 def check_token_posture(report: DoctorReport) -> None:
     """Check admin/observability token configuration."""
-    admin_token = os.environ.get("OPENCLAW_ADMIN_TOKEN") or os.environ.get(
-        "MOLTBOT_ADMIN_TOKEN"
-    )
-    obs_token = os.environ.get("OPENCLAW_OBSERVABILITY_TOKEN") or os.environ.get(
-        "MOLTBOT_OBSERVABILITY_TOKEN"
-    )
+    admin_token = get_env_value("OPENCLAW_ADMIN_TOKEN")
+    obs_token = get_env_value("OPENCLAW_OBSERVABILITY_TOKEN")
 
     if admin_token:
         report.add(

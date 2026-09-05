@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
+from .env_aliases import get_env_value
 from .job_events import JobEventType, get_job_event_store
 from .model_manager_catalog import (
     collect_catalog_entries as _collect_catalog_entries_impl,
@@ -431,9 +432,7 @@ class ModelManager:
         self.catalog_dir.mkdir(parents=True, exist_ok=True)
         self.staging_dir.mkdir(parents=True, exist_ok=True)
         root_env = (
-            os.environ.get("OPENCLAW_MODEL_INSTALL_ROOT")
-            or os.environ.get("MOLTBOT_MODEL_INSTALL_ROOT")
-            or ""
+            get_env_value("OPENCLAW_MODEL_INSTALL_ROOT", default="") or ""
         ).strip()
         # CRITICAL: keep explicit branch order. A compact inline ternary here can
         # accidentally ignore injected test/runtime install_root overrides.
@@ -446,18 +445,14 @@ class ModelManager:
         self.install_root = resolved_install_root
         self.install_root.mkdir(parents=True, exist_ok=True)
         self.allow_hosts = _parse_hosts(
-            os.environ.get("OPENCLAW_MODEL_DOWNLOAD_ALLOW_HOSTS")
-            or os.environ.get("MOLTBOT_MODEL_DOWNLOAD_ALLOW_HOSTS")
-            or ""
+            get_env_value("OPENCLAW_MODEL_DOWNLOAD_ALLOW_HOSTS", default="") or ""
         )
         self.allow_any_public = _truthy(
-            os.environ.get("OPENCLAW_MODEL_DOWNLOAD_ALLOW_ANY_PUBLIC")
-            or os.environ.get("MOLTBOT_MODEL_DOWNLOAD_ALLOW_ANY_PUBLIC")
+            get_env_value("OPENCLAW_MODEL_DOWNLOAD_ALLOW_ANY_PUBLIC", default="0")
             or "0"
         )
         self.allow_loopback_hosts = _parse_hosts(
-            os.environ.get("OPENCLAW_MODEL_DOWNLOAD_ALLOW_LOOPBACK_HOSTS")
-            or os.environ.get("MOLTBOT_MODEL_DOWNLOAD_ALLOW_LOOPBACK_HOSTS")
+            get_env_value("OPENCLAW_MODEL_DOWNLOAD_ALLOW_LOOPBACK_HOSTS", default="")
             or ""
         )
         self.max_workers = self._read_int(
@@ -515,18 +510,16 @@ class ModelManager:
     def _read_int(
         keys: tuple[str, ...], default: int, minimum: int, maximum: int
     ) -> int:
-        for key in keys:
-            raw = os.environ.get(key)
-            if raw is None or str(raw).strip() == "":
-                continue
-            try:
-                val = int(str(raw).strip())
-            except Exception:
-                return default
-            if val < minimum or val > maximum:
-                return default
-            return val
-        return default
+        raw = get_env_value(keys[0], aliases=keys[1:])
+        if raw is None or str(raw).strip() == "":
+            return default
+        try:
+            val = int(str(raw).strip())
+        except Exception:
+            return default
+        if val < minimum or val > maximum:
+            return default
+        return val
 
     @staticmethod
     def _error(code: str, detail: str, status: int = 400) -> ModelManagerError:

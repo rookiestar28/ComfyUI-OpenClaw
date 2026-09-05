@@ -4,7 +4,6 @@ CRUD endpoints for local presets.
 """
 
 import logging
-import os
 import time
 from typing import Optional
 
@@ -43,6 +42,12 @@ else:
     "services.tenant_context",
     ("TenantBoundaryError", "request_tenant_scope"),
 )
+(get_env_value,) = import_attrs_dual(
+    __package__,
+    "..services.env_aliases",
+    "services.env_aliases",
+    ("get_env_value",),
+)
 
 logger = logging.getLogger("ComfyUI-OpenClaw.api.presets")
 web = import_aiohttp_web()
@@ -69,16 +74,10 @@ class PresetHandlers:
         # 1. OPENCLAW_PRESETS_PUBLIC_READ (or legacy MOLTBOT_PRESETS_PUBLIC_READ) = '0' (Explicitly disabled)
         # 2. OPENCLAW_STRICT_LOCALHOST_AUTH (or legacy MOLTBOT_STRICT_LOCALHOST_AUTH) = '1' (Implicit strict mode)
 
-        public_read = (
-            os.environ.get("OPENCLAW_PRESETS_PUBLIC_READ")
-            or os.environ.get("MOLTBOT_PRESETS_PUBLIC_READ")
-            or "1"
-        ) == "1"
+        public_read = get_env_value("OPENCLAW_PRESETS_PUBLIC_READ", default="1") == "1"
         strict_auth = (
-            os.environ.get("OPENCLAW_STRICT_LOCALHOST_AUTH")
-            or os.environ.get("MOLTBOT_STRICT_LOCALHOST_AUTH")
-            or "1"
-        ) == "1"
+            get_env_value("OPENCLAW_STRICT_LOCALHOST_AUTH", default="1") == "1"
+        )
 
         # If public read is OFF, or Strict Mode is ON, we gate it.
         if not public_read or strict_auth:
@@ -118,16 +117,10 @@ class PresetHandlers:
     async def get_preset(self, request: web.Request) -> web.Response:
         """GET /moltbot/presets/{preset_id}"""
         # Milestone B: Auth Check
-        public_read = (
-            os.environ.get("OPENCLAW_PRESETS_PUBLIC_READ")
-            or os.environ.get("MOLTBOT_PRESETS_PUBLIC_READ")
-            or "1"
-        ) == "1"
+        public_read = get_env_value("OPENCLAW_PRESETS_PUBLIC_READ", default="1") == "1"
         strict_auth = (
-            os.environ.get("OPENCLAW_STRICT_LOCALHOST_AUTH")
-            or os.environ.get("MOLTBOT_STRICT_LOCALHOST_AUTH")
-            or "1"
-        ) == "1"
+            get_env_value("OPENCLAW_STRICT_LOCALHOST_AUTH", default="1") == "1"
+        )
 
         if not public_read or strict_auth:
             allowed, error = require_admin_token(request)

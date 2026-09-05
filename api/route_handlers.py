@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 from collections.abc import Callable
 from contextlib import suppress
@@ -11,6 +10,11 @@ from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger("ComfyUI-OpenClaw")
+
+if __package__ and "." in __package__:
+    from ..services.env_aliases import get_env_value
+else:  # pragma: no cover - test-only import mode
+    from services.env_aliases import get_env_value
 
 
 @dataclass(frozen=True)
@@ -107,9 +111,7 @@ async def health_response(request: Any, deps: RouteHandlerDependencies) -> Any:
         _ = is_loopback
 
         token_val = (
-            os.environ.get("OPENCLAW_OBSERVABILITY_TOKEN")
-            or os.environ.get("MOLTBOT_OBSERVABILITY_TOKEN")
-            or ""
+            get_env_value("OPENCLAW_OBSERVABILITY_TOKEN", default="") or ""
         ).strip()
         token_configured = bool(token_val)
     except ImportError:
@@ -118,9 +120,7 @@ async def health_response(request: Any, deps: RouteHandlerDependencies) -> Any:
         _ = is_loopback
 
         token_val = (
-            os.environ.get("OPENCLAW_OBSERVABILITY_TOKEN")
-            or os.environ.get("MOLTBOT_OBSERVABILITY_TOKEN")
-            or ""
+            get_env_value("OPENCLAW_OBSERVABILITY_TOKEN", default="") or ""
         ).strip()
         token_configured = bool(token_val)
     policy_mode = "token" if token_configured else "loopback_only"

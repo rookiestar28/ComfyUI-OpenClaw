@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 from typing import Optional
 
 # Import discipline:
@@ -30,6 +29,7 @@ if __package__ and "." in __package__:
         RoutePlane,
         endpoint_metadata,
     )
+    from ..services.env_aliases import get_env_value
     from ..services.execution_budgets import BudgetExceededError
     from ..services.templates import is_template_allowed
     from ..services.trace import generate_trace_id
@@ -42,6 +42,7 @@ else:  # pragma: no cover (test-only import mode)
         RoutePlane,
         endpoint_metadata,
     )
+    from services.env_aliases import get_env_value
     from services.execution_budgets import BudgetExceededError  # type: ignore
     from services.templates import is_template_allowed  # type: ignore
     from services.trace import generate_trace_id  # type: ignore
@@ -52,10 +53,8 @@ web = import_aiohttp_web()
 
 # Default: require approval for external triggers (secure-by-default)
 REQUIRE_APPROVAL_DEFAULT = (
-    os.environ.get("OPENCLAW_REQUIRE_APPROVAL_FOR_TRIGGERS")
-    or os.environ.get("MOLTBOT_REQUIRE_APPROVAL_FOR_TRIGGERS")
-    or "0"
-) == "1"
+    get_env_value("OPENCLAW_REQUIRE_APPROVAL_FOR_TRIGGERS", default="0") == "1"
+)
 
 
 class TriggerHandlers:

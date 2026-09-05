@@ -11,6 +11,8 @@ import os
 from threading import Lock
 from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple
 
+from .env_aliases import EnvLookupMode, resolve_env
+
 SOURCE_ENV = "env"
 SOURCE_RUNTIME_OVERRIDE = "runtime_override"
 SOURCE_PERSISTED = "persisted"
@@ -53,11 +55,18 @@ def get_first_present_env(
     keys: Iterable[str], *, env: Optional[Mapping[str, str]] = None
 ) -> Optional[str]:
     """Return the first env value by presence (not truthiness)."""
+    ordered_keys = tuple(keys)
+    if not ordered_keys:
+        return None
+    # Preserve the historical empty-mapping fallback at this compatibility facade.
     env_map = env or os.environ
-    for key in keys:
-        if key in env_map:
-            return env_map.get(key)
-    return None
+    return resolve_env(
+        ordered_keys[0],
+        aliases=ordered_keys[1:],
+        mode=EnvLookupMode.PRESENCE,
+        env=env_map,
+        warn_legacy=env is None,
+    ).value
 
 
 def get_preferred_env_value(
@@ -70,11 +79,16 @@ def get_preferred_env_value(
     count as a deliberate override.
     """
     env_map = env or os.environ
-    if primary in env_map:
-        return env_map.get(primary), False
-    if legacy and legacy in env_map:
-        return env_map.get(legacy), True
-    return None, False
+    result = resolve_env(
+        primary,
+        aliases=(legacy,) if legacy else (),
+        mode=EnvLookupMode.PRESENCE,
+        env=env_map,
+        # This compatibility facade reports provenance to its caller; warning ownership remains
+        # with that caller until its migration selects a central resolver policy explicitly.
+        warn_legacy=False,
+    )
+    return result.value, result.used_legacy
 
 
 def get_runtime_overrides(section: str) -> Dict[str, Any]:

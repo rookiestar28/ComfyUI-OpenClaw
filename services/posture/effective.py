@@ -9,6 +9,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from ..env_aliases import EnvLookupMode, resolve_env
+
 SCHEMA_VERSION = 1
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 _FALSY = frozenset({"0", "false", "no", "off"})
@@ -85,12 +87,14 @@ def _read(
     default: str = "",
 ) -> str:
     try:
-        if primary in environ:
-            value = environ.get(primary, default)
-        elif legacy and legacy in environ:
-            value = environ.get(legacy, default)
-        else:
-            value = default
+        value = resolve_env(
+            primary,
+            aliases=(legacy,) if legacy else (),
+            mode=EnvLookupMode.PRESENCE,
+            default=default,
+            env=environ,
+            warn_legacy=False,
+        ).value
     except Exception:
         # CRITICAL: malformed environment providers must fail closed without echoing
         # exception content or the attempted value into diagnostics.

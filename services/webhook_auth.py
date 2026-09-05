@@ -10,9 +10,9 @@ Supports:
 import hashlib
 import hmac
 import logging
-import os
 from typing import Mapping, Optional, Protocol, Tuple
 
+from .env_aliases import EnvLookupMode, get_env_value
 from .legacy_compat import (
     WEBHOOK_NONCE_HEADERS,
     WEBHOOK_SIGNATURE_HEADERS,
@@ -52,11 +52,12 @@ class RequestLike(Protocol):
 
 def _env_get(primary: str, legacy: str, default: Optional[str] = None) -> Optional[str]:
     """Get env var value (prefers new names, falls back to legacy). Respects empty-string overrides."""
-    if primary in os.environ:
-        return os.environ.get(primary)
-    if legacy in os.environ:
-        return os.environ.get(legacy)
-    return default
+    return get_env_value(
+        primary,
+        aliases=(legacy,),
+        mode=EnvLookupMode.PRESENCE,
+        default=default,
+    )
 
 
 def get_auth_mode() -> str:

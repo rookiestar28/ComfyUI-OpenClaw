@@ -4,9 +4,9 @@ R16/S11: Key lookup policy per provider with pluggable secret-provider chain.
 """
 
 import logging
-import os
 from typing import Optional
 
+from ..env_aliases import get_env_value
 from ..secret_providers import resolve_provider_secret
 from .catalog import PROVIDER_CATALOG, get_provider_info
 
@@ -87,20 +87,17 @@ def get_all_configured_keys(tenant_id: Optional[str] = None) -> dict:
             provider_candidates.append(info.env_key_name)
 
             source = None
-            for env_name in provider_candidates:
-                value = os.environ.get(env_name)
-                if value:
-                    key = value
+            if provider_candidates:
+                key = get_env_value(
+                    provider_candidates[0], aliases=provider_candidates[1:]
+                )
+                if key:
                     source = "env"
-                    break
 
             if key is None:
-                for env_name in GENERIC_KEY_NAMES:
-                    value = os.environ.get(env_name)
-                    if value:
-                        key = value
-                        source = "env"
-                        break
+                key = get_env_value(GENERIC_KEY_NAMES[0], aliases=GENERIC_KEY_NAMES[1:])
+                if key:
+                    source = "env"
 
             if key is None and (
                 provider_id in store_status or "generic" in store_status
@@ -132,12 +129,9 @@ def get_all_configured_keys(tenant_id: Optional[str] = None) -> dict:
     # Add generic key status for diagnostics.
     generic_key = None
     generic_source = None
-    for env_name in GENERIC_KEY_NAMES:
-        value = os.environ.get(env_name)
-        if value:
-            generic_key = value
-            generic_source = "env"
-            break
+    generic_key = get_env_value(GENERIC_KEY_NAMES[0], aliases=GENERIC_KEY_NAMES[1:])
+    if generic_key:
+        generic_source = "env"
     if generic_key is None and "generic" in store_status:
         generic_source = "server_store"
     if generic_key is None and generic_source is None:

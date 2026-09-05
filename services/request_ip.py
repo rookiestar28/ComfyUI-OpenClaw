@@ -5,8 +5,9 @@ Handles safe extraction of client IP behind reverse proxies.
 
 import ipaddress
 import logging
-import os
 from typing import List, Optional
+
+from .env_aliases import get_env_value
 
 logger = logging.getLogger("ComfyUI-OpenClaw.services.request_ip")
 
@@ -16,11 +17,7 @@ def get_trusted_proxies() -> List[ipaddress.IPv4Network]:
     Parse OPENCLAW_TRUSTED_PROXIES (or legacy MOLTBOT_TRUSTED_PROXIES) env var into list of networks.
     Example: "127.0.0.1,10.0.0.0/8"
     """
-    raw = (
-        os.environ.get("OPENCLAW_TRUSTED_PROXIES")
-        or os.environ.get("MOLTBOT_TRUSTED_PROXIES")
-        or ""
-    ).strip()
+    raw = (get_env_value("OPENCLAW_TRUSTED_PROXIES", default="") or "").strip()
     if not raw:
         return []
 
@@ -80,11 +77,7 @@ def get_client_ip(request) -> str:
     remote = request.remote or ""
 
     # Check opt-in
-    trust_xf_raw = (
-        os.environ.get("OPENCLAW_TRUST_X_FORWARDED_FOR")
-        or os.environ.get("MOLTBOT_TRUST_X_FORWARDED_FOR")
-        or "0"
-    )
+    trust_xf_raw = get_env_value("OPENCLAW_TRUST_X_FORWARDED_FOR", default="0")
     trust_xf = trust_xf_raw in ("1", "true", "True", "yes")
     if not trust_xf:
         return remote

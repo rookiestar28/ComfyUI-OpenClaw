@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from .config_projection_handlers import ConfigHandlerDependencies
+
+if __package__ and "." in __package__:
+    from ..services.env_aliases import get_env_value
+else:  # pragma: no cover - test-only import mode
+    from services.env_aliases import get_env_value
 
 
 async def llm_models_response(request: Any, deps: ConfigHandlerDependencies) -> Any:
@@ -44,9 +48,7 @@ async def llm_models_response(request: Any, deps: ConfigHandlerDependencies) -> 
                     {"ok": False, "error": error or "Unauthorized"}, status=403
                 )
             allow_remote = (
-                os.environ.get("OPENCLAW_ALLOW_REMOTE_ADMIN")
-                or os.environ.get("MOLTBOT_ALLOW_REMOTE_ADMIN")
-                or ""
+                get_env_value("OPENCLAW_ALLOW_REMOTE_ADMIN", default="") or ""
             ).lower()
             if allow_remote not in ("1", "true", "yes", "on"):
                 remote = request.remote or ""

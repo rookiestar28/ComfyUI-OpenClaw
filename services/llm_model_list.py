@@ -8,14 +8,15 @@ test compatibility surface.
 
 from __future__ import annotations
 
-import os
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
 
 if __package__ and "." in __package__:
+    from .env_aliases import EnvLookupMode, get_env_value
     from .import_fallback import import_module_dual
 else:
+    from services.env_aliases import EnvLookupMode, get_env_value
     from services.import_fallback import import_module_dual  # type: ignore
 
 _MODEL_LIST_CACHE: OrderedDict = OrderedDict()
@@ -88,9 +89,7 @@ def get_stale_cached_models(key: tuple):
 
 
 def get_llm_allowed_hosts() -> set[str]:
-    allowed_hosts_str = os.environ.get("OPENCLAW_LLM_ALLOWED_HOSTS") or os.environ.get(
-        "MOLTBOT_LLM_ALLOWED_HOSTS", ""
-    )
+    allowed_hosts_str = get_env_value("OPENCLAW_LLM_ALLOWED_HOSTS", default="") or ""
     env_hosts = {h.lower().strip() for h in allowed_hosts_str.split(",") if h.strip()}
     catalog = _providers_catalog_module()
     return set(catalog.get_default_public_llm_hosts()) | env_hosts
@@ -108,9 +107,10 @@ def format_llm_ssrf_error(exc: Exception) -> str:
 
 
 def llm_insecure_override_enabled() -> bool:
-    val = os.environ.get("OPENCLAW_ALLOW_INSECURE_BASE_URL")
-    if val is None:
-        val = os.environ.get("MOLTBOT_ALLOW_INSECURE_BASE_URL")
+    val = get_env_value(
+        "OPENCLAW_ALLOW_INSECURE_BASE_URL",
+        mode=EnvLookupMode.PRESENCE,
+    )
     if val is None:
         return False
     return str(val).strip().lower() in ("1", "true", "yes", "y", "on")

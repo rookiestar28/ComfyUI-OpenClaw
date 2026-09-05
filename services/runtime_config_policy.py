@@ -8,6 +8,9 @@ import os
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
+from .env_aliases import EnvLookupMode
+from .env_aliases import get_env_value as resolve_env_value
+
 try:
     from .config_layers import (
         ADMIN_TOKEN_ENV_KEYS,
@@ -178,13 +181,14 @@ LLM_KEY_ORDER = tuple(ENV_MAPPINGS.keys())
 
 
 def env_flag(primary: str, legacy: str, default: bool = False) -> bool:
-    if primary in os.environ:
-        value = os.environ.get(primary, "")
-    elif legacy in os.environ:
-        value = os.environ.get(legacy, "")
-    else:
+    resolution = resolve_env_value(
+        primary,
+        aliases=(legacy,),
+        mode=EnvLookupMode.PRESENCE,
+    )
+    if resolution is None:
         return default
-    return str(value).strip().lower() in ("1", "true", "yes", "on")
+    return str(resolution).strip().lower() in ("1", "true", "yes", "on")
 
 
 def get_env_value(
@@ -228,8 +232,8 @@ def get_llm_egress_controls(
     Callers must reuse this same control set for both pre-validation and request-time
     validation. Diverging parameters caused the S65 loopback regression.
     """
-    allowed_hosts_str = os.environ.get("OPENCLAW_LLM_ALLOWED_HOSTS") or os.environ.get(
-        "MOLTBOT_LLM_ALLOWED_HOSTS", ""
+    allowed_hosts_str = (
+        resolve_env_value("OPENCLAW_LLM_ALLOWED_HOSTS", default="") or ""
     )
     env_hosts = {
         host.lower().strip() for host in allowed_hosts_str.split(",") if host.strip()

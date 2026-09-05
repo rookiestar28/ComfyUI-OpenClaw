@@ -7,6 +7,7 @@ import json
 import os
 from typing import Dict
 
+from .env_aliases import get_env_value
 from .security_doctor_report import (
     SecurityCheckResult,
     SecurityReport,
@@ -31,17 +32,13 @@ HIGH_RISK_FLAGS: Dict[str, str] = {
     "OPENCLAW_ENABLE_BRIDGE": "Sidecar bridge",
     "OPENCLAW_ENABLE_TRANSFORMS": "Constrained transforms (F42)",
     "OPENCLAW_ENABLE_REGISTRY_SYNC": "Remote registry sync (F41)",
-    "MOLTBOT_DEV_MODE": "Development mode (auth bypass)",
+    "OPENCLAW_DEV_MODE": "Development mode (auth bypass)",
 }
 
 
 def check_endpoint_exposure(report: SecurityReport) -> None:
-    admin_token = os.environ.get("OPENCLAW_ADMIN_TOKEN") or os.environ.get(
-        "MOLTBOT_ADMIN_TOKEN"
-    )
-    obs_token = os.environ.get("OPENCLAW_OBSERVABILITY_TOKEN") or os.environ.get(
-        "MOLTBOT_OBSERVABILITY_TOKEN"
-    )
+    admin_token = get_env_value("OPENCLAW_ADMIN_TOKEN")
+    obs_token = get_env_value("OPENCLAW_OBSERVABILITY_TOKEN")
 
     if not admin_token and not obs_token:
         report.add(
@@ -91,9 +88,7 @@ def check_public_shared_surface_boundary(report: SecurityReport) -> None:
         profile = "local"
 
     ack_raw = (
-        os.environ.get("OPENCLAW_PUBLIC_SHARED_SURFACE_BOUNDARY_ACK")
-        or os.environ.get("MOLTBOT_PUBLIC_SHARED_SURFACE_BOUNDARY_ACK")
-        or ""
+        get_env_value("OPENCLAW_PUBLIC_SHARED_SURFACE_BOUNDARY_ACK", default="") or ""
     ).strip()
     ack = ack_raw.lower() in {"1", "true", "yes", "on"}
 
@@ -143,15 +138,9 @@ def check_public_shared_surface_boundary(report: SecurityReport) -> None:
 
 
 def check_token_boundaries(report: SecurityReport) -> None:
-    admin_token = (
-        os.environ.get("OPENCLAW_ADMIN_TOKEN")
-        or os.environ.get("MOLTBOT_ADMIN_TOKEN")
-        or ""
-    ).strip()
+    admin_token = (get_env_value("OPENCLAW_ADMIN_TOKEN", default="") or "").strip()
     obs_token = (
-        os.environ.get("OPENCLAW_OBSERVABILITY_TOKEN")
-        or os.environ.get("MOLTBOT_OBSERVABILITY_TOKEN")
-        or ""
+        get_env_value("OPENCLAW_OBSERVABILITY_TOKEN", default="") or ""
     ).strip()
 
     if admin_token and obs_token and admin_token == obs_token:
@@ -188,12 +177,13 @@ def check_token_boundaries(report: SecurityReport) -> None:
 
 
 def check_ssrf_posture(report: SecurityReport) -> None:
+    # IMPORTANT: preserve the historical two-family order. Resolving ALLOWLIST before
+    # exhausting ALLOW_HOSTS aliases changes which restriction governs SSRF checks.
     callback_allowlist = (
-        os.environ.get("OPENCLAW_CALLBACK_ALLOW_HOSTS", "").strip()
-        or os.environ.get("MOLTBOT_CALLBACK_ALLOW_HOSTS", "").strip()
-        or os.environ.get("OPENCLAW_CALLBACK_ALLOWLIST", "").strip()
-        or os.environ.get("MOLTBOT_CALLBACK_ALLOWLIST", "").strip()
-    )
+        get_env_value("OPENCLAW_CALLBACK_ALLOW_HOSTS", default="") or ""
+    ).strip() or (
+        get_env_value("OPENCLAW_CALLBACK_ALLOWLIST", default="") or ""
+    ).strip()
     if callback_allowlist:
         hosts = [host.strip() for host in callback_allowlist.split(",") if host.strip()]
         if any("*" in host for host in hosts):
@@ -269,7 +259,7 @@ def check_ssrf_posture(report: SecurityReport) -> None:
 def check_feature_flags(report: SecurityReport) -> None:
     enabled_flags = []
     for env_key, label in HIGH_RISK_FLAGS.items():
-        value = os.environ.get(env_key, "").strip().lower()
+        value = (get_env_value(env_key, default="") or "").strip().lower()
         if value in ("1", "true", "yes", "on"):
             enabled_flags.append(f"{env_key} ({label})")
 
@@ -296,12 +286,7 @@ def check_feature_flags(report: SecurityReport) -> None:
 
 
 def check_api_key_posture(report: SecurityReport) -> None:
-    api_key = (
-        os.environ.get("OPENCLAW_LLM_API_KEY")
-        or os.environ.get("MOLTBOT_LLM_API_KEY")
-        or os.environ.get("CLAWDBOT_LLM_API_KEY")
-        or ""
-    )
+    api_key = get_env_value("OPENCLAW_LLM_API_KEY", default="") or ""
 
     if not api_key:
         report.add(

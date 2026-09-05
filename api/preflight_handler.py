@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Any, Dict
 
 try:
@@ -19,6 +18,7 @@ except ImportError:
 if __package__ and "." in __package__:
     from ..models.schemas import MAX_BODY_SIZE
     from ..services.access_control import is_loopback, require_admin_token
+    from ..services.env_aliases import get_env_value
     from ..services.preflight import (
         _get_node_class_mappings,
         get_model_inventory_snapshot,
@@ -30,6 +30,7 @@ if __package__ and "." in __package__:
 else:  # pragma: no cover (test-only import mode)
     from models.schemas import MAX_BODY_SIZE  # type: ignore
     from services.access_control import is_loopback, require_admin_token  # type: ignore
+    from services.env_aliases import get_env_value
     from services.preflight import (  # type: ignore
         _get_node_class_mappings,
         get_model_inventory_snapshot,
@@ -65,13 +66,7 @@ logger = logging.getLogger("ComfyUI-OpenClaw.api.preflight")
 
 def _remote_admin_allowed() -> bool:
     val = (
-        (
-            os.environ.get("OPENCLAW_ALLOW_REMOTE_ADMIN")
-            or os.environ.get("MOLTBOT_ALLOW_REMOTE_ADMIN")
-            or ""
-        )
-        .strip()
-        .lower()
+        (get_env_value("OPENCLAW_ALLOW_REMOTE_ADMIN", default="") or "").strip().lower()
     )
     return val in ("1", "true", "yes", "on")
 

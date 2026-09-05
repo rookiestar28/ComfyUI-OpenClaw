@@ -8,6 +8,8 @@ import os
 import sys
 from typing import Optional
 
+from .env_aliases import get_env_value
+
 logger = logging.getLogger("ComfyUI-OpenClaw.services.state_dir")
 
 # Environment variables to override state directory
@@ -46,7 +48,7 @@ def _get_user_data_dir(subdir: Optional[str] = None) -> str:
 
 def _resolve_state_dir_path() -> str:
     """Resolve the canonical state-dir path without creating it."""
-    env_dir = os.environ.get(STATE_DIR_ENV) or os.environ.get(LEGACY_STATE_DIR_ENV)
+    env_dir = get_env_value(STATE_DIR_ENV, aliases=(LEGACY_STATE_DIR_ENV,))
     if env_dir:
         return os.path.abspath(env_dir)
 

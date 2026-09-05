@@ -5,6 +5,13 @@ import time
 from logging.handlers import RotatingFileHandler
 from typing import Optional
 
+try:
+    from .services.env_aliases import EnvLookupMode
+    from .services.env_aliases import get_env_value as resolve_env_value
+except ImportError:
+    from services.env_aliases import EnvLookupMode
+    from services.env_aliases import get_env_value as resolve_env_value
+
 # R139: centralized env-alias helpers for config surface compatibility.
 try:
     from .services.config_layers import (
@@ -27,11 +34,15 @@ except Exception:
         )
 
         def get_first_present_env(keys, *, env=None):  # type: ignore
-            env_map = env or os.environ
-            for key in keys:
-                if key in env_map:
-                    return env_map.get(key)
-            return None
+            ordered_keys = tuple(keys)
+            if not ordered_keys:
+                return None
+            return resolve_env_value(
+                ordered_keys[0],
+                aliases=ordered_keys[1:],
+                mode=EnvLookupMode.PRESENCE,
+                env=env,
+            )
 
         def get_effective_llm_api_key(provider=None, tenant_id=None):  # type: ignore
             return get_first_present_env(GENERIC_LLM_API_KEY_ENV_KEYS)
@@ -167,11 +178,18 @@ _LOG_TRUNCATE_APPLIED = False
 
 
 def _is_env_enabled(*keys: str) -> bool:
-    for key in keys:
-        val = (os.environ.get(key) or "").strip().lower()
-        if val in {"1", "true", "yes", "on"}:
-            return True
-    return False
+    if not keys:
+        return False
+    # IMPORTANT: this is intentionally TRUTHY_ANY. An explicit false canonical flag must
+    # not suppress a true legacy log-truncation flag during the compatibility window.
+    return (
+        resolve_env_value(
+            keys[0],
+            aliases=keys[1:],
+            mode=EnvLookupMode.TRUTHY_ANY,
+        )
+        is not None
+    )
 
 
 def _maybe_truncate_log_on_start(logger: logging.Logger) -> None:

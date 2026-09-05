@@ -40,6 +40,15 @@ configure_logger_for_structured_output, emit_structured_log = cast(
         ("configure_logger_for_structured_output", "emit_structured_log"),
     ),
 )
+(get_env_value,) = cast(
+    tuple[Callable[..., str | None]],
+    import_attrs_dual(
+        __package__,
+        ".env_aliases",
+        "services.env_aliases",
+        ("get_env_value",),
+    ),
+)
 
 configure_logger_for_structured_output(logger)
 
@@ -56,11 +65,7 @@ import os
 )
 
 # ComfyUI internal server URL fallback
-COMFYUI_URL = (
-    os.environ.get("OPENCLAW_COMFYUI_URL")
-    or os.environ.get("MOLTBOT_COMFYUI_URL")
-    or "http://127.0.0.1:8188"
-)
+COMFYUI_URL = get_env_value("OPENCLAW_COMFYUI_URL") or "http://127.0.0.1:8188"
 # IMPORTANT: keep this fixed and prompt-free; ComfyUI forwards it into API-node hidden inputs.
 COMFY_USAGE_SOURCE = "comfyui-openclaw"
 

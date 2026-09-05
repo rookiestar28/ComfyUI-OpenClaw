@@ -9,10 +9,10 @@ The validate_auth() here is a simplified stub; it does NOT provide secure-by-def
 import hashlib
 import hmac
 import json
-import os
 import time
 from typing import Any, Dict, Optional
 
+from ..env_aliases import get_env_value
 from .session_scope import build_scope_key
 from .transport_contract import (
     DeliveryMessage,
@@ -145,16 +145,10 @@ class WebhookTransportAdapter(TransportAdapter):
         - If OPENCLAW_WEBHOOK_SECRET (or legacy MOLTBOT_WEBHOOK_SECRET) not set: PASSES (insecure, for dev only)
         - If set: validates X-OpenClaw-Signature (legacy X-Moltbot-Signature) header
         """
-        secret = os.environ.get("OPENCLAW_WEBHOOK_SECRET") or os.environ.get(
-            "MOLTBOT_WEBHOOK_SECRET", ""
-        )
+        secret = get_env_value("OPENCLAW_WEBHOOK_SECRET", default="") or ""
         if not secret:
             # S22: Fail closed unless DEV_MODE is explicit
-            dev_mode = (
-                os.environ.get("OPENCLAW_DEV_MODE")
-                or os.environ.get("MOLTBOT_DEV_MODE")
-                or "0"
-            ) == "1"
+            dev_mode = get_env_value("OPENCLAW_DEV_MODE", default="0") == "1"
             if dev_mode:
                 import logging
 

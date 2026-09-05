@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
-import os
 import re
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
+
+from .env_aliases import get_env_value
 
 DEFAULT_TENANT_ID = "default"
 TENANT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -45,18 +46,12 @@ def _is_truthy(value: Optional[str]) -> bool:
 
 
 def is_multi_tenant_enabled() -> bool:
-    return _is_truthy(
-        os.environ.get("OPENCLAW_MULTI_TENANT_ENABLED")
-        or os.environ.get("MOLTBOT_MULTI_TENANT_ENABLED")
-        or "0"
-    )
+    return _is_truthy(get_env_value("OPENCLAW_MULTI_TENANT_ENABLED", default="0"))
 
 
 def allow_default_tenant_fallback() -> bool:
     return _is_truthy(
-        os.environ.get("OPENCLAW_MULTI_TENANT_ALLOW_DEFAULT_FALLBACK")
-        or os.environ.get("MOLTBOT_MULTI_TENANT_ALLOW_DEFAULT_FALLBACK")
-        or "0"
+        get_env_value("OPENCLAW_MULTI_TENANT_ALLOW_DEFAULT_FALLBACK", default="0")
     )
 
 
@@ -74,8 +69,7 @@ def normalize_tenant_id(tenant_id: Any, *, field_name: str = "tenant_id") -> str
 
 def get_tenant_header_names() -> tuple[str, ...]:
     configured = (
-        os.environ.get("OPENCLAW_TENANT_HEADER")
-        or os.environ.get("MOLTBOT_TENANT_HEADER")
+        get_env_value("OPENCLAW_TENANT_HEADER", default="X-OpenClaw-Tenant-Id")
         or "X-OpenClaw-Tenant-Id"
     ).strip()
     # Keep explicit legacy compatibility fallback.

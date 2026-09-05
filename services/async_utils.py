@@ -9,11 +9,11 @@ can hang. This helper uses loop.run_in_executor with a plain functools.partial i
 import asyncio
 import functools
 import logging
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, Iterable, Literal, TypeVar
 
+from .env_aliases import resolve_env
 from .metrics import metrics
 
 T = TypeVar("T")
@@ -33,32 +33,35 @@ _WAIT_BUCKET_MS = 250
 def _parse_worker_count(
     env_keys: Iterable[str], default: int, *, minimum: int, maximum: int
 ) -> int:
-    for key in env_keys:
-        raw = os.environ.get(key)
-        if raw is None or str(raw).strip() == "":
-            continue
-        try:
-            parsed = int(str(raw).strip())
-        except Exception:
-            logger.warning(
-                "R129: invalid worker count for %s=%r; using safe default %d",
-                key,
-                raw,
-                default,
-            )
-            return default
-        if parsed < minimum or parsed > maximum:
-            logger.warning(
-                "R129: out-of-range worker count for %s=%r (allowed %d..%d); using safe default %d",
-                key,
-                parsed,
-                minimum,
-                maximum,
-                default,
-            )
-            return default
-        return parsed
-    return default
+    ordered_keys = tuple(env_keys)
+    if not ordered_keys:
+        return default
+    resolution = resolve_env(ordered_keys[0], aliases=ordered_keys[1:])
+    raw = resolution.value
+    if raw is None or str(raw).strip() == "":
+        return default
+    selected_key = resolution.selected_key or ordered_keys[0]
+    try:
+        parsed = int(str(raw).strip())
+    except Exception:
+        logger.warning(
+            "R129: invalid worker count for %s=%r; using safe default %d",
+            selected_key,
+            raw,
+            default,
+        )
+        return default
+    if parsed < minimum or parsed > maximum:
+        logger.warning(
+            "R129: out-of-range worker count for %s=%r (allowed %d..%d); using safe default %d",
+            selected_key,
+            parsed,
+            minimum,
+            maximum,
+            default,
+        )
+        return default
+    return parsed
 
 
 _LLM_WORKERS = _parse_worker_count(

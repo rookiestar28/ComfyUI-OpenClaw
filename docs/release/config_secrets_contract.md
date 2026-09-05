@@ -1,8 +1,8 @@
 # OpenClaw Config & Secrets Contract (v1)
 
 > **Status**: normative
-> **Version**: 1.0.6
-> **Date**: 2026-06-04
+> **Version**: 1.0.7
+> **Date**: 2026-09-05
 
 This document defines the authoritative configuration contract for OpenClaw. It enumerates all supported environment variables, their precedence rules, and security classifications.
 
@@ -14,6 +14,11 @@ This document defines the authoritative configuration contract for OpenClaw. It 
 2. **Secure by Default**: Missing optional secrets result in disabled features (fail-closed), not insecure open access.
 3. **No Plaintext Storage**: Secrets MUST NOT be stored in plaintext config files committed to version control. They should be injected via environment variables or a secure secrets manager.
 4. **Legacy Compatibility**: `MOLTBOT_*` keys are supported for backward compatibility but are deprecated. `OPENCLAW_*` keys are preferred.
+
+When a legacy environment key supplies the selected process value, OpenClaw emits at most one
+deprecation warning for that key per process. The warning contains environment key names only; it
+never includes the configured value or value-derived metadata. Deterministic evaluators that receive
+an explicit environment mapping do not emit process warnings.
 
 ---
 
@@ -45,7 +50,8 @@ Optional local secret-manager path (disabled by default):
 
 Lookup precedence for provider keys:
 1. Provider-specific env key (`OPENCLAW_*`, legacy `MOLTBOT_*`)
-2. Generic env key (`OPENCLAW_LLM_API_KEY`, legacy aliases)
+2. Generic env key in this order: `OPENCLAW_LLM_API_KEY`, `MOLTBOT_LLM_API_KEY`, then
+   `CLAWDBOT_LLM_API_KEY`
 3. Optional 1Password provider (if enabled and allowlist-valid)
 4. Encrypted server-side secret store (`secrets.enc.json`)
 
@@ -250,7 +256,7 @@ To rotate a secret (e.g., `OPENCLAW_ADMIN_TOKEN` or `OPENCLAW_LLM_API_KEY`):
 
 If multiple layers are configured for the same purpose, the following order applies:
 
-1. Environment variable layer (`OPENCLAW_*` preferred, `MOLTBOT_*` fallback only when preferred key is absent)
+1. Environment variable layer (`OPENCLAW_*` preferred, supported legacy aliases as fallback)
 2. Runtime override (process-local, non-persisted)
 3. File-based config (`OPENCLAW_STATE_DIR/config.json`)
 4. Defaults (Lowest priority)
@@ -267,3 +273,9 @@ Multi-tenant persistence note:
 Persistence guardrails:
 - Runtime-only guardrail fields (for example `runtime_guardrails` and legacy guardrail aliases) are stripped/ignored when loading persisted config and rejected on `/config` write requests.
 - This prevents runtime safety caps (timeouts/retries/provider safety clamps) from being silently converted into mutable persisted settings.
+
+Environment aliases use the compatibility semantics required by each setting. Presence-sensitive
+settings let an explicitly empty canonical value suppress a legacy value; historical
+`canonical or legacy` settings fall through an empty canonical value; the startup log-truncation
+flag remains true when any supported ordered alias is true. These modes preserve existing behavior
+while keeping canonical keys first.

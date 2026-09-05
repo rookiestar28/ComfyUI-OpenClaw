@@ -4,10 +4,11 @@ R16: Provider-agnostic facade that routes to appropriate adapters.
 """
 
 import logging
-import os
 import re
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from .env_aliases import get_env_value
 
 try:
     from ..config import setup_logger
@@ -355,9 +356,7 @@ class LLMClient:
 
     def _allow_insecure_base_url(self) -> bool:
         return (
-            os.environ.get("OPENCLAW_ALLOW_INSECURE_BASE_URL")
-            or os.environ.get("MOLTBOT_ALLOW_INSECURE_BASE_URL")
-            or ""
+            get_env_value("OPENCLAW_ALLOW_INSECURE_BASE_URL") or ""
         ).strip().lower() in ("1", "true", "yes", "y", "on")
 
     def _validate_candidate_url(self, provider: str, base_url: Optional[str]) -> bool:

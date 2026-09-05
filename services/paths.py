@@ -2,12 +2,13 @@
 OpenClaw Path Configuration (legacy-compatible).
 """
 
-import os
 from pathlib import Path
+
+from .env_aliases import get_env_value
 
 # Base state directory (repo-local)
 # Users can override via OPENCLAW_STATE_DIR (legacy: MOLTBOT_STATE_DIR).
-_env_dir = os.environ.get("OPENCLAW_STATE_DIR") or os.environ.get("MOLTBOT_STATE_DIR")
+_env_dir = get_env_value("OPENCLAW_STATE_DIR")
 _default_new = Path("openclaw_state").resolve()
 _default_legacy = Path("moltbot_state").resolve()
 

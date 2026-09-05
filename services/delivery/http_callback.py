@@ -6,11 +6,11 @@ Hardened by S21: Uses safe_io for SSRF protection.
 
 import asyncio
 import logging
-import os
 from typing import Optional, Set
 
 from ..async_utils import run_io_in_thread
 from ..chatops.transport_contract import DeliveryMessage, DeliveryTarget, TransportType
+from ..env_aliases import get_env_value
 from ..safe_io import STANDARD_OUTBOUND_POLICY, SSRFError, safe_request_json
 
 logger = logging.getLogger("ComfyUI-OpenClaw.delivery.http_callback")
@@ -25,8 +25,10 @@ def get_callback_host_allowlist() -> Optional[Set[str]]:
     Get allowlisted callback hosts (exact match).
     Returns None if no allowlist (which means DENY ALL).
     """
-    hosts_str = os.environ.get(ENV_BRIDGE_CALLBACK_HOST_ALLOWLIST) or os.environ.get(
-        LEGACY_ENV_BRIDGE_CALLBACK_HOST_ALLOWLIST, ""
+    hosts_str = get_env_value(
+        ENV_BRIDGE_CALLBACK_HOST_ALLOWLIST,
+        aliases=(LEGACY_ENV_BRIDGE_CALLBACK_HOST_ALLOWLIST,),
+        default="",
     )
     if not hosts_str:
         return None

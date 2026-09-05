@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from .env_aliases import get_env_value
 from .redaction import redact_text
 
 logger = logging.getLogger("ComfyUI-OpenClaw.services.tool_runner")
@@ -309,11 +310,7 @@ class ToolRunner:
         return raw in _TRUTHY
 
     def _sandbox_workspace(self) -> str:
-        custom = (
-            os.environ.get("OPENCLAW_TOOL_SANDBOX_DIR")
-            or os.environ.get("MOLTBOT_TOOL_SANDBOX_DIR")
-            or ""
-        ).strip()
+        custom = (get_env_value("OPENCLAW_TOOL_SANDBOX_DIR", default="") or "").strip()
         if custom:
             base = os.path.abspath(custom)
         else:

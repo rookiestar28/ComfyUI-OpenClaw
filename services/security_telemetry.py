@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Deque, Dict, List, Optional
 
 from .audit_events import build_audit_event, emit_audit_event
+from .env_aliases import EnvLookupMode, resolve_env
 
 logger = logging.getLogger("ComfyUI-OpenClaw.services.security_telemetry")
 
@@ -43,10 +44,18 @@ def _is_truthy(raw: str) -> bool:
 def is_security_telemetry_enabled(env: Optional[Dict[str, str]] = None) -> bool:
     """S9: Explicit opt-out gate for security anomaly telemetry emission."""
     env_map = env or os.environ
-    for key in TELEMETRY_OPT_OUT_ENV_KEYS:
-        if key in env_map:
-            return not _is_truthy(env_map.get(key, ""))
-    return True
+    # IMPORTANT: preserve presence-based canonical precedence. A present false canonical flag must
+    # suppress a true legacy opt-out instead of falling through to it.
+    resolution = resolve_env(
+        TELEMETRY_OPT_OUT_ENV_KEYS[0],
+        aliases=TELEMETRY_OPT_OUT_ENV_KEYS[1:],
+        mode=EnvLookupMode.PRESENCE,
+        env=env_map,
+        warn_legacy=env is None,
+    )
+    if resolution.selected_key is None:
+        return True
+    return not _is_truthy(resolution.value or "")
 
 
 @dataclass

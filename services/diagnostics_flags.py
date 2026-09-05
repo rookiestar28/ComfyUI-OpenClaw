@@ -7,9 +7,9 @@ Controlled via OPENCLAW_DIAGNOSTICS environment variable (e.g., "webhook.*,templ
 
 import fnmatch
 import logging
-import os
 from typing import Set
 
+from .env_aliases import get_env_value
 from .redaction import redact_dict_safe, redact_text
 
 # Default logger for this module
@@ -26,10 +26,7 @@ class DiagnosticsManager:
 
     def reload(self):
         """Reload flags from environment variable."""
-        raw = os.environ.get("OPENCLAW_DIAGNOSTICS", "")
-        # Also check legacy env var if needed, but R46 is new, so sticking to OpenClaw.
-        if not raw:
-            raw = os.environ.get("MOLTBOT_DIAGNOSTICS", "")
+        raw = get_env_value("OPENCLAW_DIAGNOSTICS", default="") or ""
 
         self._patterns = {p.strip() for p in raw.split(",") if p.strip()}
         self._enabled_cache = {}

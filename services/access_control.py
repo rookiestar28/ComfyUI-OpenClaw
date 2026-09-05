@@ -7,7 +7,6 @@ import datetime
 import hmac
 import ipaddress
 import logging
-import os
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -18,6 +17,7 @@ try:
 except ImportError:
     web = None
 
+from .env_aliases import get_env_value
 from .legacy_compat import (
     ADMIN_TOKEN_HEADERS,
     OBS_TOKEN_HEADERS,
@@ -75,14 +75,9 @@ def is_auth_configured() -> bool:
     Check if Admin Token authentication is configured (S41).
     Returns True if OPENCLAW_ADMIN_TOKEN/MOLTBOT_ADMIN_TOKEN is non-empty.
     """
-    # CRITICAL: keep OPENCLAW/MOLTBOT alias fallback chained with `or ... or ""`.
-    # Replacing with `and` (or removing the empty-string fallback) can produce None
-    # and break `.strip()`, which silently weakens mutation/adversarial gate coverage.
-    val = (
-        os.environ.get("OPENCLAW_ADMIN_TOKEN")
-        or os.environ.get("MOLTBOT_ADMIN_TOKEN")
-        or ""
-    )
+    # CRITICAL: retain NONEMPTY alias semantics here; canonical empty values must still
+    # fall through to the legacy token or authentication behavior can silently weaken.
+    val = get_env_value("OPENCLAW_ADMIN_TOKEN", default="") or ""
     return bool(val.strip())
 
 
@@ -94,13 +89,7 @@ def is_any_token_configured() -> bool:
     if is_auth_configured():
         return True
 
-    # CRITICAL: same fallback invariant as admin token path above.
-    # Keep alias+default semantics deterministic for legacy compatibility and test gates.
-    obs_val = (
-        os.environ.get("OPENCLAW_OBSERVABILITY_TOKEN")
-        or os.environ.get("MOLTBOT_OBSERVABILITY_TOKEN")
-        or ""
-    )
+    obs_val = get_env_value("OPENCLAW_OBSERVABILITY_TOKEN", default="") or ""
     return bool(obs_val.strip())
 
 
@@ -222,13 +211,7 @@ def resolve_token_info(request) -> Optional[TokenInfo]:
 
     # 2. Static Env Check (Legacy/Bootstrap)
     # Admin
-    # CRITICAL: preserve OPENCLAW->MOLTBOT alias fallback chain.
-    # This path must stay None-safe (`... or ""`) because we call `.strip()`.
-    admin_token = (
-        os.environ.get("OPENCLAW_ADMIN_TOKEN")
-        or os.environ.get("MOLTBOT_ADMIN_TOKEN")
-        or ""
-    ).strip()
+    admin_token = (get_env_value("OPENCLAW_ADMIN_TOKEN", default="") or "").strip()
 
     if admin_token and client_token:
         if hmac.compare_digest(client_token, admin_token):
@@ -242,12 +225,8 @@ def resolve_token_info(request) -> Optional[TokenInfo]:
             )
 
     # Observability
-    # CRITICAL: preserve OPENCLAW->MOLTBOT alias fallback chain.
-    # This path must stay None-safe (`... or ""`) because we call `.strip()`.
     obs_token = (
-        os.environ.get("OPENCLAW_OBSERVABILITY_TOKEN")
-        or os.environ.get("MOLTBOT_OBSERVABILITY_TOKEN")
-        or ""
+        get_env_value("OPENCLAW_OBSERVABILITY_TOKEN", default="") or ""
     ).strip()
 
     if obs_token and client_token:
@@ -460,9 +439,7 @@ def require_observability_access(request) -> Tuple[bool, Optional[str]]:
         return True, None
 
     expected_token = (
-        os.environ.get("OPENCLAW_OBSERVABILITY_TOKEN")
-        or os.environ.get("MOLTBOT_OBSERVABILITY_TOKEN")
-        or ""
+        get_env_value("OPENCLAW_OBSERVABILITY_TOKEN", default="") or ""
     ).strip()
     if expected_token:
         client_token, _used_legacy = get_header_alias_value(
@@ -488,11 +465,7 @@ def require_admin_token(request) -> Tuple[bool, Optional[str]]:
     - Deny remote by default.
     """
     remote = get_client_ip(request)
-    expected_token = (
-        os.environ.get("OPENCLAW_ADMIN_TOKEN")
-        or os.environ.get("MOLTBOT_ADMIN_TOKEN")
-        or ""
-    ).strip()
+    expected_token = (get_env_value("OPENCLAW_ADMIN_TOKEN", default="") or "").strip()
     if expected_token:
         client_token, _used_legacy = get_header_alias_value(
             request.headers, ADMIN_TOKEN_HEADERS, logger=logger

@@ -5,11 +5,11 @@ Watches job completion and delivers results to callback URLs.
 
 import asyncio
 import logging
-import os
 from typing import Any, Dict, Optional, Set
 
 from .async_utils import run_io_in_thread
 from .comfyui_history import extract_images, fetch_history, get_job_status
+from .env_aliases import get_env_value
 from .job_events import JobEventType, get_job_event_store  # R71
 from .metrics import metrics
 from .reasoning_redaction import sanitize_operator_payload
@@ -22,12 +22,10 @@ logger = logging.getLogger("ComfyUI-OpenClaw.services.callback_delivery")
 CALLBACK_ALLOW_HOSTS_ENV = "OPENCLAW_CALLBACK_ALLOW_HOSTS"
 LEGACY_CALLBACK_ALLOW_HOSTS_ENV = "MOLTBOT_CALLBACK_ALLOW_HOSTS"
 CALLBACK_TIMEOUT_SEC = int(
-    os.environ.get("OPENCLAW_CALLBACK_TIMEOUT_SEC")
-    or os.environ.get("MOLTBOT_CALLBACK_TIMEOUT_SEC", "10")
+    get_env_value("OPENCLAW_CALLBACK_TIMEOUT_SEC", default="10") or "10"
 )
 CALLBACK_MAX_RETRIES = int(
-    os.environ.get("OPENCLAW_CALLBACK_MAX_RETRIES")
-    or os.environ.get("MOLTBOT_CALLBACK_MAX_RETRIES", "3")
+    get_env_value("OPENCLAW_CALLBACK_MAX_RETRIES", default="3") or "3"
 )
 POLL_INTERVAL_SEC = 2
 POLL_MAX_ATTEMPTS = 150  # 5 minutes at 2s interval
@@ -35,8 +33,13 @@ POLL_MAX_ATTEMPTS = 150  # 5 minutes at 2s interval
 
 def get_callback_allow_hosts() -> Set[str]:
     """Get allowed callback hosts from environment."""
-    hosts_str = os.environ.get(CALLBACK_ALLOW_HOSTS_ENV) or os.environ.get(
-        LEGACY_CALLBACK_ALLOW_HOSTS_ENV, ""
+    hosts_str = (
+        get_env_value(
+            CALLBACK_ALLOW_HOSTS_ENV,
+            aliases=(LEGACY_CALLBACK_ALLOW_HOSTS_ENV,),
+            default="",
+        )
+        or ""
     )
     if not hosts_str.strip():
         return set()

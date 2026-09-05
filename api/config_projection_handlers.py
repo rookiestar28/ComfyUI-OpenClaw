@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from typing import Any
+
+if __package__ and "." in __package__:
+    from ..services.env_aliases import get_env_value
+else:  # pragma: no cover - test-only import mode
+    from services.env_aliases import get_env_value
 
 
 @dataclass(frozen=True)
@@ -139,9 +143,7 @@ async def config_put_response(request: Any, deps: ConfigHandlerDependencies) -> 
         )
 
     allow_remote = (
-        os.environ.get("OPENCLAW_ALLOW_REMOTE_ADMIN")
-        or os.environ.get("MOLTBOT_ALLOW_REMOTE_ADMIN")
-        or ""
+        get_env_value("OPENCLAW_ALLOW_REMOTE_ADMIN", default="") or ""
     ).lower()
     if allow_remote not in ("1", "true", "yes", "on"):
         remote = deps.get_client_ip(request)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 
+from .env_aliases import get_env_value
 from .security_doctor_report import (
     SecurityCheckResult,
     SecurityReport,
@@ -127,7 +128,7 @@ def check_connector_security_posture(report: SecurityReport) -> None:
             )
         )
 
-    dev_mode = os.environ.get("MOLTBOT_DEV_MODE", "").strip().lower()
+    dev_mode = (get_env_value("OPENCLAW_DEV_MODE", default="") or "").strip().lower()
     if dev_mode in ("1", "true", "yes", "on") and active_markers:
         report.add(
             SecurityCheckResult(
@@ -135,7 +136,7 @@ def check_connector_security_posture(report: SecurityReport) -> None:
                 severity=SecuritySeverity.WARN.value,
                 message="Dev mode enabled with active connectors — auth bypass risk",
                 category="connector",
-                remediation="Disable MOLTBOT_DEV_MODE when connectors are internet-exposed.",
+                remediation="Disable OPENCLAW_DEV_MODE when connectors are internet-exposed.",
             )
         )
 

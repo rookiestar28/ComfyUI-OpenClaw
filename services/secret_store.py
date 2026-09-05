@@ -22,6 +22,8 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from .env_aliases import get_env_value
+
 try:
     from .tenant_context import (
         DEFAULT_TENANT_ID,
@@ -121,10 +123,8 @@ class SecretStore:
         return f"tenant::{tenant}::{provider_id}"
 
     def _allow_legacy_fallback(self) -> bool:
-        value = (
-            os.environ.get("OPENCLAW_MULTI_TENANT_ALLOW_LEGACY_SECRET_FALLBACK")
-            or os.environ.get("MOLTBOT_MULTI_TENANT_ALLOW_LEGACY_SECRET_FALLBACK")
-            or "0"
+        value = get_env_value(
+            "OPENCLAW_MULTI_TENANT_ALLOW_LEGACY_SECRET_FALLBACK", default="0"
         )
         return str(value).strip().lower() in ("1", "true", "yes", "on")
 

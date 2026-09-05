@@ -14,6 +14,7 @@ from typing import Any, Dict, Iterable
 
 from .access_control import is_loopback
 from .audit import emit_audit_event
+from .env_aliases import get_env_value
 from .internal_content import sanitize_internal_content
 from .request_ip import get_client_ip
 from .runtime_profile import get_runtime_profile, is_hardened_mode
@@ -165,8 +166,10 @@ def resolve_reasoning_reveal(request: Any, *, admin_authorized: bool) -> Dict[st
     runtime_profile = get_runtime_profile().value
     remote_addr = get_client_ip(request)
     env_enabled = _is_truthy_flag(
-        os.environ.get(REASONING_REVEAL_ENV)
-        or os.environ.get(LEGACY_REASONING_REVEAL_ENV)
+        get_env_value(
+            REASONING_REVEAL_ENV,
+            aliases=(LEGACY_REASONING_REVEAL_ENV,),
+        )
     )
 
     if not requested:
