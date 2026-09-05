@@ -840,6 +840,162 @@ UNBOUND = deleted_reader.getenv("MOLTBOT_FLAG")
             7,
         )
 
+    def test_environment_alias_contract_tracks_class_fallback_and_comprehension_iterables(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/scope_edges.py"
+        ] = """import os
+
+class DeadClassBinding:
+    if False:
+        os = client
+    VALUE = os.getenv("MOLTBOT_FLAG")
+
+class LaterClassBinding:
+    VALUE = os.getenv("MOLTBOT_FLAG")
+    os = client
+
+class DeletedClassBinding:
+    os = client
+    del os
+    VALUE = os.getenv("MOLTBOT_FLAG")
+
+class DefiniteClassBinding:
+    os = client
+    NOT_ENVIRONMENT = os.getenv("MOLTBOT_FLAG")
+
+LIST_VALUE = [item for os in os.getenv("MOLTBOT_FLAG")]
+SET_VALUE = {item for os in os.getenv("MOLTBOT_FLAG")}
+DICT_VALUE = {item: item for os in os.getenv("MOLTBOT_FLAG")}
+GEN_VALUE = (item for os in os.getenv("MOLTBOT_FLAG"))
+BODY_NOT_ENVIRONMENT = [os.getenv("MOLTBOT_FLAG") for os in clients]
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/scope_edges.py")
+
+        findings = self._evaluate(files, configure=configure)
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            7,
+        )
+
+    def test_environment_alias_contract_tracks_keyword_and_explicit_mapping_reads(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/call_shapes.py"
+        ] = """import os
+from os import getenv as read_environment
+
+ONE = os.getenv(key="MOLTBOT_FLAG")
+TWO = read_environment(key="MOLTBOT_FLAG")
+THREE = os.environ.get(key="MOLTBOT_FLAG")
+FOUR = os.getenv(**{"key": "MOLTBOT_FLAG"})
+FIVE = os.environ.__getitem__("MOLTBOT_FLAG")
+SIX = os.getenv(*("MOLTBOT_FLAG",))
+SEVEN = os.environ.get(*["MOLTBOT_FLAG"])
+
+legacy_key = "MOLTBOT_FLAG"
+EIGHT = os.getenv(**{"key": legacy_key})
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/call_shapes.py")
+
+        findings = self._evaluate(files, configure=configure)
+        codes = [finding.rule_id for finding in findings]
+
+        self.assertEqual(codes.count("ENV_ALIAS_DIRECT_READ"), 7)
+        self.assertEqual(codes.count("ENV_ALIAS_DYNAMIC_READ"), 1)
+
+    def test_environment_alias_contract_propagates_compound_and_unpacked_aliases(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/compound_aliases.py"
+        ] = """import os as real
+
+boolean_reader = real or client
+ONE = boolean_reader.getenv("MOLTBOT_FLAG")
+
+conditional_reader = real if condition else client
+TWO = conditional_reader.getenv("MOLTBOT_FLAG")
+
+(unpacked_reader,) = (real,)
+THREE = unpacked_reader.getenv("MOLTBOT_FLAG")
+
+precise_reader, fake_reader = (real, client)
+FOUR = precise_reader.getenv("MOLTBOT_FLAG")
+NOT_ENVIRONMENT = fake_reader.getenv("MOLTBOT_FLAG")
+
+selected_reader = (real, client)[0]
+FIVE = selected_reader.getenv("MOLTBOT_FLAG")
+
+mapped_reader = {"reader": real}["reader"]
+SIX = mapped_reader.getenv("MOLTBOT_FLAG")
+
+and_reader = real and client
+ALSO_NOT_ENVIRONMENT = and_reader.getenv("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/compound_aliases.py")
+
+        findings = self._evaluate(files, configure=configure)
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            6,
+        )
+
+    def test_environment_alias_contract_does_not_resurrect_deleted_or_shadowed_names(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/deleted_global.py"
+        ] = """import os
+
+def deleted_global():
+    global os
+    del os
+    return os.getenv("MOLTBOT_FLAG")
+"""
+        files[
+            "alpha/exception_shadow.py"
+        ] = """import os
+
+try:
+    operation()
+except Exception as os:
+    NOT_ENVIRONMENT = os.getenv("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].extend(
+                ["alpha/deleted_global.py", "alpha/exception_shadow.py"]
+            )
+
+        findings = self._evaluate(files, configure=configure)
+
+        self.assertNotIn(
+            "ENV_ALIAS_DIRECT_READ", {finding.rule_id for finding in findings}
+        )
+
     def test_environment_alias_contract_tracks_global_import_and_rebinding_order(self):
         files = self._base_files()
         files["alpha/env_aliases.py"] = environment_alias_owner_source()
