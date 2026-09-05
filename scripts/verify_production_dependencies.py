@@ -1448,6 +1448,7 @@ class _EnvironmentScopeIndex(ast.NodeVisitor):
         self.node_control_paths: dict[int, _EnvironmentControlPath] = {}
         self._event_origin_cache: dict[int, frozenset[str]] = {}
         self._resolving_events: set[int] = set()
+        self.definition_sources: dict[int, ast.AST] = {}
         self._current = 0
         self._control_path: list[tuple[int, str]] = []
         self.visit(tree)
@@ -2900,6 +2901,26 @@ def _resolved_static_iterable_elements(
                 return None
             keys.extend(nested)
         return tuple(keys)
+    if isinstance(node, ast.Call) and _is_proven_builtin_callable(
+        node.func, "iter", index, scope_id
+    ):
+        positional, positional_exact, has_keywords = _effective_static_call_arguments(
+            node, index, scope_id
+        )
+        if positional_exact and has_keywords is False and len(positional) == 1:
+            argument = positional[0]
+            # CRITICAL: canonical one-argument iter() preserves the member stream. Leaving the
+            # call opaque binds loop targets to the iterator object and hides env readers or
+            # bound generator consumers carried by its elements. Shadowed and two-argument
+            # iter() calls must remain opaque because they do not share this contract.
+            return _resolved_static_iterable_elements(
+                argument,
+                index,
+                index.node_scopes.get(id(argument), scope_id),
+                argument,
+                resolving,
+            )
+        return None
     if not isinstance(node, ast.Name):
         return None
     guard = (scope_id, node.id)
@@ -3149,7 +3170,7 @@ def _expression_resolves_to_node(
     scope_id: int,
     resolving: frozenset[tuple[int, str, int]] = frozenset(),
 ) -> bool:
-    if node is target:
+    if node is target or index.definition_sources.get(id(node)) is target:
         return True
     if isinstance(node, ast.NamedExpr):
         return _expression_resolves_to_node(
@@ -3399,17 +3420,65 @@ def _generator_consumption_sites(
     return (*method_sites, *((argument, candidate) for argument in arguments))
 
 
-def _eager_class_execution_scope(index: _EnvironmentScopeIndex, scope_id: int) -> int:
-    # CRITICAL: a class body and its evaluated definition expressions execute while the
-    # containing scope is active. Project only ClassDef scopes outward; projecting function or
-    # lambda scopes would falsely activate generators referenced solely by deferred method bodies.
+def _eager_execution_scope(index: _EnvironmentScopeIndex, scope_id: int) -> int:
+    # CRITICAL: class bodies and materialized list/set/dict comprehensions execute while their
+    # containing scope is active. Project only those eager scopes outward; projecting generator
+    # expressions, functions, or lambdas would activate generators in deferred bodies.
     current = scope_id
-    while isinstance(index.scopes[current].root, ast.ClassDef):
+    while isinstance(
+        index.scopes[current].root,
+        (ast.ClassDef, ast.ListComp, ast.SetComp, ast.DictComp),
+    ):
         parent = index.scopes[current].parent
         if parent is None:
             break
         current = parent
     return current
+
+
+def _function_scope_is_invoked_from(
+    tree: ast.AST,
+    index: _EnvironmentScopeIndex,
+    scope_id: int,
+    ancestor_scope: int,
+    parents: Mapping[int, ast.AST],
+    resolving: frozenset[int] = frozenset(),
+) -> bool:
+    if scope_id == ancestor_scope:
+        return True
+    if scope_id in resolving:
+        return False
+    scope = index.scopes[scope_id]
+    root = scope.root
+    parent_scope = scope.parent
+    if not isinstance(root, (ast.FunctionDef, ast.Lambda)) or parent_scope is None:
+        return False
+    if not _function_scope_is_invoked_from(
+        tree,
+        index,
+        parent_scope,
+        ancestor_scope,
+        parents,
+        resolving | {scope_id},
+    ):
+        return False
+    for candidate in ast.walk(tree):
+        if not isinstance(candidate, ast.Call) or _node_is_statically_unreachable(
+            candidate, parents
+        ):
+            continue
+        candidate_scope = _eager_execution_scope(
+            index, index.node_scopes.get(id(candidate), parent_scope)
+        )
+        if candidate_scope != parent_scope:
+            continue
+        if _expression_resolves_to_node(candidate.func, root, index, parent_scope):
+            # CRITICAL: a nested function body is deferred until its exact definition is called.
+            # Projecting every function scope outward invents generator-walrus activation in
+            # never-called closures; use-site provenance through aliases/selections preserves the
+            # deferred boundary while allowing same-closure consume-then-read analysis.
+            return True
+    return False
 
 
 def _walrus_comprehension_activation(
@@ -3418,16 +3487,18 @@ def _walrus_comprehension_activation(
     scope_id: int,
     node: ast.NamedExpr,
     parents: Mapping[int, ast.AST],
-) -> tuple[int, tuple[int, int], _EnvironmentControlPath] | None:
+) -> tuple[tuple[int, tuple[int, int], _EnvironmentControlPath], ...]:
     scope = index.scopes[scope_id]
     owner = scope.root
     if not isinstance(
         owner, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
     ):
         return (
-            scope_id,
-            _environment_end_position(node),
-            index.node_control_paths.get(id(node), ()),
+            (
+                scope_id,
+                _environment_end_position(node),
+                index.node_control_paths.get(id(node), ()),
+            ),
         )
     target_scope = scope.parent
     while target_scope is not None and isinstance(
@@ -3436,7 +3507,7 @@ def _walrus_comprehension_activation(
     ):
         target_scope = index.scopes[target_scope].parent
     if target_scope is None:
-        return None
+        return ()
     definitely_executes = True
     reached_walrus = False
     for generator in owner.generators:
@@ -3445,7 +3516,7 @@ def _walrus_comprehension_activation(
             break
         elements = _static_iterable_elements(generator.iter)
         if elements == ():
-            return None
+            return ()
         if elements is None:
             definitely_executes = False
         for condition in generator.ifs:
@@ -3453,20 +3524,23 @@ def _walrus_comprehension_activation(
                 reached_walrus = True
                 break
             if isinstance(condition, ast.Constant) and not bool(condition.value):
-                return None
+                return ()
             if not (isinstance(condition, ast.Constant) and condition.value is True):
                 definitely_executes = False
         if reached_walrus:
             break
-    activation_node: ast.AST = owner
+    activation_nodes: dict[int, ast.AST] = {target_scope: owner}
     if isinstance(owner, ast.GeneratorExp):
-        consumers: list[ast.AST] = []
+        activation_nodes = {}
         for candidate in ast.walk(tree):
             candidate_scope = index.node_scopes.get(id(candidate), target_scope)
             sites = _generator_consumption_sites(candidate, index, candidate_scope)
             if not sites or _node_is_statically_unreachable(candidate, parents):
                 continue
-            if _eager_class_execution_scope(index, candidate_scope) != target_scope or (
+            execution_scope = _eager_execution_scope(index, candidate_scope)
+            if not _function_scope_is_invoked_from(
+                tree, index, execution_scope, target_scope, parents
+            ) or (
                 not any(part is owner for part in ast.walk(candidate))
                 and _environment_end_position(candidate)
                 <= _environment_end_position(owner)
@@ -3475,19 +3549,31 @@ def _walrus_comprehension_activation(
             for consumed, activation in sites:
                 consumed_scope = index.node_scopes.get(id(consumed), target_scope)
                 if _expression_resolves_to_node(consumed, owner, index, consumed_scope):
-                    consumers.append(activation)
-        if not consumers:
-            return None
-        activation_node = min(consumers, key=_environment_node_position)
-    control_path = index.node_control_paths.get(id(activation_node), ())
-    if not definitely_executes:
-        control_path = (*control_path, (id(owner), "walrus-iteration"))
+                    previous = activation_nodes.get(execution_scope)
+                    if previous is None or _environment_node_position(
+                        activation
+                    ) < _environment_node_position(previous):
+                        activation_nodes[execution_scope] = activation
+        if not activation_nodes:
+            return ()
     # IMPORTANT: comprehension walrus targets belong to the nearest containing
     # non-comprehension scope, but only an executed iteration binds them. Treating eager-empty
     # and unconsumed generators as assignments invents aliases. Generator consumers must resolve
     # to the original generator value at their exact use site; name-only scans accept dead/rebound
     # `next()` calls and miss aliases, loops, and materialization.
-    return target_scope, _environment_end_position(activation_node), control_path
+    activations: list[tuple[int, tuple[int, int], _EnvironmentControlPath]] = []
+    for activation_scope, activation_node in activation_nodes.items():
+        control_path = index.node_control_paths.get(id(activation_node), ())
+        if not definitely_executes:
+            control_path = (*control_path, (id(owner), "walrus-iteration"))
+        activations.append(
+            (
+                activation_scope,
+                _environment_end_position(activation_node),
+                control_path,
+            )
+        )
+    return tuple(activations)
 
 
 def _build_environment_scope_index(tree: ast.AST) -> _EnvironmentScopeIndex:
@@ -3610,11 +3696,18 @@ def _build_environment_scope_index(tree: ast.AST) -> _EnvironmentScopeIndex:
             )
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             facts.base_origins[node.name].add(_ENV_ORIGIN_OTHER)
+            definition_source: ast.expr | None = None
+            if isinstance(node, ast.FunctionDef):
+                definition_source = ast.copy_location(
+                    ast.Name(id=f"__definition_{id(node)}", ctx=ast.Load()), node
+                )
+                index.definition_sources[id(definition_source)] = node
             facts.binding_events[node.name].append(
                 _EnvironmentBindingEvent(
                     _environment_end_position(node),
                     control_path,
                     frozenset({_ENV_ORIGIN_OTHER}),
+                    value=definition_source,
                 )
             )
         elif isinstance(node, ast.Import):
@@ -3840,25 +3933,25 @@ def _build_environment_scope_index(tree: ast.AST) -> _EnvironmentScopeIndex:
         )
 
     for node, original_scope_id in pending_named_exprs:
-        activation = _walrus_comprehension_activation(
+        activations = _walrus_comprehension_activation(
             tree, index, original_scope_id, node, parents
         )
-        if activation is None:
+        if not activations:
             continue
-        target_scope, activation_position, event_control_path = activation
-        facts = index.scopes[target_scope]
         bindings = _target_value_bindings(
             node.target, node.value, index, original_scope_id, node.value
         )
-        for target_name, binding_value in bindings:
-            facts.assignments.append((target_name, binding_value))
-            facts.binding_events[target_name].append(
-                _EnvironmentBindingEvent(
-                    activation_position,
-                    event_control_path,
-                    value=binding_value,
+        for target_scope, activation_position, event_control_path in activations:
+            facts = index.scopes[target_scope]
+            for target_name, binding_value in bindings:
+                facts.assignments.append((target_name, binding_value))
+                facts.binding_events[target_name].append(
+                    _EnvironmentBindingEvent(
+                        activation_position,
+                        event_control_path,
+                        value=binding_value,
+                    )
                 )
-            )
 
     for facts in index.scopes:
         for events in facts.binding_events.values():

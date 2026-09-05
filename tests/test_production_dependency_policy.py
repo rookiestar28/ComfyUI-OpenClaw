@@ -1630,6 +1630,243 @@ NOT_ENVIRONMENT = fake_reader("MOLTBOT_FLAG")
             4,
         )
 
+    def test_environment_alias_contract_preserves_canonical_iter_loop_members(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/canonical_iter_loop_members.py"
+        ] = """import os
+from builtins import iter as builtin_iter
+
+readers = [os.getenv]
+
+for reader in iter(readers):
+    reader("MOLTBOT_FLAG")
+
+MODULE_LIST = [reader("MOLTBOT_FLAG") for reader in iter(readers)]
+MODULE_SET = {reader("MOLTBOT_FLAG") for reader in builtin_iter(readers)}
+assigned_iter = builtin_iter
+MODULE_DICT = {
+    reader("MOLTBOT_FLAG"): True for reader in assigned_iter(readers)
+}
+
+def function_scope():
+    local_readers = [os.getenv]
+    return tuple(
+        reader("MOLTBOT_FLAG") for reader in iter(local_readers)
+    )
+
+class Governed:
+    readers = [os.getenv]
+    LIST_VALUE = [reader("MOLTBOT_FLAG") for reader in iter(readers)]
+    SET_VALUE = {reader("MOLTBOT_FLAG") for reader in iter(readers)}
+    DICT_VALUE = {
+        reader("MOLTBOT_FLAG"): True for reader in iter(readers)
+    }
+    GEN_VALUE = tuple(
+        reader("MOLTBOT_FLAG") for reader in iter(readers)
+    )
+
+bound_generator = ((bound_reader := os.getenv) for _ in [1])
+for step in iter([bound_generator.__next__]):
+    step()
+BOUND_VALUE = bound_reader("MOLTBOT_FLAG")
+
+selected_generator = ((selected_reader := os.getenv) for _ in [1])
+SELECTED_STEPS = [
+    step() for step in iter([selected_generator.__next__])
+]
+SELECTED_VALUE = selected_reader("MOLTBOT_FLAG")
+
+for not_reader in iter([client]):
+    not_reader("MOLTBOT_FLAG")
+
+def shadowed_iter():
+    iter = client
+    return [reader("MOLTBOT_FLAG") for reader in iter([os.getenv])]
+
+sentinel = object()
+for two_arg_reader in iter(lambda: os.getenv, sentinel):
+    two_arg_reader("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/canonical_iter_loop_members.py")
+
+        findings = self._evaluate(files, configure=configure)
+
+        direct_reads = [
+            finding
+            for finding in findings
+            if finding.rule_id == "ENV_ALIAS_DIRECT_READ"
+        ]
+        self.assertEqual(
+            len(direct_reads),
+            11,
+            msg="\n".join(
+                f"{finding.path}:{finding.line}: {finding.subject}"
+                for finding in direct_reads
+            ),
+        )
+
+    def test_environment_alias_contract_correlates_invoked_closure_consumers(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/invoked_closure_consumers.py"
+        ] = """import os
+
+def direct_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+
+    def inner():
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+
+    return inner()
+
+def aliased_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+
+    def inner():
+        step = generator.__next__
+        step()
+        return reader("MOLTBOT_FLAG")
+
+    return inner()
+
+def selected_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+
+    def inner():
+        [generator.__next__][0]()
+        return reader("MOLTBOT_FLAG")
+
+    return inner()
+
+def class_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+
+    def inner():
+        class Consumer:
+            generator.__next__()
+        return reader("MOLTBOT_FLAG")
+
+    return inner()
+
+def aliased_call_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+
+    def inner():
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+
+    call_inner = inner
+    return call_inner()
+
+def selected_call_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+
+    def inner():
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+
+    return [inner][0]()
+
+def conditional_rebind_outer(flag):
+    generator = ((reader := os.getenv) for _ in [1])
+
+    def inner():
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+
+    if flag:
+        inner = client
+    return inner()
+
+def invoked_lambda_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+    action = lambda: (generator.__next__(), reader("MOLTBOT_FLAG"))
+    return action()
+
+def never_called_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+
+    def deferred():
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+
+    return None
+
+def no_consumer_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+
+    def inner():
+        return reader("MOLTBOT_FLAG")
+
+    return inner()
+
+def rebound_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+
+    def inner():
+        generator = iter(())
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+
+    return inner()
+
+def non_reader_outer():
+    generator = ((reader := client) for _ in [1])
+
+    def inner():
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+
+    return inner()
+
+def before_consumer_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+
+    def inner():
+        value = reader("MOLTBOT_FLAG")
+        generator.__next__()
+        return value
+
+    return inner()
+
+def definitely_rebound_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+
+    def inner():
+        generator.__next__()
+        return reader("MOLTBOT_FLAG")
+
+    inner = client
+    return inner()
+
+def deferred_lambda_outer():
+    generator = ((reader := os.getenv) for _ in [1])
+    action = lambda: (generator.__next__(), reader("MOLTBOT_FLAG"))
+    return None
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/invoked_closure_consumers.py")
+
+        findings = self._evaluate(files, configure=configure)
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            8,
+        )
+
     def test_environment_alias_contract_tracks_keyword_and_explicit_mapping_reads(
         self,
     ):
