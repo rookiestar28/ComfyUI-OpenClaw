@@ -25,6 +25,8 @@ VALID_CLASSIFICATIONS = {
     "needs_follow_up_test_coverage",
 }
 VALID_COVERAGE_MODES = {"all_broad_catches", "selected_scopes"}
+_AMBIGUOUS_ORIGIN = "<ambiguous>"
+_ControlPath = tuple[tuple[int, str], ...]
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,7 @@ class _ScopeImports:
 class _BindingEvent:
     position: tuple[int, int]
     origin: str | None
+    control_path: _ControlPath
 
 
 @dataclass(frozen=True)
@@ -61,6 +64,8 @@ class _ScopeFrame:
     imports: _ScopeImports
     binding_events: dict[str, tuple[_BindingEvent, ...]]
     virtual_locals: frozenset[str] = frozenset()
+    deferred_anchor: tuple[int, int] | None = None
+    deferred_outer_paths: tuple[_ControlPath, ...] = ()
 
 
 class _ImportOriginCollector(ast.NodeVisitor):
@@ -141,11 +146,47 @@ def _bound_target_names(node: ast.AST | None) -> set[str]:
     return set()
 
 
+def _bound_pattern_names(node: ast.pattern) -> set[str]:
+    names: set[str] = set()
+    if isinstance(node, ast.MatchAs):
+        if node.name is not None:
+            names.add(node.name)
+        if node.pattern is not None:
+            names.update(_bound_pattern_names(node.pattern))
+    elif isinstance(node, ast.MatchStar):
+        if node.name is not None:
+            names.add(node.name)
+    elif isinstance(node, ast.MatchMapping):
+        if node.rest is not None:
+            names.add(node.rest)
+        for pattern in node.patterns:
+            names.update(_bound_pattern_names(pattern))
+    elif isinstance(node, ast.MatchSequence):
+        for pattern in node.patterns:
+            names.update(_bound_pattern_names(pattern))
+    elif isinstance(node, ast.MatchClass):
+        for pattern in (*node.patterns, *node.kwd_patterns):
+            names.update(_bound_pattern_names(pattern))
+    elif isinstance(node, ast.MatchOr):
+        for pattern in node.patterns:
+            names.update(_bound_pattern_names(pattern))
+    return names
+
+
 class _BindingEventCollector(ast.NodeVisitor):
     """Collect binding activation points without crossing lexical-scope boundaries."""
 
     def __init__(self) -> None:
         self.events: dict[str, list[_BindingEvent]] = {}
+        self._control_path: list[tuple[int, str]] = []
+
+    def _visit_region(
+        self, owner: ast.AST, label: str, nodes: Iterable[ast.AST]
+    ) -> None:
+        self._control_path.append((id(owner), label))
+        for node in nodes:
+            self.visit(node)
+        self._control_path.pop()
 
     def _record(
         self,
@@ -153,7 +194,9 @@ class _BindingEventCollector(ast.NodeVisitor):
         activation_node: ast.AST,
         origin: str | None = "other",
     ) -> None:
-        event = _BindingEvent(_end_position(activation_node), origin)
+        event = _BindingEvent(
+            _end_position(activation_node), origin, tuple(self._control_path)
+        )
         for name in names:
             self.events.setdefault(name, []).append(event)
 
@@ -209,9 +252,12 @@ class _BindingEventCollector(ast.NodeVisitor):
 
     def _visit_for(self, node: ast.For | ast.AsyncFor) -> None:
         self.visit(node.iter)
+        self._control_path.append((id(node), "body"))
         self._record(_bound_target_names(node.target), node.iter)
-        for statement in (*node.body, *node.orelse):
+        for statement in node.body:
             self.visit(statement)
+        self._control_path.pop()
+        self._visit_region(node, "else", node.orelse)
 
     def visit_For(self, node: ast.For) -> None:
         self._visit_for(node)
@@ -222,9 +268,12 @@ class _BindingEventCollector(ast.NodeVisitor):
     def _visit_with(self, node: ast.With | ast.AsyncWith) -> None:
         for item in node.items:
             self.visit(item.context_expr)
+        self._control_path.append((id(node), "body"))
+        for item in node.items:
             self._record(_bound_target_names(item.optional_vars), item.context_expr)
         for statement in node.body:
             self.visit(statement)
+        self._control_path.pop()
 
     def visit_With(self, node: ast.With) -> None:
         self._visit_with(node)
@@ -243,6 +292,50 @@ class _BindingEventCollector(ast.NodeVisitor):
             # CPython clears the exception target when the handler exits.
             self._record((node.name,), node, None)
 
+    def visit_If(self, node: ast.If) -> None:
+        self.visit(node.test)
+        self._visit_region(node, "body", node.body)
+        self._visit_region(node, "else", node.orelse)
+
+    def visit_While(self, node: ast.While) -> None:
+        self.visit(node.test)
+        self._visit_region(node, "body", node.body)
+        self._visit_region(node, "else", node.orelse)
+
+    def visit_Try(self, node: ast.Try) -> None:
+        self._visit_region(node, "body", node.body)
+        for index, handler in enumerate(node.handlers):
+            self._visit_region(node, f"handler:{index}", (handler,))
+        self._visit_region(node, "else", node.orelse)
+        for statement in node.finalbody:
+            self.visit(statement)
+
+    def visit_TryStar(self, node: Any) -> None:
+        self.visit_Try(node)
+
+    def visit_IfExp(self, node: ast.IfExp) -> None:
+        self.visit(node.test)
+        self._visit_region(node, "body", (node.body,))
+        self._visit_region(node, "else", (node.orelse,))
+
+    def visit_BoolOp(self, node: ast.BoolOp) -> None:
+        if not node.values:
+            return
+        self.visit(node.values[0])
+        for index, value in enumerate(node.values[1:], start=1):
+            self._visit_region(node, f"value:{index}", (value,))
+
+    def visit_Match(self, node: ast.Match) -> None:
+        self.visit(node.subject)
+        for index, case in enumerate(node.cases):
+            self._control_path.append((id(node), f"case:{index}"))
+            self._record(_bound_pattern_names(case.pattern), case.pattern)
+            if case.guard is not None:
+                self.visit(case.guard)
+            for statement in case.body:
+                self.visit(statement)
+            self._control_path.pop()
+
     def visit_Delete(self, node: ast.Delete) -> None:
         for target in node.targets:
             self._record(_bound_target_names(target), node, None)
@@ -250,11 +343,18 @@ class _BindingEventCollector(ast.NodeVisitor):
     def _visit_single_value_comp(
         self, node: ast.ListComp | ast.SetComp | ast.GeneratorExp
     ) -> None:
-        self.visit(node.elt)
+        if not node.generators:
+            self.visit(node.elt)
+            return
+        self.visit(node.generators[0].iter)
+        self._control_path.append((id(node), "iteration"))
         for generator in node.generators:
-            self.visit(generator.iter)
+            if generator is not node.generators[0]:
+                self.visit(generator.iter)
             for condition in generator.ifs:
                 self.visit(condition)
+        self.visit(node.elt)
+        self._control_path.pop()
 
     def visit_ListComp(self, node: ast.ListComp) -> None:
         self._visit_single_value_comp(node)
@@ -263,12 +363,20 @@ class _BindingEventCollector(ast.NodeVisitor):
         self._visit_single_value_comp(node)
 
     def visit_DictComp(self, node: ast.DictComp) -> None:
-        self.visit(node.key)
-        self.visit(node.value)
+        if not node.generators:
+            self.visit(node.key)
+            self.visit(node.value)
+            return
+        self.visit(node.generators[0].iter)
+        self._control_path.append((id(node), "iteration"))
         for generator in node.generators:
-            self.visit(generator.iter)
+            if generator is not node.generators[0]:
+                self.visit(generator.iter)
             for condition in generator.ifs:
                 self.visit(condition)
+        self.visit(node.key)
+        self.visit(node.value)
+        self._control_path.pop()
 
     def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
         self._visit_single_value_comp(node)
@@ -304,7 +412,9 @@ def _function_lexical_locals(
     arguments: ast.arguments,
     binding_events: dict[str, tuple[_BindingEvent, ...]],
 ) -> frozenset[str]:
-    candidates = _argument_names(arguments) | set(binding_events)
+    candidates = (
+        _argument_names(arguments) | set(binding_events) | set(table.get_identifiers())
+    )
     return frozenset(
         name
         for name in candidates
@@ -329,6 +439,7 @@ class _BroadCatchVisitor(ast.NodeVisitor):
                 binding_events=_scope_binding_events(tree.body),
             )
         ]
+        self._frame_control_paths: list[list[tuple[int, str]]] = [[]]
         self._child_tables: dict[symtable.SymbolTable, list[symtable.SymbolTable]] = {}
 
     def _take_child_table(
@@ -370,25 +481,96 @@ class _BroadCatchVisitor(ast.NodeVisitor):
         )
 
     def _uses_direct_execution_order(self, frame_index: int) -> bool:
-        return all(
+        return self._frames[frame_index].kind in {"module", "class"} and all(
             frame.kind in {"class", "comprehension"}
             for frame in self._frames[frame_index + 1 :]
         )
 
+    @staticmethod
+    def _control_paths_compatible(left: _ControlPath, right: _ControlPath) -> bool:
+        left_regions = dict(left)
+        right_regions = dict(right)
+        return all(
+            right_regions.get(owner, label) == label
+            for owner, label in left_regions.items()
+        )
+
+    @staticmethod
+    def _control_path_dominates(event: _ControlPath, use: _ControlPath) -> bool:
+        return len(event) <= len(use) and use[: len(event)] == event
+
+    def _binding_origin_at(
+        self,
+        frame_index: int,
+        name: str,
+        position: tuple[int, int],
+        control_path: _ControlPath,
+    ) -> str | None:
+        # CRITICAL: source-earlier conditional bindings may never execute. Only a
+        # dominating region may replace state; compatible alternatives stay ambiguous
+        # so dead branches and zero-iteration loops cannot hide a runtime builtin.
+        states: set[str | None] = {None}
+        for event in self._frames[frame_index].binding_events.get(name, ()):
+            if event.position > position:
+                break
+            if not self._control_paths_compatible(event.control_path, control_path):
+                continue
+            if self._control_path_dominates(event.control_path, control_path):
+                states = {event.origin}
+            else:
+                states.add(event.origin)
+        if len(states) == 1:
+            return next(iter(states))
+        return _AMBIGUOUS_ORIGIN
+
+    def _deferred_context_after(
+        self, frame_index: int
+    ) -> tuple[tuple[int, int], _ControlPath] | None:
+        for frame in self._frames[frame_index + 1 :]:
+            if frame.kind != "generator_expression":
+                continue
+            if frame.deferred_anchor is None or frame_index >= len(
+                frame.deferred_outer_paths
+            ):
+                continue
+            return frame.deferred_anchor, frame.deferred_outer_paths[frame_index]
+        return None
+
+    def _deferred_binding_origin(
+        self,
+        frame_index: int,
+        name: str,
+        anchor: tuple[int, int],
+        control_path: _ControlPath,
+    ) -> str | None:
+        # CRITICAL: generator bodies resolve enclosing names when consumed, not when
+        # created. Any compatible later mutation is ambiguous and must fail closed.
+        states = {self._binding_origin_at(frame_index, name, anchor, control_path)}
+        for event in self._frames[frame_index].binding_events.get(name, ()):
+            if event.position <= anchor:
+                continue
+            if self._control_paths_compatible(event.control_path, control_path):
+                states.add(event.origin)
+        if len(states) == 1:
+            return next(iter(states))
+        return _AMBIGUOUS_ORIGIN
+
     def _active_binding_origin(
         self, frame_index: int, name: str, node: ast.AST
     ) -> str | None:
-        frame = self._frames[frame_index]
-        active: str | None = None
-        for event in frame.binding_events.get(name, ()):
-            if event.position > self._node_position(node):
-                break
-            active = event.origin
-        return active
+        return self._binding_origin_at(
+            frame_index,
+            name,
+            self._node_position(node),
+            tuple(self._frame_control_paths[frame_index]),
+        )
 
     def _resolved_binding_origin(
         self, frame_index: int, name: str, node: ast.AST
     ) -> str | None:
+        deferred_context = self._deferred_context_after(frame_index)
+        if deferred_context is not None:
+            return self._deferred_binding_origin(frame_index, name, *deferred_context)
         if self._uses_direct_execution_order(frame_index):
             return self._active_binding_origin(frame_index, name, node)
         origins = {
@@ -403,7 +585,12 @@ class _BroadCatchVisitor(ast.NodeVisitor):
         frame = self._frames[frame_index]
         if name in frame.virtual_locals:
             return True
-        if frame.kind in {"function", "lambda", "comprehension"}:
+        if frame.kind in {
+            "function",
+            "lambda",
+            "comprehension",
+            "generator_expression",
+        }:
             return False
         if frame.table is None:
             return False
@@ -429,7 +616,14 @@ class _BroadCatchVisitor(ast.NodeVisitor):
         current_index = len(self._frames) - 1
         current_frame = self._frames[current_index]
 
-        if current_frame.kind == "comprehension" and current_frame.table is None:
+        if (
+            current_frame.kind
+            in {
+                "comprehension",
+                "generator_expression",
+            }
+            and current_frame.table is None
+        ):
             if name in current_frame.virtual_locals:
                 return current_index
             return self._find_enclosing_binding(name, node, current_index - 1)
@@ -460,10 +654,10 @@ class _BroadCatchVisitor(ast.NodeVisitor):
         if not symbol.is_imported() or symbol.is_assigned():
             return None
         canonical = frame.imports.builtin_symbols.get(name)
-        if (
-            self._resolved_binding_origin(binding_index, name, node)
-            != f"symbol:{canonical}"
-        ):
+        if self._resolved_binding_origin(binding_index, name, node) not in {
+            f"symbol:{canonical}",
+            _AMBIGUOUS_ORIGIN,
+        }:
             return None
         return canonical
 
@@ -473,6 +667,12 @@ class _BroadCatchVisitor(ast.NodeVisitor):
         binding_index = self._binding_index(name, node)
         if binding_index is None:
             return name == expected
+        if (
+            self._resolved_binding_origin(binding_index, name, node)
+            == _AMBIGUOUS_ORIGIN
+            and name == expected
+        ):
+            return True
         return self._canonical_import_symbol(name, node) == expected
 
     def _resolves_to_builtin_module(self, name: str, node: ast.AST) -> bool:
@@ -484,12 +684,12 @@ class _BroadCatchVisitor(ast.NodeVisitor):
         if table is None:
             return False
         symbol = table.lookup(name)
+        resolved_origin = self._resolved_binding_origin(binding_index, name, node)
         return bool(
             symbol.is_imported()
             and not symbol.is_assigned()
             and name in frame.imports.builtin_modules
-            and self._resolved_binding_origin(binding_index, name, node)
-            == "module:builtins"
+            and resolved_origin in {"module:builtins", _AMBIGUOUS_ORIGIN}
         )
 
     def _catch_type_name(self, node: ast.expr | None) -> str:
@@ -516,6 +716,90 @@ class _BroadCatchVisitor(ast.NodeVisitor):
             if "Exception" in names:
                 return "Exception"
         return ""
+
+    def _visit_control_region(
+        self, owner: ast.AST, label: str, nodes: Iterable[ast.AST]
+    ) -> None:
+        self._frame_control_paths[-1].append((id(owner), label))
+        for node in nodes:
+            self.visit(node)
+        self._frame_control_paths[-1].pop()
+
+    def visit_If(self, node: ast.If) -> None:
+        self.visit(node.test)
+        self._visit_control_region(node, "body", node.body)
+        self._visit_control_region(node, "else", node.orelse)
+
+    def visit_While(self, node: ast.While) -> None:
+        self.visit(node.test)
+        self._visit_control_region(node, "body", node.body)
+        self._visit_control_region(node, "else", node.orelse)
+
+    def _visit_for(self, node: ast.For | ast.AsyncFor) -> None:
+        self.visit(node.iter)
+        self._frame_control_paths[-1].append((id(node), "body"))
+        self.visit(node.target)
+        for statement in node.body:
+            self.visit(statement)
+        self._frame_control_paths[-1].pop()
+        self._visit_control_region(node, "else", node.orelse)
+
+    def visit_For(self, node: ast.For) -> None:
+        self._visit_for(node)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        self._visit_for(node)
+
+    def _visit_with(self, node: ast.With | ast.AsyncWith) -> None:
+        for item in node.items:
+            self.visit(item.context_expr)
+        self._frame_control_paths[-1].append((id(node), "body"))
+        for item in node.items:
+            if item.optional_vars is not None:
+                self.visit(item.optional_vars)
+        for statement in node.body:
+            self.visit(statement)
+        self._frame_control_paths[-1].pop()
+
+    def visit_With(self, node: ast.With) -> None:
+        self._visit_with(node)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        self._visit_with(node)
+
+    def visit_Try(self, node: ast.Try) -> None:
+        self._visit_control_region(node, "body", node.body)
+        for index, handler in enumerate(node.handlers):
+            self._visit_control_region(node, f"handler:{index}", (handler,))
+        self._visit_control_region(node, "else", node.orelse)
+        for statement in node.finalbody:
+            self.visit(statement)
+
+    def visit_TryStar(self, node: Any) -> None:
+        self.visit_Try(node)
+
+    def visit_IfExp(self, node: ast.IfExp) -> None:
+        self.visit(node.test)
+        self._visit_control_region(node, "body", (node.body,))
+        self._visit_control_region(node, "else", (node.orelse,))
+
+    def visit_BoolOp(self, node: ast.BoolOp) -> None:
+        if not node.values:
+            return
+        self.visit(node.values[0])
+        for index, value in enumerate(node.values[1:], start=1):
+            self._visit_control_region(node, f"value:{index}", (value,))
+
+    def visit_Match(self, node: ast.Match) -> None:
+        self.visit(node.subject)
+        for index, case in enumerate(node.cases):
+            self._frame_control_paths[-1].append((id(node), f"case:{index}"))
+            self.visit(case.pattern)
+            if case.guard is not None:
+                self.visit(case.guard)
+            for statement in case.body:
+                self.visit(statement)
+            self._frame_control_paths[-1].pop()
 
     def _visit_outer_function_expressions(
         self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda
@@ -565,8 +849,10 @@ class _BroadCatchVisitor(ast.NodeVisitor):
                 ),
             )
         )
+        self._frame_control_paths.append([])
         for statement in node.body:
             self.visit(statement)
+        self._frame_control_paths.pop()
         self._frames.pop()
         self.scope_stack.pop()
 
@@ -593,8 +879,10 @@ class _BroadCatchVisitor(ast.NodeVisitor):
                 binding_events=_scope_binding_events(node.body),
             )
         )
+        self._frame_control_paths.append([])
         for statement in node.body:
             self.visit(statement)
+        self._frame_control_paths.pop()
         self._frames.pop()
         self.scope_stack.pop()
 
@@ -626,7 +914,9 @@ class _BroadCatchVisitor(ast.NodeVisitor):
                 ),
             )
         )
+        self._frame_control_paths.append([])
         self.visit(node.body)
+        self._frame_control_paths.pop()
         self._frames.pop()
 
     def _visit_comprehension_scope(
@@ -649,15 +939,31 @@ class _BroadCatchVisitor(ast.NodeVisitor):
         for generator in generators:
             target_names.update(_bound_target_names(generator.target))
         child = self._take_child_table(table_names, node.lineno, required=False)
+        frame_kind = (
+            "generator_expression"
+            if isinstance(node, ast.GeneratorExp)
+            else "comprehension"
+        )
         self._frames.append(
             _ScopeFrame(
-                kind="comprehension",
+                kind=frame_kind,
                 table=child,
                 imports=_ScopeImports(frozenset(), {}),
                 binding_events={},
                 virtual_locals=frozenset(target_names),
+                deferred_anchor=(
+                    self._node_position(node)
+                    if frame_kind == "generator_expression"
+                    else None
+                ),
+                deferred_outer_paths=(
+                    tuple(tuple(path) for path in self._frame_control_paths)
+                    if frame_kind == "generator_expression"
+                    else ()
+                ),
             )
         )
+        self._frame_control_paths.append([])
         self.visit(generators[0].target)
         for condition in generators[0].ifs:
             self.visit(condition)
@@ -668,6 +974,7 @@ class _BroadCatchVisitor(ast.NodeVisitor):
                 self.visit(condition)
         for value in values:
             self.visit(value)
+        self._frame_control_paths.pop()
         self._frames.pop()
 
     def visit_ListComp(self, node: ast.ListComp) -> None:

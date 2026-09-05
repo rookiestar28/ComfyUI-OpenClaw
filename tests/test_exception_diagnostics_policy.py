@@ -711,6 +711,130 @@ class TestExceptionDiagnosticsPolicy(unittest.TestCase):
             )
             self.assertEqual(validate_exception_boundary_policy(repo, policy), [])
 
+    def test_policy_fails_closed_for_conditional_module_and_class_bindings(self):
+        from scripts.verify_exception_boundary_policy import (
+            validate_exception_boundary_policy,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "api").mkdir()
+            (repo / "selected.py").write_text("value = 1\n", encoding="utf-8")
+            source = repo / "api" / "runtime.py"
+
+            source.write_text(
+                "if False:\n"
+                "    print = lambda *args: args\n"
+                "    class Exception:\n        pass\n"
+                "print('builtin-after-dead-shadow')\n"
+                "try:\n    raise ValueError\n"
+                "except Exception:\n    pass\n"
+                "class Runtime:\n"
+                "    if False:\n"
+                "        print = staticmethod(lambda *args: args)\n"
+                "        class Exception:\n            pass\n"
+                "    print('class-builtin-after-dead-shadow')\n"
+                "    try:\n        raise ValueError\n"
+                "    except Exception:\n        pass\n",
+                encoding="utf-8",
+            )
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertEqual(
+                sum("unowned runtime print" in item for item in failures), 2
+            )
+            self.assertEqual(sum("unowned pass-only" in item for item in failures), 2)
+
+            source.write_text(
+                "enabled = True\n"
+                "if enabled:\n"
+                "    print = lambda *args: args\n"
+                "    class Exception:\n        pass\n"
+                "    print('dominated-shadow')\n"
+                "    try:\n        raise ValueError\n"
+                "    except Exception:\n        pass\n"
+                "for print in ():\n"
+                "    print('loop-target-shadow')\n"
+                "print('builtin-after-zero-iteration-loop')\n",
+                encoding="utf-8",
+            )
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertEqual(
+                sum("unowned runtime print" in item for item in failures), 1
+            )
+            self.assertFalse(any("unowned pass-only" in item for item in failures))
+
+    def test_policy_fails_closed_for_deferred_generator_binding_mutation(self):
+        from scripts.verify_exception_boundary_policy import (
+            validate_exception_boundary_policy,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "api").mkdir()
+            (repo / "selected.py").write_text("value = 1\n", encoding="utf-8")
+            source = repo / "api" / "runtime.py"
+
+            source.write_text(
+                "items = (1,)\n"
+                "deferred = (print(item) for item in items)\n"
+                "print = lambda *args: args\n"
+                "next(deferred)\n",
+                encoding="utf-8",
+            )
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertTrue(any("unowned runtime print" in item for item in failures))
+
+            source.write_text(
+                "items = (1,)\n"
+                "print = lambda *args: args\n"
+                "deferred = (print(item) for item in items)\n"
+                "del print\n"
+                "next(deferred)\n",
+                encoding="utf-8",
+            )
+            failures = validate_exception_boundary_policy(repo, self._minimal_policy())
+            self.assertTrue(any("unowned runtime print" in item for item in failures))
+
+            source.write_text(
+                "items = (1,)\n"
+                "print = lambda *args: args\n"
+                "deferred = (print(item) for item in items)\n"
+                "next(deferred)\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                validate_exception_boundary_policy(repo, self._minimal_policy()), []
+            )
+
+    def test_policy_recognizes_structural_pattern_capture_shadows(self):
+        from scripts.verify_exception_boundary_policy import (
+            validate_exception_boundary_policy,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "api").mkdir()
+            (repo / "selected.py").write_text("value = 1\n", encoding="utf-8")
+            (repo / "api" / "runtime.py").write_text(
+                "def runtime(value):\n"
+                "    match value:\n"
+                "        case print:\n"
+                "            print('function-capture')\n"
+                "match callback:\n"
+                "    case print:\n"
+                "        print('module-capture')\n"
+                "class Runtime:\n"
+                "    match callback:\n"
+                "        case Exception:\n"
+                "            try:\n                raise ValueError\n"
+                "            except Exception:\n                pass\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                validate_exception_boundary_policy(repo, self._minimal_policy()), []
+            )
+
     def test_policy_rejects_qualified_exception_pass_only_boundary(self):
         from scripts.verify_exception_boundary_policy import (
             validate_exception_boundary_policy,
