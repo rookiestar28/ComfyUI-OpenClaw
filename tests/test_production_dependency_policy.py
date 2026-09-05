@@ -1512,6 +1512,124 @@ FOUR = live_reader("MOLTBOT_FLAG")
             4,
         )
 
+    def test_environment_alias_contract_preserves_class_comprehension_iterable_scope(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/class_comprehension_iterables.py"
+        ] = """import os
+
+module_readers = [os.getenv]
+MODULE_VALUE = [reader("MOLTBOT_FLAG") for reader in module_readers]
+
+def function_scope():
+    readers = [os.getenv]
+    return [reader("MOLTBOT_FLAG") for reader in readers]
+
+class Governed:
+    readers = [os.getenv]
+    nested_readers = [[os.getenv]]
+    LIST_VALUE = [reader("MOLTBOT_FLAG") for reader in readers]
+    SET_VALUE = {reader("MOLTBOT_FLAG") for reader in readers}
+    DICT_VALUE = {reader("MOLTBOT_FLAG"): True for reader in readers}
+    GEN_VALUE = tuple(reader("MOLTBOT_FLAG") for reader in readers)
+    STAR_VALUE = [*(reader for reader in readers)][0]("MOLTBOT_FLAG")
+    ITER_VALUE = [*iter(readers)][0]("MOLTBOT_FLAG")
+    NESTED_VALUE = [
+        reader("MOLTBOT_FLAG")
+        for group in nested_readers
+        for reader in group
+    ]
+
+class ReverseControls:
+    readers = [client]
+    NOT_ENVIRONMENT = [reader("MOLTBOT_FLAG") for reader in readers]
+    class_reader = os.getenv
+    CLASS_NAMESPACE_IS_SKIPPED = [class_reader("MOLTBOT_FLAG") for _ in [1]]
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/class_comprehension_iterables.py")
+
+        findings = self._evaluate(files, configure=configure)
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            9,
+        )
+
+    def test_environment_alias_contract_activates_generators_in_eager_class_regions(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/eager_class_generator_consumers.py"
+        ] = """import os
+
+direct = ((direct_reader := os.getenv) for _ in [1])
+
+class DirectConsumer:
+    direct.__next__()
+
+ONE = direct_reader("MOLTBOT_FLAG")
+
+defaulted = ((default_reader := os.getenv) for _ in [1])
+
+class DefaultConsumer:
+    def method(value=defaulted.__next__()):
+        return value
+
+TWO = default_reader("MOLTBOT_FLAG")
+
+nested = ((nested_reader := os.getenv) for _ in [1])
+
+class OuterConsumer:
+    class InnerConsumer:
+        nested.__next__()
+
+THREE = nested_reader("MOLTBOT_FLAG")
+
+def local_scope():
+    local = ((local_reader := os.getenv) for _ in [1])
+
+    class LocalConsumer:
+        local.__next__()
+
+    return local_reader("MOLTBOT_FLAG")
+
+deferred = ((deferred_reader := os.getenv) for _ in [1])
+
+class DeferredControl:
+    def method(self):
+        deferred.__next__()
+
+DEFERRED_NOT_ACTIVATED = deferred_reader("MOLTBOT_FLAG")
+
+not_environment = ((fake_reader := client) for _ in [1])
+
+class NonReaderControl:
+    not_environment.__next__()
+
+NOT_ENVIRONMENT = fake_reader("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append(
+                "alpha/eager_class_generator_consumers.py"
+            )
+
+        findings = self._evaluate(files, configure=configure)
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            4,
+        )
+
     def test_environment_alias_contract_tracks_keyword_and_explicit_mapping_reads(
         self,
     ):

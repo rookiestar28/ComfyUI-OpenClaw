@@ -3399,6 +3399,19 @@ def _generator_consumption_sites(
     return (*method_sites, *((argument, candidate) for argument in arguments))
 
 
+def _eager_class_execution_scope(index: _EnvironmentScopeIndex, scope_id: int) -> int:
+    # CRITICAL: a class body and its evaluated definition expressions execute while the
+    # containing scope is active. Project only ClassDef scopes outward; projecting function or
+    # lambda scopes would falsely activate generators referenced solely by deferred method bodies.
+    current = scope_id
+    while isinstance(index.scopes[current].root, ast.ClassDef):
+        parent = index.scopes[current].parent
+        if parent is None:
+            break
+        current = parent
+    return current
+
+
 def _walrus_comprehension_activation(
     tree: ast.AST,
     index: _EnvironmentScopeIndex,
@@ -3453,7 +3466,7 @@ def _walrus_comprehension_activation(
             sites = _generator_consumption_sites(candidate, index, candidate_scope)
             if not sites or _node_is_statically_unreachable(candidate, parents):
                 continue
-            if index.node_scopes.get(id(candidate), 0) != target_scope or (
+            if _eager_class_execution_scope(index, candidate_scope) != target_scope or (
                 not any(part is owner for part in ast.walk(candidate))
                 and _environment_end_position(candidate)
                 <= _environment_end_position(owner)
@@ -3745,8 +3758,15 @@ def _build_environment_scope_index(tree: ast.AST) -> _EnvironmentScopeIndex:
             # Defer it until ordinary binding events for the whole tree have been indexed.
             pending_named_exprs.append((node, scope_id))
         elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+            binding_scope_id = scope_id
+            if isinstance(node, ast.comprehension):
+                # CRITICAL: a comprehension target is local to the child scope, but its first
+                # iterable is evaluated in the enclosing scope. Resolve from the iterable's
+                # indexed scope; using the child scope skips class locals and hides their readers.
+                # Nested generator iterables remain child-scoped because the index records them so.
+                binding_scope_id = index.node_scopes.get(id(node.iter), scope_id)
             bindings = _loop_target_value_bindings(
-                node.target, node.iter, index, scope_id
+                node.target, node.iter, index, binding_scope_id
             )
             activation_node = node.iter
             activation_position = _environment_end_position(activation_node)
