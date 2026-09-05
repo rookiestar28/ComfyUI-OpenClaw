@@ -1397,6 +1397,7 @@ _ENV_ORIGIN_LEGACY_SIGNAL = "legacy_signal"
 _ENV_ORIGIN_OTHER = "other"
 _ENV_ORIGIN_UNBOUND = "unbound"
 _EnvironmentControlPath = tuple[tuple[int, str], ...]
+_EnvironmentBindingSource = ast.expr | tuple[ast.expr, ...]
 
 
 @dataclass(frozen=True)
@@ -1404,7 +1405,7 @@ class _EnvironmentBindingEvent:
     position: tuple[int, int]
     control_path: _EnvironmentControlPath
     fixed_origins: frozenset[str] | None = None
-    value: ast.AST | None = None
+    value: _EnvironmentBindingSource | None = None
 
 
 @dataclass
@@ -1413,8 +1414,9 @@ class _EnvironmentScopeFacts:
     root: ast.AST
     base_origins: dict[str, set[str]]
     origins: dict[str, set[str]]
-    assignments: list[tuple[str, ast.AST]]
+    assignments: list[tuple[str, _EnvironmentBindingSource]]
     binding_events: dict[str, list[_EnvironmentBindingEvent]]
+    wildcard_import_events: list[_EnvironmentBindingEvent]
     global_names: set[str]
     nonlocal_names: set[str]
 
@@ -1431,6 +1433,7 @@ class _EnvironmentScopeIndex(ast.NodeVisitor):
                 defaultdict(set),
                 [],
                 defaultdict(list),
+                [],
                 set(),
                 set(),
             )
@@ -1458,6 +1461,7 @@ class _EnvironmentScopeIndex(ast.NodeVisitor):
                 defaultdict(set),
                 [],
                 defaultdict(list),
+                [],
                 set(),
                 set(),
             )
@@ -1719,14 +1723,16 @@ def _environment_event_origins(
     index._resolving_events.add(cache_key)
     try:
         origins: set[str] = set()
-        if _is_os_module_expression(event.value, index, scope_id):
-            origins.add(_ENV_ORIGIN_OS_MODULE)
-        if _is_getenv_expression(event.value, index, scope_id):
-            origins.add(_ENV_ORIGIN_GETENV)
-        if _is_env_mapping_expression(event.value, index, scope_id):
-            origins.add(_ENV_ORIGIN_MAPPING)
-        if _contains_legacy_env_signal(event.value, index, scope_id):
-            origins.add(_ENV_ORIGIN_LEGACY_SIGNAL)
+        sources = event.value if isinstance(event.value, tuple) else (event.value,)
+        for source in sources:
+            if _is_os_module_expression(source, index, scope_id):
+                origins.add(_ENV_ORIGIN_OS_MODULE)
+            if _is_getenv_expression(source, index, scope_id):
+                origins.add(_ENV_ORIGIN_GETENV)
+            if _is_env_mapping_expression(source, index, scope_id):
+                origins.add(_ENV_ORIGIN_MAPPING)
+            if _contains_legacy_env_signal(source, index, scope_id):
+                origins.add(_ENV_ORIGIN_LEGACY_SIGNAL)
         result = frozenset(origins or {_ENV_ORIGIN_OTHER})
         index._event_origin_cache[cache_key] = result
         return result
@@ -1744,7 +1750,11 @@ def _environment_binding_states_at(
     states: set[str | None] = {None}
     position = _environment_node_position(node)
     control_path = index.node_control_paths.get(id(node), ())
-    for event in facts.binding_events.get(name, ()):
+    events = sorted(
+        (*facts.binding_events.get(name, ()), *facts.wildcard_import_events),
+        key=lambda event: event.position,
+    )
+    for event in events:
         if event.position > position:
             break
         if not _environment_control_paths_compatible(event.control_path, control_path):
@@ -1840,17 +1850,17 @@ def _static_container_selection(node: ast.AST) -> ast.AST | None:
     if not isinstance(node, ast.Subscript) or not isinstance(node.slice, ast.Constant):
         return None
     selector = node.slice.value
-    if (
-        isinstance(selector, int)
-        and not isinstance(selector, bool)
-        and isinstance(node.value, (ast.List, ast.Tuple))
-    ):
+    if isinstance(selector, int) and isinstance(node.value, (ast.List, ast.Tuple)):
         try:
             return node.value.elts[selector]
         except IndexError:
             return None
     if isinstance(node.value, ast.Dict):
-        for key, value in zip(node.value.keys, node.value.values, strict=True):
+        # IMPORTANT: duplicate dict-literal keys retain the last value at runtime. Forward
+        # selection reverses Python semantics and can both hide and invent an env-reader alias.
+        for key, value in reversed(
+            tuple(zip(node.value.keys, node.value.values, strict=True))
+        ):
             if (
                 isinstance(key, ast.Constant)
                 and key.value == selector
@@ -1975,33 +1985,181 @@ def _contains_legacy_env_signal(
 def _target_names(node: ast.AST) -> set[str]:
     if isinstance(node, ast.Name):
         return {node.id}
+    if isinstance(node, ast.Starred):
+        return _target_names(node.value)
     if isinstance(node, (ast.List, ast.Tuple)):
         return {name for element in node.elts for name in _target_names(element)}
     return set()
 
 
+def _static_sequence_elements(node: ast.AST) -> tuple[ast.expr, ...] | None:
+    if not isinstance(node, (ast.List, ast.Tuple)):
+        return None
+    elements: list[ast.expr] = []
+    for element in node.elts:
+        if not isinstance(element, ast.Starred):
+            elements.append(element)
+            continue
+        nested = _static_sequence_elements(element.value)
+        if nested is None:
+            return None
+        elements.extend(nested)
+    return tuple(elements)
+
+
+def _static_iterable_elements(node: ast.AST) -> tuple[ast.expr, ...] | None:
+    sequence = _static_sequence_elements(node)
+    if sequence is not None:
+        return sequence
+    if not isinstance(node, ast.Set):
+        return None
+    elements: list[ast.expr] = []
+    for element in node.elts:
+        if not isinstance(element, ast.Starred):
+            elements.append(element)
+            continue
+        nested = _static_iterable_elements(element.value)
+        if nested is None:
+            return None
+        elements.extend(nested)
+    return tuple(elements)
+
+
+def _unknown_binding_value(node: ast.AST) -> ast.Constant:
+    return ast.copy_location(ast.Constant(value=None), node)
+
+
+def _unpack_possible_sources(node: ast.expr) -> tuple[ast.expr, ...]:
+    if not isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return (node,)
+    sources: list[ast.expr] = []
+    for element in node.elts:
+        if isinstance(element, ast.Starred):
+            sources.extend(_unpack_possible_sources(element.value))
+        else:
+            sources.append(element)
+    return tuple(sources)
+
+
 def _target_value_bindings(
-    target: ast.AST, value: ast.AST
-) -> list[tuple[str, ast.AST]]:
+    target: ast.AST, value: ast.expr
+) -> list[tuple[str, _EnvironmentBindingSource]]:
     if isinstance(target, ast.Name):
         return [(target.id, value)]
     if isinstance(target, ast.Starred):
         return _target_value_bindings(target.value, value)
     if isinstance(target, (ast.List, ast.Tuple)):
-        if isinstance(value, (ast.List, ast.Tuple)) and len(target.elts) == len(
-            value.elts
+        values = _static_sequence_elements(value)
+        starred_indices = [
+            index
+            for index, element in enumerate(target.elts)
+            if isinstance(element, ast.Starred)
+        ]
+        if (
+            values is not None
+            and not starred_indices
+            and len(target.elts) == len(values)
         ):
             return [
                 binding
                 for target_element, value_element in zip(
-                    target.elts, value.elts, strict=True
+                    target.elts, values, strict=True
                 )
                 for binding in _target_value_bindings(target_element, value_element)
             ]
-        # An unknown unpack shape can route any reachable value to any target. Keep the
-        # conservative whole expression so ambiguous canonical origins cannot disappear.
-        return [(name, value) for name in _target_names(target)]
+        if values is not None and len(starred_indices) == 1:
+            starred_index = starred_indices[0]
+            suffix_count = len(target.elts) - starred_index - 1
+            if len(values) >= len(target.elts) - 1:
+                bindings: list[tuple[str, _EnvironmentBindingSource]] = []
+                for target_element, value_element in zip(
+                    target.elts[:starred_index],
+                    values[:starred_index],
+                    strict=True,
+                ):
+                    bindings.extend(
+                        _target_value_bindings(target_element, value_element)
+                    )
+                middle_end = len(values) - suffix_count if suffix_count else len(values)
+                # IMPORTANT: an extended-unpack target receives a new list, not one of the
+                # captured callables. Propagating a middle element as the target origin invents
+                # an executable env-reader alias.
+                middle_value = ast.copy_location(
+                    ast.List(
+                        elts=list(values[starred_index:middle_end]), ctx=ast.Load()
+                    ),
+                    value,
+                )
+                bindings.extend(
+                    _target_value_bindings(target.elts[starred_index], middle_value)
+                )
+                if suffix_count:
+                    for target_element, value_element in zip(
+                        target.elts[-suffix_count:],
+                        values[-suffix_count:],
+                        strict=True,
+                    ):
+                        bindings.extend(
+                            _target_value_bindings(target_element, value_element)
+                        )
+                return bindings
+        if values is not None:
+            # A statically ordered but arity-incompatible unpack raises before any target is
+            # bound. Retain lexical shadowing without inventing a callable value after the error.
+            return [
+                (name, _unknown_binding_value(value)) for name in _target_names(target)
+            ]
+        possible_values = _unpack_possible_sources(value)
+        if possible_values:
+            possible_source: _EnvironmentBindingSource = (
+                possible_values[0] if len(possible_values) == 1 else possible_values
+            )
+            unordered_bindings: list[tuple[str, _EnvironmentBindingSource]] = []
+            for target_element in target.elts:
+                if isinstance(target_element, ast.Starred):
+                    middle_value = ast.copy_location(
+                        ast.List(elts=list(possible_values), ctx=ast.Load()), value
+                    )
+                    unordered_bindings.extend(
+                        _target_value_bindings(target_element, middle_value)
+                    )
+                    continue
+                unordered_bindings.extend(
+                    (name, possible_source) for name in _target_names(target_element)
+                )
+            return unordered_bindings
+        # An unresolved unpack still creates local bindings, but no individual target has a
+        # statically proven value. Mark it unknown so an outer `os` alias is not resurrected.
+        return [(name, _unknown_binding_value(value)) for name in _target_names(target)]
     return []
+
+
+def _loop_target_value_bindings(
+    target: ast.AST, iterable: ast.expr
+) -> list[tuple[str, _EnvironmentBindingSource]]:
+    values = _static_iterable_elements(iterable)
+    if values is None:
+        # An unresolved iterable alias may itself carry the governed dynamic-key or callable
+        # provenance. Preserve that conservative union when no literal elements are available.
+        return [(name, iterable) for name in _target_names(target)]
+    by_name: dict[str, list[ast.expr]] = defaultdict(list)
+    for value in values:
+        for name, source in _target_value_bindings(target, value):
+            if isinstance(source, tuple):
+                by_name[name].extend(source)
+            else:
+                by_name[name].append(source)
+    if not by_name:
+        return [
+            (name, _unknown_binding_value(iterable)) for name in _target_names(target)
+        ]
+    # IMPORTANT: loop/comprehension targets receive iterable elements, never the container
+    # object. Preserve the union of statically reachable element origins to prevent one-element
+    # alias loops from bypassing the raw-read policy.
+    return [
+        (name, sources[0] if len(sources) == 1 else tuple(sources))
+        for name, sources in by_name.items()
+    ]
 
 
 def _build_environment_scope_index(tree: ast.AST) -> _EnvironmentScopeIndex:
@@ -2022,6 +2180,30 @@ def _build_environment_scope_index(tree: ast.AST) -> _EnvironmentScopeIndex:
                 _EnvironmentBindingEvent(
                     _environment_node_position(node),
                     control_path,
+                    frozenset({_ENV_ORIGIN_OTHER}),
+                )
+            )
+        implicit_bindings: list[tuple[str, ast.AST]] = []
+        if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            implicit_bindings.append((node.name, node))
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            implicit_bindings.append((node.rest, node))
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            implicit_bindings.extend(
+                (name, item.optional_vars)
+                for item in node.items
+                if item.optional_vars is not None
+                for name in _target_names(item.optional_vars)
+            )
+        for implicit_name, implicit_activation in implicit_bindings:
+            # IMPORTANT: pattern captures and context-manager targets bind before their guarded
+            # body executes. Omitting these implicit binders resurrects outer env aliases and
+            # lets later registry replacement evade the immutable single-binding check.
+            facts.base_origins[implicit_name].add(_ENV_ORIGIN_OTHER)
+            facts.binding_events[implicit_name].append(
+                _EnvironmentBindingEvent(
+                    _environment_end_position(implicit_activation),
+                    index.node_control_paths.get(id(implicit_activation), control_path),
                     frozenset({_ENV_ORIGIN_OTHER}),
                 )
             )
@@ -2078,6 +2260,17 @@ def _build_environment_scope_index(tree: ast.AST) -> _EnvironmentScopeIndex:
                                 frozenset({star_origin}),
                             )
                         )
+                elif alias.name == "*":
+                    # CRITICAL: an unknown wildcard import can replace any existing name,
+                    # including `frozenset` and immutable registry variables. Treat it as a
+                    # scope-wide binding event; recording only the literal name `*` is fail-open.
+                    facts.wildcard_import_events.append(
+                        _EnvironmentBindingEvent(
+                            _environment_end_position(node),
+                            control_path,
+                            frozenset({_ENV_ORIGIN_OTHER}),
+                        )
+                    )
                 else:
                     facts.base_origins[bound].add(_ENV_ORIGIN_OTHER)
                     facts.binding_events[bound].append(
@@ -2127,8 +2320,9 @@ def _build_environment_scope_index(tree: ast.AST) -> _EnvironmentScopeIndex:
                         )
                     )
 
-        bindings: list[tuple[str, ast.AST]] = []
+        bindings: list[tuple[str, _EnvironmentBindingSource]] = []
         activation_node: ast.AST = node
+        activation_position = _environment_end_position(node)
         event_control_path = control_path
         if isinstance(node, ast.Assign):
             bindings = [
@@ -2140,17 +2334,23 @@ def _build_environment_scope_index(tree: ast.AST) -> _EnvironmentScopeIndex:
             if node.value is not None:
                 bindings = _target_value_bindings(node.target, node.value)
         elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
-            bindings = [(name, node.iter) for name in _target_names(node.target)]
+            bindings = _loop_target_value_bindings(node.target, node.iter)
             activation_node = node.iter
+            activation_position = _environment_end_position(activation_node)
             event_control_path = index.node_control_paths.get(
                 id(node.target), control_path
             )
+            if isinstance(node, ast.comprehension):
+                # IMPORTANT: comprehension result expressions appear before their `for` clause
+                # in source order but execute after target binding. A source-column timestamp
+                # therefore hides canonical aliases used by the result expression.
+                activation_position = (0, 0)
         if bindings:
             for target_name, binding_value in bindings:
                 facts.assignments.append((target_name, binding_value))
                 facts.binding_events[target_name].append(
                     _EnvironmentBindingEvent(
-                        _environment_end_position(activation_node),
+                        activation_position,
                         event_control_path,
                         value=binding_value,
                     )
@@ -2189,6 +2389,7 @@ def _build_environment_scope_index(tree: ast.AST) -> _EnvironmentScopeIndex:
     for facts in index.scopes:
         for events in facts.binding_events.values():
             events.sort(key=lambda event: event.position)
+        facts.wildcard_import_events.sort(key=lambda event: event.position)
 
     for facts in index.scopes:
         facts.origins = defaultdict(
@@ -2205,16 +2406,19 @@ def _build_environment_scope_index(tree: ast.AST) -> _EnvironmentScopeIndex:
             )
             for target, value in facts.assignments:
                 new_origins: set[str] = set()
-                if _is_os_module_expression(value, index, scope_id):
-                    new_origins.add(_ENV_ORIGIN_OS_MODULE)
-                if _is_getenv_expression(value, index, scope_id):
-                    new_origins.add(_ENV_ORIGIN_GETENV)
-                if _is_env_mapping_expression(value, index, scope_id):
-                    new_origins.add(_ENV_ORIGIN_MAPPING)
-                # IMPORTANT: signal propagation is lexical. File-wide name sets made an unrelated
-                # function's `key` inherit a legacy loop target and caused false policy failures.
-                if _contains_legacy_env_signal(value, index, scope_id):
-                    new_origins.add(_ENV_ORIGIN_LEGACY_SIGNAL)
+                sources = value if isinstance(value, tuple) else (value,)
+                for source in sources:
+                    if _is_os_module_expression(source, index, scope_id):
+                        new_origins.add(_ENV_ORIGIN_OS_MODULE)
+                    if _is_getenv_expression(source, index, scope_id):
+                        new_origins.add(_ENV_ORIGIN_GETENV)
+                    if _is_env_mapping_expression(source, index, scope_id):
+                        new_origins.add(_ENV_ORIGIN_MAPPING)
+                    # IMPORTANT: signal propagation is lexical. File-wide name sets made an
+                    # unrelated function's `key` inherit a legacy loop target and caused false
+                    # policy failures.
+                    if _contains_legacy_env_signal(source, index, scope_id):
+                        new_origins.add(_ENV_ORIGIN_LEGACY_SIGNAL)
                 if not new_origins:
                     new_origins.add(_ENV_ORIGIN_OTHER)
                 calculated[target].update(new_origins)
@@ -2233,15 +2437,27 @@ def _legacy_key_from_expression(node: ast.AST) -> str | None:
 
 def _environment_call_key_nodes(node: ast.Call) -> tuple[ast.AST, ...]:
     candidates: list[ast.AST] = []
-    if node.args:
-        first = node.args[0]
-        if isinstance(first, ast.Starred):
-            if isinstance(first.value, (ast.List, ast.Tuple)) and first.value.elts:
-                candidates.append(first.value.elts[0])
-            else:
-                candidates.append(first.value)
-        else:
-            candidates.append(first)
+    for argument in node.args:
+        if not isinstance(argument, ast.Starred):
+            candidates.append(argument)
+            break
+        expanded = _static_sequence_elements(argument.value)
+        if expanded is None:
+            unordered = _static_iterable_elements(argument.value)
+            if unordered is not None:
+                if unordered:
+                    # A set expansion is unordered; every element can become the effective key.
+                    candidates.extend(unordered)
+                    break
+                continue
+            # IMPORTANT: an unknown `*args` may be empty, so both its dynamic signal and a later
+            # argument can supply the first effective key. Stopping at syntax position zero lets
+            # empty expansions hide a governed legacy read.
+            candidates.append(argument.value)
+            continue
+        if expanded:
+            candidates.append(expanded[0])
+            break
     for keyword in node.keywords:
         if keyword.arg == "key":
             candidates.append(keyword.value)
@@ -2354,7 +2570,11 @@ def _assigned_string_set(tree: ast.AST, assignment_name: str) -> frozenset[str] 
     if len(matches) != 1:
         return None
     value = matches[0]
-    if len(scope_index.scopes[0].binding_events.get(assignment_name, ())) != 1:
+    module_facts = scope_index.scopes[0]
+    if (
+        len(module_facts.binding_events.get(assignment_name, ())) != 1
+        or module_facts.wildcard_import_events
+    ):
         return None
     if not (
         isinstance(value, ast.Call)
@@ -2367,9 +2587,13 @@ def _assigned_string_set(tree: ast.AST, assignment_name: str) -> frozenset[str] 
     # CRITICAL: the registry constructor must resolve to the builtin at this exact use. A
     # whole-module binding scan both trusted conditionally shadowed callees and rejected safe
     # assignments that occurred later, breaking registry-policy parity in both directions.
-    if _environment_binding_states_at(scope_index, 0, "frozenset", value.func) != {
-        None
-    }:
+    constructor_states = _environment_binding_states_at(
+        scope_index, 0, "frozenset", value.func
+    )
+    # IMPORTANT: deleting a module shadow restores builtin lookup, while deleting names such as
+    # `os` leaves no canonical module fallback. Permit the unbound tombstone only for this known
+    # builtin constructor; wildcard or conditional-shadow states remain unprovable.
+    if constructor_states not in ({None}, {_ENV_ORIGIN_UNBOUND}):
         return None
     if not value.args:
         return frozenset()

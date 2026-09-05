@@ -917,6 +917,34 @@ EIGHT = os.getenv(**{"key": legacy_key})
         self.assertEqual(codes.count("ENV_ALIAS_DIRECT_READ"), 7)
         self.assertEqual(codes.count("ENV_ALIAS_DYNAMIC_READ"), 1)
 
+    def test_environment_alias_contract_tracks_first_effective_starred_call_argument(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/starred_calls.py"
+        ] = """import os
+
+ONE = os.getenv(*(), *("MOLTBOT_FLAG",))
+TWO = os.getenv(*[], "MOLTBOT_FLAG")
+THREE = os.getenv(*(), *[], "MOLTBOT_FLAG")
+FOUR = os.getenv(*{"MOLTBOT_FLAG"})
+FIVE = os.getenv(*{"PATH", "MOLTBOT_FLAG"})
+NOT_A_KEY = os.getenv(*("PATH",), "MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/starred_calls.py")
+
+        findings = self._evaluate(files, configure=configure)
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            5,
+        )
+
     def test_environment_alias_contract_propagates_compound_and_unpacked_aliases(
         self,
     ):
@@ -958,6 +986,149 @@ ALSO_NOT_ENVIRONMENT = and_reader.getenv("MOLTBOT_FLAG")
         self.assertEqual(
             [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
             6,
+        )
+
+    def test_environment_alias_contract_matches_python_static_container_selection(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/static_selection.py"
+        ] = """import os
+
+duplicate_reader = {"key": client, "key": os.getenv}["key"]
+ONE = duplicate_reader("MOLTBOT_FLAG")
+
+fake_duplicate_reader = {"key": os.getenv, "key": client}["key"]
+NOT_ENVIRONMENT = fake_duplicate_reader("MOLTBOT_FLAG")
+
+true_reader = [client, os.getenv][True]
+TWO = true_reader("MOLTBOT_FLAG")
+
+false_reader = (os.getenv, client)[False]
+THREE = false_reader("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/static_selection.py")
+
+        findings = self._evaluate(files, configure=configure)
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            3,
+        )
+
+    def test_environment_alias_contract_tracks_extended_unpack_and_literal_iteration(
+        self,
+    ):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/extended_unpack.py"
+        ] = """import os
+
+prefix_reader, *prefix_rest = (os.getenv, client, client)
+ONE = prefix_reader("MOLTBOT_FLAG")
+
+*suffix_rest, suffix_reader = (client, client, os.getenv)
+TWO = suffix_reader("MOLTBOT_FLAG")
+
+head, *middle, final_reader = (client, client, os.getenv)
+THREE = final_reader("MOLTBOT_FLAG")
+
+possible_reader, unordered_other = {client, os.getenv}
+UNORDERED = possible_reader("MOLTBOT_FLAG")
+
+nested_reader, nested_other = (*{client, os.getenv},)
+NESTED_UNORDERED = nested_reader("MOLTBOT_FLAG")
+
+fake_head, *list_value = (client, os.getenv)
+NOT_CALLABLE = list_value("MOLTBOT_FLAG")
+
+for loop_reader in [os.getenv]:
+    FOUR = loop_reader("MOLTBOT_FLAG")
+
+VALUES = [reader("MOLTBOT_FLAG") for reader in (os.getenv,)]
+
+for possible_reader in [client, os.getenv]:
+    FIVE = possible_reader("MOLTBOT_FLAG")
+
+for fake_reader in [client]:
+    NOT_ENVIRONMENT = fake_reader("MOLTBOT_FLAG")
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/extended_unpack.py")
+
+        findings = self._evaluate(files, configure=configure)
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            8,
+        )
+
+    def test_environment_alias_contract_tracks_pattern_and_with_bindings(self):
+        files = self._base_files()
+        files["alpha/env_aliases.py"] = environment_alias_owner_source()
+        files[
+            "alpha/implicit_bindings.py"
+        ] = """import os
+from os import getenv
+
+match first:
+    case os:
+        NOT_ENVIRONMENT = os.getenv("MOLTBOT_FLAG")
+
+match second:
+    case [getenv]:
+        ALSO_NOT_ENVIRONMENT = getenv("MOLTBOT_FLAG")
+
+match third:
+    case {"reader": _, **os}:
+        STILL_NOT_ENVIRONMENT = os.get("MOLTBOT_FLAG")
+
+def pattern_scope(value):
+    match value:
+        case [*os]:
+            return os.getenv("MOLTBOT_FLAG")
+
+class PatternScope:
+    match class_value:
+        case os:
+            NOT_ENVIRONMENT = os.getenv("MOLTBOT_FLAG")
+
+with manager() as os:
+    WITH_NOT_ENVIRONMENT = os.getenv("MOLTBOT_FLAG")
+
+with manager() as (os, other):
+    UNPACKED_WITH_NOT_ENVIRONMENT = os.getenv("MOLTBOT_FLAG")
+
+async def governed():
+    import os
+    async with async_manager() as os:
+        return os.getenv("MOLTBOT_FLAG")
+
+import os
+match fourth:
+    case 0:
+        REAL_ENVIRONMENT = os.getenv("MOLTBOT_FLAG")
+    case os:
+        pass
+"""
+
+        def configure(policy):
+            configure_environment_alias_contract(policy)
+            policy["domains"]["alpha"].append("alpha/implicit_bindings.py")
+
+        findings = self._evaluate(files, configure=configure)
+
+        self.assertEqual(
+            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
+            1,
         )
 
     def test_environment_alias_contract_does_not_resurrect_deleted_or_shadowed_names(
@@ -1175,6 +1346,63 @@ REJECTED_LEGACY_ENV_KEYS = frozenset({"CLAWDBOT_REJECTED"})
             configure=lambda policy: configure_environment_alias_contract(policy),
         )
         self.assertIn(
+            "ENV_ALIAS_REGISTRY_UNREADABLE",
+            [finding.rule_id for finding in findings],
+        )
+
+    def test_environment_alias_registry_rejects_implicit_and_wildcard_rebinding(self):
+        files = self._base_files()
+
+        unsafe_suffixes = (
+            """
+match value:
+    case LEGACY_MOLTBOT_ENV_KEYS:
+        pass
+""",
+            """
+with manager() as LEGACY_MOLTBOT_ENV_KEYS:
+    pass
+""",
+            """
+from fake import *
+""",
+        )
+        for suffix in unsafe_suffixes:
+            with self.subTest(suffix=suffix.strip().splitlines()[0]):
+                files["alpha/env_aliases.py"] = (
+                    environment_alias_owner_source() + suffix
+                )
+                findings = self._evaluate(
+                    files,
+                    configure=lambda policy: configure_environment_alias_contract(
+                        policy
+                    ),
+                )
+                self.assertIn(
+                    "ENV_ALIAS_REGISTRY_UNREADABLE",
+                    [finding.rule_id for finding in findings],
+                )
+
+        files["alpha/env_aliases.py"] = (
+            "from fake import *\n" + environment_alias_owner_source()
+        )
+        findings = self._evaluate(
+            files,
+            configure=lambda policy: configure_environment_alias_contract(policy),
+        )
+        self.assertIn(
+            "ENV_ALIAS_REGISTRY_UNREADABLE",
+            [finding.rule_id for finding in findings],
+        )
+
+        files["alpha/env_aliases.py"] = (
+            "frozenset = fake\ndel frozenset\n" + environment_alias_owner_source()
+        )
+        findings = self._evaluate(
+            files,
+            configure=lambda policy: configure_environment_alias_contract(policy),
+        )
+        self.assertNotIn(
             "ENV_ALIAS_REGISTRY_UNREADABLE",
             [finding.rule_id for finding in findings],
         )
