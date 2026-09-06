@@ -152,33 +152,43 @@ class WorkspaceHygieneContractTests(unittest.TestCase):
             self.assertNotIn(private_content, check.stderr)
 
     def test_gate_scripts_snapshot_before_tests_and_check_after_tests(self):
+        # Each case pins the ordered stage markers that must sit between the
+        # hygiene snapshot and the hygiene check. Intermediate markers are
+        # optional so a gate can add stages without losing the invariant.
         cases = (
             (
                 WINDOWS_GATE,
-                'Write-Host "[tests] 5/10 backend unit tests"',
-                'Write-Host "[tests] 10/10 frontend E2E"',
+                (
+                    'Write-Host "[tests] 5/11 backend unit tests"',
+                    'Write-Host "[tests] 10/11 frontend unit tests"',
+                    'Write-Host "[tests] 11/11 frontend E2E"',
+                ),
             ),
             (
                 LINUX_GATE,
-                'echo "[tests] 5/10 backend unit tests"',
-                'echo "[tests] 10/10 frontend E2E"',
+                (
+                    'echo "[tests] 5/11 backend unit tests"',
+                    'echo "[tests] 10/11 frontend unit tests"',
+                    'echo "[tests] 11/11 frontend E2E"',
+                ),
             ),
             (
                 PRE_PUSH_GATE,
-                'echo "[pre-push] 5/9 backend unit tests"',
-                'echo "[pre-push] 9/9 npm test (Playwright)"',
+                (
+                    'echo "[pre-push] 5/9 backend unit tests"',
+                    'echo "[pre-push] 9/9 npm test (Playwright)"',
+                ),
             ),
         )
-        for path, backend_marker, frontend_marker in cases:
+        for path, markers in cases:
             with self.subTest(path=path.name):
                 content = path.read_text(encoding="utf-8")
                 snapshot_at = content.index("check_workspace_hygiene.py snapshot")
-                backend_at = content.index(backend_marker)
-                frontend_at = content.index(frontend_marker)
                 check_at = content.index("check_workspace_hygiene.py check")
-                self.assertLess(snapshot_at, backend_at)
-                self.assertLess(backend_at, frontend_at)
-                self.assertLess(frontend_at, check_at)
+                positions = [content.index(marker) for marker in markers]
+                self.assertLess(snapshot_at, positions[0])
+                self.assertEqual(positions, sorted(positions))
+                self.assertLess(positions[-1], check_at)
 
     def test_local_gate_state_paths_are_owned_by_tmp(self):
         for path in (WINDOWS_GATE, LINUX_GATE, PRE_PUSH_GATE):

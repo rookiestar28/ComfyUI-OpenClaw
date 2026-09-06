@@ -316,36 +316,36 @@ if ($LASTEXITCODE -ne 0) {
 }
 Assert-PreCommitDidNotMutateRepo -BeforeWorktree $preCommitWorktreeBefore -BeforeIndex $preCommitIndexBefore
 
-Write-Host "[tests] 3/10 coverage governance check"
+Write-Host "[tests] 3/11 coverage governance check"
 Invoke-Checked "coverage governance check" {
   & $venvPython scripts\verify_quality_governance.py
 }
 
-Write-Host "[tests] 4/10 test debt governance check"
+Write-Host "[tests] 4/11 test debt governance check"
 Invoke-Checked "test debt governance check" {
   & $venvPython scripts\verify_test_debt_governance.py
 }
 
-Write-Host "[tests] 5/10 backend unit tests"
+Write-Host "[tests] 5/11 backend unit tests"
 $env:MOLTBOT_STATE_DIR = "$root\.tmp\test-state\full\unit"
 Invoke-Checked "backend unit tests" {
   & $venvPython scripts\run_backend_coverage.py --start-dir tests --pattern "test_*.py" --enforce-skip-policy tests\skip_policy.json --coverage-json .tmp\coverage\backend_unit_coverage.json
 }
 
-Write-Host "[tests] 5.1/10 backend coverage hotspot report"
+Write-Host "[tests] 5.1/11 backend coverage hotspot report"
 Invoke-Checked "backend coverage hotspot report" {
   & $venvPython scripts\report_coverage_governance.py --coverage-json .tmp\coverage\backend_unit_coverage.json
 }
 
 if ($env:OPENCLAW_IMPL_RECORD_PATH) {
-  Write-Host "[tests] 5.5/10 implementation record lint (strict)"
+  Write-Host "[tests] 5.5/11 implementation record lint (strict)"
   # IMPORTANT: strict mode is opt-in via OPENCLAW_IMPL_RECORD_PATH to avoid retroactive legacy record failures.
   Invoke-Checked "implementation record lint" {
     & $venvPython scripts\lint_implementation_record.py --path $env:OPENCLAW_IMPL_RECORD_PATH --strict
   }
 }
 
-Write-Host "[tests] 6/10 backend real E2E lanes (R122/R123)"
+Write-Host "[tests] 6/11 backend real E2E lanes (R122/R123)"
 $env:MOLTBOT_STATE_DIR = "$root\.tmp\test-state\full\backend-e2e-real"
 Invoke-Checked "backend real E2E lane R122" {
   & $venvPython scripts\run_unittests.py --module tests.test_r122_real_backend_lane --enforce-skip-policy tests\skip_policy.json --max-skipped 0
@@ -354,12 +354,12 @@ Invoke-Checked "backend real E2E lane R123" {
   & $venvPython scripts\run_unittests.py --module tests.test_r123_real_backend_model_list_lane --enforce-skip-policy tests\skip_policy.json --max-skipped 0
 }
 
-Write-Host "[tests] 7/10 R121 retry partition contract"
+Write-Host "[tests] 7/11 R121 retry partition contract"
 Invoke-Checked "R121 retry partition contract" {
   & $venvPython scripts\run_unittests.py --module tests.test_r121_retry_partition_contract --enforce-skip-policy tests\skip_policy.json --max-skipped 0
 }
 
-Write-Host "[tests] 8/10 Slack integration gates (R124/R125/R117/F57)"
+Write-Host "[tests] 8/11 Slack integration gates (R124/R125/R117/F57)"
 Invoke-Checked "Slack integration gates" {
   & $venvPython scripts\run_unittests.py --module tests.test_r124_slack_ingress_contract --enforce-skip-policy tests\skip_policy.json --max-skipped 0
   & $venvPython scripts\run_unittests.py --module tests.test_r125_slack_real_backend_lane --enforce-skip-policy tests\skip_policy.json --max-skipped 0
@@ -369,7 +369,7 @@ Invoke-Checked "Slack integration gates" {
   & $venvPython scripts\run_unittests.py --module tests.test_f57_slack_socket_mode_startup --enforce-skip-policy tests\skip_policy.json --max-skipped 0
 }
 
-Write-Host "[tests] 9/10 R118 adversarial gate (adaptive: smoke/extended)"
+Write-Host "[tests] 9/11 R118 adversarial gate (adaptive: smoke/extended)"
 $env:MOLTBOT_STATE_DIR = "$root\.tmp\test-state\full\adversarial"
 Invoke-Checked "R118 adversarial adaptive" {
   & $venvPython scripts\run_adversarial_gate.py --profile auto --seed 42 --artifact-dir .tmp\adversarial

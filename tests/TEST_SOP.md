@@ -276,7 +276,8 @@ python scripts/check_workspace_hygiene.py check --root . --snapshot .tmp/workspa
 
 ### Optional: One-Command Full Test Scripts (Fastest)
 
-Use these if you want a single command that runs **all required steps** (detect-secrets, pre-commit, unit tests, E2E). These scripts also handle the most common environment issues (Windows cache locks, Black cache, Node 18).
+Use these if you want a single command that runs **all required steps** (detect-secrets, pre-commit, backend unit tests, frontend unit tests, E2E). These scripts also handle the most common environment issues (Windows cache locks, Black cache, Node 18).
+Stage `10/11` runs `npm run test:unit`. Do not remove it: the Vitest suite owns the frozen frontend decomposition contract and the frontend render-safety ratchet, and no other gate, workflow, or hook executes it.
 Scripts enforce a project-local venv and will bootstrap missing test tooling (`pre-commit`, and `aiohttp` where needed for imports).
 R118 adversarial stage uses adaptive profile selection (`--profile auto`) and escalates to `extended` on high-risk diffs.
 On WSL, scripts prefer `.venv-wsl`; on Windows they use `.venv`.
