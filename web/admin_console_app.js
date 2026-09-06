@@ -18,6 +18,30 @@ function fillBox(node, value) {
     node.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
 }
 
+/**
+ * S104: build a list detail row as text.
+ *
+ * CRITICAL: run/approval/schedule/error values arrive from backend records and
+ * must reach the DOM through `textContent`. Do not restore template-literal
+ * `innerHTML` interpolation here; the render-safety policy pins this file at
+ * zero dynamic sinks.
+ */
+function textRow(root, text, className = "tiny") {
+    const node = root.createElement("div");
+    node.className = className;
+    node.textContent = text;
+    return node;
+}
+
+/** S104: build the emphasized identifier row as text. */
+function boldRow(root, text) {
+    const node = root.createElement("div");
+    const label = root.createElement("b");
+    label.textContent = text;
+    node.appendChild(label);
+    return node;
+}
+
 function createElements(root) {
     return {
         token: query(root, "token"),
@@ -178,11 +202,15 @@ export function mountAdminConsole(root = document) {
         runs.forEach((run) => {
             const node = root.createElement("div");
             node.className = "item";
-            node.innerHTML = `
-                <div><b>${run.run_id || "run"}</b></div>
-                <div class="tiny">status=${run.status || "n/a"} schedule=${run.schedule_id || "n/a"}</div>
-                <div class="tiny">template=${run.template_id || "n/a"} at=${run.started_at || run.created_at || "n/a"}</div>
-            `;
+            node.appendChild(boldRow(root, run.run_id || "run"));
+            node.appendChild(textRow(
+                root,
+                `status=${run.status || "n/a"} schedule=${run.schedule_id || "n/a"}`,
+            ));
+            node.appendChild(textRow(
+                root,
+                `template=${run.template_id || "n/a"} at=${run.started_at || run.created_at || "n/a"}`,
+            ));
             elements.runsList.appendChild(node);
         });
         setStatus(elements.eventsStatus, `Runs refreshed at ${now()}`, "ok");
@@ -262,7 +290,11 @@ export function mountAdminConsole(root = document) {
         const response = await api.request("/approvals?status=pending&limit=60&offset=0");
         elements.approvalsList.innerHTML = "";
         if (!response.ok) {
-            elements.approvalsList.innerHTML = `<div class="tiny err">Approvals fetch failed: ${response.error || "unknown"}</div>`;
+            elements.approvalsList.appendChild(textRow(
+                root,
+                `Approvals fetch failed: ${response.error || "unknown"}`,
+                "tiny err",
+            ));
             return;
         }
 
@@ -275,10 +307,11 @@ export function mountAdminConsole(root = document) {
         approvals.forEach((approval) => {
             const item = root.createElement("div");
             item.className = "item";
-            item.innerHTML = `
-                <div><b>${approval.approval_id || "approval"}</b></div>
-                <div class="tiny">template=${approval.template_id || "n/a"} source=${approval.source || "n/a"}</div>
-            `;
+            item.appendChild(boldRow(root, approval.approval_id || "approval"));
+            item.appendChild(textRow(
+                root,
+                `template=${approval.template_id || "n/a"} source=${approval.source || "n/a"}`,
+            ));
             const bar = root.createElement("div");
             bar.className = "tools";
 
@@ -317,7 +350,11 @@ export function mountAdminConsole(root = document) {
         const response = await api.request("/schedules");
         elements.schedulesList.innerHTML = "";
         if (!response.ok) {
-            elements.schedulesList.innerHTML = `<div class="tiny err">Schedules fetch failed: ${response.error || "unknown"}</div>`;
+            elements.schedulesList.appendChild(textRow(
+                root,
+                `Schedules fetch failed: ${response.error || "unknown"}`,
+                "tiny err",
+            ));
             return;
         }
 
@@ -330,11 +367,12 @@ export function mountAdminConsole(root = document) {
         schedules.forEach((schedule) => {
             const item = root.createElement("div");
             item.className = "item";
-            item.innerHTML = `
-                <div><b>${schedule.name || schedule.schedule_id}</b></div>
-                <div class="tiny">id=${schedule.schedule_id} enabled=${Boolean(schedule.enabled)} trigger=${schedule.trigger_type || "n/a"}</div>
-                <div class="tiny">template=${schedule.template_id || "n/a"}</div>
-            `;
+            item.appendChild(boldRow(root, schedule.name || schedule.schedule_id));
+            item.appendChild(textRow(
+                root,
+                `id=${schedule.schedule_id} enabled=${Boolean(schedule.enabled)} trigger=${schedule.trigger_type || "n/a"}`,
+            ));
+            item.appendChild(textRow(root, `template=${schedule.template_id || "n/a"}`));
             const bar = root.createElement("div");
             bar.className = "tools";
 

@@ -1,16 +1,8 @@
 import { openclawApi } from "../openclaw_api.js";
 import { clearError, showError, showToast } from "../openclaw_utils.js";
+import { escapeHtml } from "../openclaw_text_safety.js";
 
 const _ACTIVE_STATES = new Set(["queued", "running"]);
-
-function escapeHtml(text) {
-    return String(text ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
 
 function normalizeString(value) {
     return String(value ?? "").trim();

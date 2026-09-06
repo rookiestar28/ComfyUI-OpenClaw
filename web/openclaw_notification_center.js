@@ -1,13 +1,5 @@
 import { openclawNotifications } from "./openclaw_notifications.js";
-
-function escapeHtml(value) {
-    return String(value ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
+import { escapeHtml } from "./openclaw_text_safety.js";
 
 function formatNotificationTime(value) {
     if (!value) return "";

@@ -4,16 +4,7 @@ import {
     clearError,
     normalizeLegacyClassNames,
 } from "../openclaw_utils.js";
-
-function escapeHtml(text) {
-    if (!text) return "";
-    return text
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/\"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
+import { escapeHtml } from "../openclaw_text_safety.js";
 
 function stringifyVal(value) {
     if (typeof value === "object" && value !== null) return "{...}";

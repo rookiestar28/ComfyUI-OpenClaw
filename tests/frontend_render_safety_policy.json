@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "item": "S104",
+  "verifier": "scripts/verify_frontend_render_safety.mjs",
+  "escape_owner": "web/openclaw_text_safety.js",
+  "notes": [
+    "Counts are dynamic HTML sinks only: an innerHTML/outerHTML assignment whose right-hand side is not an empty or substitution-free literal, a compound += assignment, or an insertAdjacentHTML/document.write call.",
+    "Clearing assignments and reviewed constant templates are classified separately and are not counted.",
+    "Counts must match exactly. An increase is a regression; a decrease means the pin must be lowered in the change that earned it.",
+    "This ratchet is a drift guard, not a safety proof. Rendered-DOM tests carry the security argument.",
+    "A file with zero dynamic sinks may be pinned at 0 to lock in a completed repair."
+  ],
+  "files": {
+    "web/admin_console_app.js": {
+      "dynamic_sinks": 0,
+      "reason": "S104 converted every run/approval/schedule/error renderer to textContent DOM construction; the standalone admin console must stay at zero.",
+      "regression_owner": "web/tests/unit/admin_console_rendering.test.js"
+    },
+    "web/openclaw.js": {
+      "dynamic_sinks": 1,
+      "reason": "Extension bootstrap shell markup; not repaired by S104.",
+      "regression_owner": "web/tests/unit/openclaw_tabs.test.js"
+    },
+    "web/openclaw_actions.js": {
+      "dynamic_sinks": 1,
+      "reason": "Context toolbox markup; not repaired by S104.",
+      "regression_owner": "web/tests/unit/openclaw_actions.test.js"
+    },
+    "web/openclaw_notification_center.js": {
+      "dynamic_sinks": 1,
+      "reason": "Notification list template; every interpolated field goes through the shared escapeHtml owner.",
+      "regression_owner": "web/tests/unit/openclaw_notification_center.test.js"
+    },
+    "web/tabs/approvals_tab.js": {
+      "dynamic_sinks": 1,
+      "reason": "Approval list template; interpolated fields go through the shared escapeHtml owner.",
+      "regression_owner": "tests/e2e/specs/approvals.spec.js"
+    },
+    "web/tabs/explorer_tab.js": {
+      "dynamic_sinks": 7,
+      "reason": "Inventory and diagnostics rendering; out of S104 scope and not escaped. Highest-priority follow-up.",
+      "regression_owner": "tests/e2e/specs/ui_harness.spec.js"
+    },
+    "web/tabs/library_tab.js": {
+      "dynamic_sinks": 1,
+      "reason": "Preset and pack list template; interpolated fields go through the shared escapeHtml owner.",
+      "regression_owner": "tests/e2e/specs/library.spec.js"
+    },
+    "web/tabs/model_manager_tab.js": {
+      "dynamic_sinks": 3,
+      "reason": "Catalog, task and installation list templates; interpolated fields go through the shared escapeHtml owner.",
+      "regression_owner": "web/tests/unit/model_manager_tab.test.js"
+    },
+    "web/tabs/packs_tab.js": {
+      "dynamic_sinks": 1,
+      "reason": "Pack list template; interpolated fields go through the shared escapeHtml owner.",
+      "regression_owner": "web/tests/unit/packs_tab_render_safety.test.js"
+    },
+    "web/tabs/parameter_lab_tab.js": {
+      "dynamic_sinks": 5,
+      "reason": "Experiment history and results rendering, including one string-concatenation error sink; out of S104 scope and not escaped. Follow-up.",
+      "regression_owner": "tests/e2e/specs/parameter_lab.spec.js"
+    },
+    "web/tabs/png_info_tab.js": {
+      "dynamic_sinks": 4,
+      "reason": "Metadata section templates; interpolated fields go through the shared escapeHtml owner.",
+      "regression_owner": "web/tests/unit/png_info_tab.test.js"
+    },
+    "web/tabs/settings_tab_dom.js": {
+      "dynamic_sinks": 3,
+      "reason": "Settings shell markup built from module-local constants; out of S104 scope.",
+      "regression_owner": "tests/e2e/specs/settings.spec.js"
+    },
+    "web/tabs/settings_tab_status.js": {
+      "dynamic_sinks": 2,
+      "reason": "Status and health panel rendering; out of S104 scope.",
+      "regression_owner": "tests/e2e/specs/settings.spec.js"
+    }
+  }
+}

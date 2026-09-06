@@ -1,16 +1,6 @@
 import { openclawApi } from "../openclaw_api.js";
 import { showError, clearError } from "../openclaw_utils.js";
-
-// Helper for safe HTML escaping
-function escapeHtml(text) {
-    if (!text) return "";
-    return text
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
+import { escapeHtml } from "../openclaw_text_safety.js";
 
 export const PacksTab = {
     id: "packs",

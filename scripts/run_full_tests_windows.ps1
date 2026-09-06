@@ -375,7 +375,13 @@ Invoke-Checked "R118 adversarial adaptive" {
   & $venvPython scripts\run_adversarial_gate.py --profile auto --seed 42 --artifact-dir .tmp\adversarial
 }
 
-Write-Host "[tests] 10/10 frontend E2E"
+Write-Host "[tests] 10/11 frontend unit tests"
+# IMPORTANT: the Vitest suite owns the frontend render-safety ratchet and the
+# frozen decomposition contract. It was previously unreachable from every gate,
+# so those checks never re-ran after the commit that added them.
+Invoke-Checked "frontend unit tests" { npm run test:unit }
+
+Write-Host "[tests] 11/11 frontend E2E"
 $env:OPENCLAW_PLAYWRIGHT_INSTALL = "1"
 $env:OPENCLAW_PLAYWRIGHT_BROWSERS = "chromium"
 # IMPORTANT: full-gate acceptance must provision Playwright browsers itself; do

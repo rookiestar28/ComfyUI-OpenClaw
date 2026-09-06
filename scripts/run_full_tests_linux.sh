@@ -282,7 +282,13 @@ echo "[tests] 9/10 R118 adversarial gate (adaptive: smoke/extended)"
 MOLTBOT_STATE_DIR="$ROOT_DIR/.tmp/test-state/full/adversarial" \
   "$VENV_PY" scripts/run_adversarial_gate.py --profile auto --seed 42 --artifact-dir .tmp/adversarial
 
-echo "[tests] 10/10 frontend E2E"
+echo "[tests] 10/11 frontend unit tests"
+# IMPORTANT: the Vitest suite owns the frontend render-safety ratchet and the
+# frozen decomposition contract. It was previously unreachable from every gate,
+# so those checks never re-ran after the commit that added them.
+npm run test:unit
+
+echo "[tests] 11/11 frontend E2E"
 # IMPORTANT: full-gate acceptance must provision Playwright browsers itself; do
 # not assume a warmed local browser cache when running on fresh WSL/Linux hosts.
 OPENCLAW_PLAYWRIGHT_INSTALL=1 OPENCLAW_PLAYWRIGHT_BROWSERS=chromium npm test

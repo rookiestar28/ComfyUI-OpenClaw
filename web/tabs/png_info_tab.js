@@ -1,14 +1,6 @@
 import { openclawApi } from "../openclaw_api.js";
 import { clearError, copyToClipboard, showError } from "../openclaw_utils.js";
-
-function escapeHtml(text) {
-    return String(text ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
+import { escapeHtml } from "../openclaw_text_safety.js";
 
 function isImageFile(file) {
     return Boolean(file?.type?.startsWith("image/"));

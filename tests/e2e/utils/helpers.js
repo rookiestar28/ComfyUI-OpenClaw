@@ -446,12 +446,19 @@ export async function mockComfyUiCore(page, options = {}) {
   });
 }
 
-export async function mockCompatApprovalsList(page, approvals = []) {
+export async function mockCompatApprovalsList(page, approvals = [], { status = 200, error = null } = {}) {
   await page.route('**/approvals**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     if (request.method() !== 'GET' || !isCompatApiPath(url.pathname, '/approvals')) {
       await route.fallback();
+      return;
+    }
+
+    // S104: additive failure path so a spec can assert that a hostile backend
+    // error string is rendered as literal text.
+    if (status !== 200) {
+      await route.fulfill(jsonRoute({ ok: false, error }, status));
       return;
     }
 
@@ -475,6 +482,13 @@ export async function mockRemoteAdminBaseline(
   {
     hostSurface = HOST_SURFACES.standaloneFrontend,
     approvals = [],
+    // S104: additive record fixtures so a spec can drive the admin console with
+    // hostile field values. Defaults keep the previous empty-list behavior.
+    runs = [],
+    schedules = [],
+    approvalsStatus = 200,
+    schedulesStatus = 200,
+    listError = null,
   } = {}
 ) {
   await installHostRuntime(page, { hostSurface });
@@ -540,7 +554,7 @@ export async function mockRemoteAdminBaseline(
     await route.fulfill(
       jsonRoute({
         ok: true,
-        runs: [],
+        runs,
       })
     );
   });
@@ -553,10 +567,15 @@ export async function mockRemoteAdminBaseline(
       return;
     }
 
+    if (schedulesStatus !== 200) {
+      await route.fulfill(jsonRoute({ ok: false, error: listError }, schedulesStatus));
+      return;
+    }
+
     await route.fulfill(
       jsonRoute({
         ok: true,
-        schedules: [],
+        schedules,
       })
     );
   });
@@ -631,7 +650,7 @@ export async function mockRemoteAdminBaseline(
     );
   });
 
-  await mockCompatApprovalsList(page, approvals);
+  await mockCompatApprovalsList(page, approvals, { status: approvalsStatus, error: listError });
 }
 
 export async function waitForOpenClawReady(page) {

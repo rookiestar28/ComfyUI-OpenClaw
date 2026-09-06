@@ -11,16 +11,7 @@ import {
     filterLibraryItems,
     getLibraryApplyTarget,
 } from "./library_tab_state.js";
-
-function escapeHtml(text) {
-    if (!text) return "";
-    return text
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/\"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
+import { escapeHtml } from "../openclaw_text_safety.js";
 
 function renderApplyButtons(preset) {
     if (preset.category === "prompt") {
