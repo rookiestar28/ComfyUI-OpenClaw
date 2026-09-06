@@ -120,7 +120,7 @@ If `assist_streaming` is unavailable or the stream transport degrades, Planner/R
 - Tests live in: `tests/e2e/specs/`
 - Harness: `tests/e2e/test-harness.html` (mocks ComfyUI core + basic OpenClaw API calls)
 - Harness bootstrap now retries one transient `openclaw.js` module-fetch failure before surfacing a hard load error, so CI-only first-request flakiness does not get misreported as a permanent sidebar failure.
-- Web helper/self-test harness: `web/tests/e2e-harness.html` (includes frontend helper and wrapper idempotence checks)
+- Web helper/self-test harness: `tests/frontend/e2e-harness.html` (includes frontend helper and wrapper idempotence checks)
 - Frontend unit contracts also freeze API exports/signatures, singleton identity, Settings DOM
   identities, owner direction, and stale-generation disposal across the decomposed modules.
 - Desktop host parity lane: `tests/e2e/specs/desktop_host_parity.spec.js` verifies standalone vs desktop host evidence separately and covers both sidebar and Remote Admin host-sensitive behavior under the shared harness shims.

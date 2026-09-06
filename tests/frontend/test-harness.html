@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OpenClaw UI Test Harness (R12)</title>
+    <style>
+        body { background: #222; color: #eee; font-family: sans-serif; padding: 20px; }
+        .test-case { margin-bottom: 20px; border: 1px solid #444; padding: 10px; border-radius: 4px; }
+        .test-case h3 { margin-top: 0; }
+        .result { padding: 4px 8px; border-radius: 4px; font-weight: bold; }
+        .pass { background: #284; color: #fff; }
+        .fail { background: #822; color: #fff; }
+        #mock-app { display: none; } /* Hidden mount point */
+    </style>
+</head>
+<body>
+    <h1>OpenClaw UI Test Harness</h1>
+    <div id="results">Running tests...</div>
+
+    <!-- Mock App Container -->
+    <div id="mock-app"></div>
+
+    <script type="module">
+        import { OpenClawSession } from '../../web/openclaw_session.js';
+
+        // Simple test runner
+        const results = document.getElementById("results");
+        let passed = 0;
+        let failed = 0;
+
+        async function runTest(name, fn) {
+            const div = document.createElement("div");
+            div.className = "test-case";
+            div.innerHTML = `<h3>${name}</h3>`;
+            try {
+                await fn();
+                div.innerHTML += `<span class="result pass">PASS</span>`;
+                passed++;
+            } catch (e) {
+                console.error(e);
+                div.innerHTML += `<span class="result fail">FAIL</span> <pre>${e.message}</pre>`;
+                failed++;
+            }
+            results.appendChild(div);
+        }
+
+        async function verifyModules() {
+            // Test 1: Session Store
+            await runTest("OpenClawSession Storage", () => {
+                OpenClawSession.setAdminToken("test-token");
+                if (OpenClawSession.getAdminToken() !== "test-token") throw new Error("Failed to set/get token");
+
+                OpenClawSession.setAdminToken(null);
+                if (OpenClawSession.getAdminToken() !== null) throw new Error("Failed to clear token");
+
+                // Cleanup
+                sessionStorage.clear();
+            });
+
+            // Future: Test Tab Registration (mocking ComfyUI objects required)
+            // await runTest("Tab Loading", async () => { ... });
+        }
+
+        // Run
+        (async () => {
+            results.innerHTML = "";
+            await verifyModules();
+            const summary = document.createElement("h2");
+            summary.textContent = `Summary: ${passed} Passed, ${failed} Failed`;
+            results.prepend(summary);
+        })();
+    </script>
+</body>
+</html>

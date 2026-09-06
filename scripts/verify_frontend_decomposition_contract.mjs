@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { stableTextDigest } from "./contract_digest.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const CONTRACT_PATH = path.join(ROOT, "web", "tests", "fixtures", "frontend_decomposition_contract_r224.json");
+const CONTRACT_PATH = path.join(ROOT, "tests", "frontend", "fixtures", "frontend_decomposition_contract_r224.json");
 
 function canonicalJson(value) {
     return `${JSON.stringify(value, null, 2)}\n`;

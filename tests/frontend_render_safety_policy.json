@@ -14,22 +14,22 @@
     "web/admin_console_app.js": {
       "dynamic_sinks": 0,
       "reason": "S104 converted every run/approval/schedule/error renderer to textContent DOM construction; the standalone admin console must stay at zero.",
-      "regression_owner": "web/tests/unit/admin_console_rendering.test.js"
+      "regression_owner": "tests/frontend/unit/admin_console_rendering.test.js"
     },
     "web/openclaw.js": {
       "dynamic_sinks": 1,
       "reason": "Extension bootstrap shell markup; not repaired by S104.",
-      "regression_owner": "web/tests/unit/openclaw_tabs.test.js"
+      "regression_owner": "tests/frontend/unit/openclaw_tabs.test.js"
     },
     "web/openclaw_actions.js": {
       "dynamic_sinks": 1,
       "reason": "Context toolbox markup; not repaired by S104.",
-      "regression_owner": "web/tests/unit/openclaw_actions.test.js"
+      "regression_owner": "tests/frontend/unit/openclaw_actions.test.js"
     },
     "web/openclaw_notification_center.js": {
       "dynamic_sinks": 1,
       "reason": "Notification list template; every interpolated field goes through the shared escapeHtml owner.",
-      "regression_owner": "web/tests/unit/openclaw_notification_center.test.js"
+      "regression_owner": "tests/frontend/unit/openclaw_notification_center.test.js"
     },
     "web/tabs/approvals_tab.js": {
       "dynamic_sinks": 1,
@@ -49,12 +49,12 @@
     "web/tabs/model_manager_tab.js": {
       "dynamic_sinks": 3,
       "reason": "Catalog, task and installation list templates; interpolated fields go through the shared escapeHtml owner.",
-      "regression_owner": "web/tests/unit/model_manager_tab.test.js"
+      "regression_owner": "tests/frontend/unit/model_manager_tab.test.js"
     },
     "web/tabs/packs_tab.js": {
       "dynamic_sinks": 1,
       "reason": "Pack list template; interpolated fields go through the shared escapeHtml owner.",
-      "regression_owner": "web/tests/unit/packs_tab_render_safety.test.js"
+      "regression_owner": "tests/frontend/unit/packs_tab_render_safety.test.js"
     },
     "web/tabs/parameter_lab_tab.js": {
       "dynamic_sinks": 5,
@@ -64,7 +64,7 @@
     "web/tabs/png_info_tab.js": {
       "dynamic_sinks": 4,
       "reason": "Metadata section templates; interpolated fields go through the shared escapeHtml owner.",
-      "regression_owner": "web/tests/unit/png_info_tab.test.js"
+      "regression_owner": "tests/frontend/unit/png_info_tab.test.js"
     },
     "web/tabs/settings_tab_dom.js": {
       "dynamic_sinks": 3,

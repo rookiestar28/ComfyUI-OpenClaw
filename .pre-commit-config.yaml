@@ -80,7 +80,6 @@ repos:
             media/.*|
             __pycache__/.*|
             tests/.*|
-            web/tests/.*|
             .*\.lock$|
             .*\.min\.js$
           )$
