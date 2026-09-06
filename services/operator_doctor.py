@@ -306,6 +306,7 @@ def check_compatibility_matrix_governance(
     try:
         from .compatibility_matrix_governance import (
             build_host_surface_contract,
+            build_reference_evidence_projection,
             detect_anchor_drift,
             normalize_observed_anchors,
             read_matrix_document,
@@ -342,6 +343,28 @@ def check_compatibility_matrix_governance(
     if validation.get("age_days") is not None:
         report.environment["compat_matrix_age_days"] = str(validation["age_days"])
     report.environment["compat_matrix_drift_code"] = str(drift.get("code", ""))
+    # R254: publish only the coarse evidence states and upstream version facts.
+    # IMPORTANT: never widen this to run content, local paths, or command logs;
+    # the doctor report is operator-facing over HTTP.
+    evidence = build_reference_evidence_projection(doc.get("metadata"))
+    report.environment["compat_source_review_state"] = str(
+        evidence.get("source_review", "unknown")
+    )
+    report.environment["compat_repository_validation_state"] = str(
+        evidence.get("repository_validation", "unknown")
+    )
+    report.environment["compat_real_host_validation_state"] = str(
+        evidence.get("real_host", "unknown")
+    )
+    report.environment["compat_core_version"] = str(
+        evidence.get("core_version", "unknown")
+    )
+    report.environment["compat_core_bundled_frontend_version"] = str(
+        evidence.get("core_bundled_frontend_version", "unknown")
+    )
+    report.environment["compat_frontend_release_version"] = str(
+        evidence.get("frontend_release_version", "unknown")
+    )
     report.environment["compat_host_surface_code"] = str(host_contract.get("code", ""))
     report.environment["compat_desktop_embedded_frontend_status"] = str(
         (

@@ -13,6 +13,7 @@ from datetime import date
 from pathlib import Path
 
 from services.compatibility_matrix_governance import (
+    build_reference_evidence_projection,
     build_host_surface_contract,
     detect_anchor_drift,
     read_matrix_document,
@@ -23,8 +24,8 @@ from services.operator_doctor import DoctorReport, check_compatibility_matrix_go
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_CURRENT_ANCHORS = {
-    "comfyui": "3aba3dae (v0.33.0-27-g3aba3dae / pyproject 0.33.0)",
-    "comfyui_frontend": "1.52.1 (569e65b30f / v1.52.1-3-g569e65b30f)",
+    "comfyui": "31dfbd4c (v0.34.0-46-g31dfbd4c / pyproject 0.34.0)",
+    "comfyui_frontend": "1.54.3 (9ff3fd7f0e / v1.54.3-21-g9ff3fd7f0e)",
     "desktop": "0.9.4 (core 0.22.3 / frontend 1.43.18)",
     "comfy_desktop": "1.0.32-rc.1 (85e28b7a / v1.0.32-rc.1-3-g85e28b7)",
 }
@@ -56,7 +57,30 @@ STALE_ACTIVE_REFERENCE_TOKENS = (
     "v0.27.0-47-g1377a2f7",
     "ceb5ae1eba",
     "v1.48.1-1-gceb5ae1eba",
+    # R254: superseded by the 2026-09-05 source-review baseline.
+    "3aba3dae",
+    "v0.33.0-27-g3aba3dae",
+    "569e65b30f",
+    "v1.52.1-3-g569e65b30f",
 )
+EXPECTED_REFERENCE_BASELINES = {
+    "comfyui": {
+        "bundled_frontend_version": "1.51.9",
+        "project_version": "0.34.0",
+        "source_describe": "v0.34.0-46-g31dfbd4c",
+        "source_head": "31dfbd4ca0cb36ab6a573fc13daec8cc3a2e1e98",
+        "tag": "v0.34.0",
+        "tag_commit": "12d5279438bfefc058a269eae805ceab6047777f",
+    },
+    "comfyui_frontend": {
+        "package_version": "1.54.3",
+        "release_tag": "v1.54.3",
+        "release_tag_commit": "b2f5587509d744d7779accce193db53f36a91d4a",
+        "release_version": "1.54.3",
+        "source_describe": "v1.54.3-21-g9ff3fd7f0e",
+        "source_head": "9ff3fd7f0e36b810a621288ceaf6e74e3846bedd",
+    },
+}
 
 
 class TestR90CompatMatrixGovernance(unittest.TestCase):
@@ -73,9 +97,12 @@ class TestR90CompatMatrixGovernance(unittest.TestCase):
         doc = read_matrix_document(
             REPO_ROOT / "docs" / "release" / "compatibility_matrix.md"
         )
-        self.assertEqual(doc["metadata"]["schema_version"], 2)
+        self.assertEqual(doc["metadata"]["schema_version"], 3)
         self.assertEqual(doc["metadata"]["anchors"], EXPECTED_CURRENT_ANCHORS)
         self.assertEqual(doc["metadata"]["host_surfaces"], EXPECTED_HOST_SURFACES)
+        self.assertEqual(
+            doc["metadata"]["reference_baselines"], EXPECTED_REFERENCE_BASELINES
+        )
 
     def test_active_current_reference_files_reject_stale_anchors(self):
         stale_hits = {}
@@ -270,7 +297,7 @@ class TestR90CompatMatrixGovernance(unittest.TestCase):
             )
             self.assertTrue(applied.ok)
             doc = read_matrix_document(matrix)
-            self.assertEqual(doc["metadata"]["schema_version"], 2)
+            self.assertEqual(doc["metadata"]["schema_version"], 3)
             self.assertEqual(
                 doc["metadata"]["anchors"]["comfyui"],
                 EXPECTED_CURRENT_ANCHORS["comfyui"],
@@ -452,6 +479,197 @@ class TestR90CompatMatrixGovernance(unittest.TestCase):
             self.assertIn("stages", payload)
             self.assertIn("collect", payload["stages"])
             self.assertIn("R90_PUBLISH_DRY_RUN", payload["decision_codes"])
+
+
+class TestR254ReferenceBaselineEvidence(unittest.TestCase):
+    """R254: source review, repository validation and real-host proof stay disjoint."""
+
+    def _schema3(self, **overrides):
+        metadata = {
+            "schema_version": 3,
+            "last_validated_date": "2026-09-06",
+            "policy": {"warn_age_days": 30, "max_age_days": 45},
+            "anchors": dict(EXPECTED_CURRENT_ANCHORS),
+            "host_surfaces": json.loads(json.dumps(EXPECTED_HOST_SURFACES)),
+            "reference_baselines": json.loads(
+                json.dumps(EXPECTED_REFERENCE_BASELINES)
+            ),
+            "evidence_states": {
+                "source_review": {
+                    "state": "reviewed",
+                    "evidence_id": "source-review-20260905",
+                    "run_id": None,
+                },
+                "repository_validation": {
+                    "state": "validated",
+                    "evidence_id": "repo-validation-20260906",
+                    "run_id": "windows-full-gate-20260906",
+                },
+                "real_host": {
+                    "state": "pending",
+                    "evidence_id": None,
+                    "run_id": None,
+                },
+            },
+        }
+        metadata.update(overrides)
+        return metadata
+
+    def _codes(self, metadata):
+        validation = validate_metadata(metadata, today=date(2026, 9, 6))
+        return validation, {entry["code"] for entry in validation["violations"]}
+
+    def test_repo_matrix_keeps_real_host_validation_pending(self):
+        doc = read_matrix_document(
+            REPO_ROOT / "docs" / "release" / "compatibility_matrix.md"
+        )
+        states = doc["metadata"]["evidence_states"]
+        self.assertEqual(states["real_host"]["state"], "pending")
+        self.assertIsNone(states["real_host"]["run_id"])
+        self.assertIsNone(states["real_host"]["evidence_id"])
+        self.assertEqual(states["source_review"]["state"], "reviewed")
+        self.assertEqual(states["repository_validation"]["state"], "validated")
+
+    def test_repo_matrix_separates_frontend_source_head_from_release(self):
+        doc = read_matrix_document(
+            REPO_ROOT / "docs" / "release" / "compatibility_matrix.md"
+        )
+        frontend = doc["metadata"]["reference_baselines"]["comfyui_frontend"]
+        self.assertNotEqual(frontend["source_head"], frontend["release_tag_commit"])
+        self.assertEqual(frontend["release_version"], "1.54.3")
+        core = doc["metadata"]["reference_baselines"]["comfyui"]
+        self.assertNotEqual(core["source_head"], core["tag_commit"])
+        self.assertEqual(core["bundled_frontend_version"], "1.51.9")
+
+    def test_schema_v3_metadata_validates(self):
+        validation, codes = self._codes(self._schema3())
+        self.assertTrue(validation["ok"], msg=validation["violations"])
+        self.assertEqual(codes, set())
+
+    def test_schema_v2_metadata_remains_supported(self):
+        # R254 added the new objects additively; a schema-2 document must not
+        # start failing just because schema 3 exists.
+        legacy = {
+            "schema_version": 2,
+            "last_validated_date": "2026-09-06",
+            "policy": {"warn_age_days": 30, "max_age_days": 45},
+            "anchors": dict(EXPECTED_CURRENT_ANCHORS),
+            "host_surfaces": json.loads(json.dumps(EXPECTED_HOST_SURFACES)),
+        }
+        validation, codes = self._codes(legacy)
+        self.assertTrue(validation["ok"], msg=validation["violations"])
+        self.assertEqual(codes, set())
+
+    def test_unknown_evidence_state_fails_closed(self):
+        metadata = self._schema3()
+        metadata["evidence_states"]["real_host"]["state"] = "probably_fine"
+        validation, codes = self._codes(metadata)
+        self.assertFalse(validation["ok"])
+        self.assertIn("R254_EVIDENCE_STATE_UNKNOWN", codes)
+
+    def test_missing_evidence_state_fails_closed(self):
+        metadata = self._schema3()
+        del metadata["evidence_states"]["real_host"]
+        validation, codes = self._codes(metadata)
+        self.assertFalse(validation["ok"])
+        self.assertIn("R254_EVIDENCE_ENTRY_MISSING", codes)
+
+    def test_validated_real_host_requires_a_run_id(self):
+        metadata = self._schema3()
+        metadata["evidence_states"]["real_host"] = {
+            "state": "validated",
+            "evidence_id": "real-host-20260906",
+            "run_id": None,
+        }
+        validation, codes = self._codes(metadata)
+        self.assertFalse(validation["ok"])
+        self.assertIn("R254_EVIDENCE_RUN_ID_REQUIRED", codes)
+
+    def test_pending_evidence_cannot_carry_a_fabricated_run(self):
+        metadata = self._schema3()
+        metadata["evidence_states"]["real_host"]["run_id"] = "imagined-run-1"
+        validation, codes = self._codes(metadata)
+        self.assertFalse(validation["ok"])
+        self.assertIn("R254_EVIDENCE_PENDING_RUN_ID", codes)
+
+    def test_source_review_cannot_claim_validated(self):
+        metadata = self._schema3()
+        metadata["evidence_states"]["source_review"]["state"] = "validated"
+        validation, codes = self._codes(metadata)
+        self.assertFalse(validation["ok"])
+        self.assertIn("R254_EVIDENCE_STATE_NOT_ALLOWED", codes)
+
+    def test_evidence_identifiers_must_be_distinct(self):
+        metadata = self._schema3()
+        metadata["evidence_states"]["repository_validation"]["evidence_id"] = (
+            "source-review-20260905"
+        )
+        validation, codes = self._codes(metadata)
+        self.assertFalse(validation["ok"])
+        self.assertIn("R254_EVIDENCE_ID_SHARED", codes)
+
+    def test_collapsed_frontend_subjects_are_rejected(self):
+        metadata = self._schema3()
+        frontend = metadata["reference_baselines"]["comfyui_frontend"]
+        frontend["release_tag_commit"] = frontend["source_head"]
+        validation, codes = self._codes(metadata)
+        self.assertFalse(validation["ok"])
+        self.assertIn("R254_BASELINE_SUBJECT_COLLAPSE", codes)
+
+    def test_short_or_malformed_baseline_commits_are_rejected(self):
+        metadata = self._schema3()
+        metadata["reference_baselines"]["comfyui"]["source_head"] = "31dfbd4c"
+        validation, codes = self._codes(metadata)
+        self.assertFalse(validation["ok"])
+        self.assertIn("R254_BASELINE_FIELD_FORMAT", codes)
+
+    def test_missing_reference_baselines_are_rejected(self):
+        metadata = self._schema3()
+        del metadata["reference_baselines"]
+        validation, codes = self._codes(metadata)
+        self.assertFalse(validation["ok"])
+        self.assertIn("R254_BASELINES_MISSING", codes)
+
+    def test_projection_is_bounded_and_never_upgrades_unknown_state(self):
+        metadata = self._schema3()
+        metadata["evidence_states"]["real_host"]["state"] = "definitely_validated"
+        projection = build_reference_evidence_projection(metadata)
+        self.assertEqual(projection["real_host"], "unknown")
+        self.assertEqual(projection["source_review"], "reviewed")
+        self.assertEqual(projection["repository_validation"], "validated")
+        self.assertEqual(
+            set(projection),
+            {
+                "schema_version",
+                "source_review",
+                "repository_validation",
+                "real_host",
+                "core_version",
+                "core_bundled_frontend_version",
+                "frontend_release_version",
+            },
+        )
+
+    def test_projection_exposes_no_internal_or_local_detail(self):
+        doc = read_matrix_document(
+            REPO_ROOT / "docs" / "release" / "compatibility_matrix.md"
+        )
+        serialized = json.dumps(build_reference_evidence_projection(doc["metadata"]))
+        forbidden_fragments = (
+            "." + "planning",
+            "reference/" + "docs",
+            "/mnt/",
+            ".tmp",
+            chr(92),
+        )
+        for forbidden in forbidden_fragments:
+            self.assertNotIn(forbidden, serialized)
+
+    def test_projection_degrades_on_empty_metadata(self):
+        projection = build_reference_evidence_projection(None)
+        self.assertEqual(projection["real_host"], "unknown")
+        self.assertEqual(projection["source_review"], "unknown")
+        self.assertEqual(projection["core_version"], "unknown")
 
 
 if __name__ == "__main__":

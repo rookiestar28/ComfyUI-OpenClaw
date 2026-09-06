@@ -10,16 +10,46 @@ export const HOST_SURFACES = Object.freeze({
     comfyDesktop: "comfy_desktop",
 });
 
+/**
+ * R254: ComfyUI core reference facts.
+ *
+ * CRITICAL: `sourceRevision` is a reviewed checkout, `tagRevision` is the
+ * reproducible tag baseline, and `bundledFrontendVersion` is the frontend the
+ * core manifest pins. These are three different subjects; do not collapse them.
+ */
+export const HOST_CORE_REFERENCE = Object.freeze({
+    sourceRevision: "31dfbd4c",
+    sourceDescribe: "v0.34.0-46-g31dfbd4c",
+    version: "0.34.0",
+    tag: "v0.34.0",
+    tagRevision: "12d52794",
+    bundledFrontendVersion: "1.51.9",
+});
+
+/**
+ * R254: real-host validation state.
+ *
+ * CRITICAL: source review and repository validation are not runtime proof. This
+ * stays `pending` until an authorized pinned real-host lane run succeeds; never
+ * flip it from source inspection or a local gate result.
+ */
+export const HOST_REAL_VALIDATION_STATE = "pending";
+
 export const HOST_SURFACE_REFERENCES = Object.freeze({
     [HOST_SURFACES.standaloneFrontend]: Object.freeze({
-        frontendVersion: "1.52.1",
-        sourceRevision: "569e65b30f",
+        frontendVersion: "1.54.3",
+        sourceRevision: "9ff3fd7f0e",
+        sourceDescribe: "v1.54.3-21-g9ff3fd7f0e",
+        // The reproducible release, 21 commits behind the reviewed source head.
+        releaseVersion: "1.54.3",
+        releaseTag: "v1.54.3",
+        releaseRevision: "b2f55875",
     }),
     [HOST_SURFACES.desktop]: Object.freeze({
         desktopVersion: "0.9.4",
         coreVersion: "0.22.3",
         embeddedFrontendVersion: "1.43.18",
-        standaloneFrontendVersion: "1.52.1",
+        standaloneFrontendVersion: "1.54.3",
         frontendParity: "lagging",
         generation: "legacy_fixed_bundle",
         hostedVersionMode: "fixed",
@@ -187,6 +217,16 @@ export const OPENCLAW_HOST_SURFACE_ATTRIBUTE_NAMES = Object.freeze([
     "data-openclaw-desktop-core-version",
     "data-openclaw-desktop-embedded-frontend",
     "data-openclaw-desktop-frontend-parity",
+    // R254: source-review versus reproducible-release facts, kept as separate
+    // attribute names so no existing attribute silently changes meaning.
+    "data-openclaw-core-source-revision",
+    "data-openclaw-core-version",
+    "data-openclaw-core-tag-revision",
+    "data-openclaw-core-bundled-frontend",
+    "data-openclaw-frontend-source-revision",
+    "data-openclaw-frontend-release-version",
+    "data-openclaw-frontend-release-revision",
+    "data-openclaw-real-host-validation",
 ]);
 
 export function stampHostSurfaceMetadata(container, options = {}) {
@@ -228,6 +268,22 @@ export function stampHostSurfaceMetadata(container, options = {}) {
         container.dataset.openclawDesktopFrontendParity = capabilities.isDesktop
             ? capabilities.reference.frontendParity || ""
             : "";
+
+        const standaloneReference =
+            HOST_SURFACE_REFERENCES[HOST_SURFACES.standaloneFrontend];
+        container.dataset.openclawCoreSourceRevision =
+            HOST_CORE_REFERENCE.sourceRevision;
+        container.dataset.openclawCoreVersion = HOST_CORE_REFERENCE.version;
+        container.dataset.openclawCoreTagRevision = HOST_CORE_REFERENCE.tagRevision;
+        container.dataset.openclawCoreBundledFrontend =
+            HOST_CORE_REFERENCE.bundledFrontendVersion;
+        container.dataset.openclawFrontendSourceRevision =
+            standaloneReference.sourceRevision;
+        container.dataset.openclawFrontendReleaseVersion =
+            standaloneReference.releaseVersion;
+        container.dataset.openclawFrontendReleaseRevision =
+            standaloneReference.releaseRevision;
+        container.dataset.openclawRealHostValidation = HOST_REAL_VALIDATION_STATE;
     }
     return capabilities;
 }

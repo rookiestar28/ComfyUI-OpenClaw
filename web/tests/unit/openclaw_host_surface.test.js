@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+    HOST_CORE_REFERENCE,
+    HOST_REAL_VALIDATION_STATE,
     HOST_SURFACES,
     HOST_SURFACE_REFERENCES,
     OPENCLAW_HOST_SURFACE_ATTRIBUTE_NAMES,
@@ -12,14 +14,18 @@ import {
 describe("openclaw_host_surface", () => {
     it("publishes exact standalone and two-generation desktop references", () => {
         expect(HOST_SURFACE_REFERENCES[HOST_SURFACES.standaloneFrontend]).toEqual({
-            frontendVersion: "1.52.1",
-            sourceRevision: "569e65b30f",
+            frontendVersion: "1.54.3",
+            sourceRevision: "9ff3fd7f0e",
+            sourceDescribe: "v1.54.3-21-g9ff3fd7f0e",
+            releaseVersion: "1.54.3",
+            releaseTag: "v1.54.3",
+            releaseRevision: "b2f55875",
         });
         expect(HOST_SURFACE_REFERENCES[HOST_SURFACES.desktop]).toEqual({
             desktopVersion: "0.9.4",
             coreVersion: "0.22.3",
             embeddedFrontendVersion: "1.43.18",
-            standaloneFrontendVersion: "1.52.1",
+            standaloneFrontendVersion: "1.54.3",
             frontendParity: "lagging",
             generation: "legacy_fixed_bundle",
             hostedVersionMode: "fixed",
@@ -265,7 +271,7 @@ describe("openclaw_host_surface", () => {
         });
         expect(container.dataset.openclawHostSurface).toBe("desktop");
         expect(container.dataset.openclawDesktopHost).toBe("true");
-        expect(container.dataset.openclawReferenceFrontend).toBe("1.52.1");
+        expect(container.dataset.openclawReferenceFrontend).toBe("1.54.3");
         expect(container.dataset.openclawCurrentDesktopVersion).toBe("1.0.32-rc.1");
         expect(container.dataset.openclawCurrentDesktopGeneration).toBe("managed_install");
         expect(container.dataset.openclawCurrentDesktopHostedVersionMode).toBe(
@@ -369,5 +375,75 @@ describe("openclaw_host_surface", () => {
             expect(container.hasAttribute(name)).toBe(false);
         }
         expect(container.getAttribute("data-unrelated-owner")).toBe("preserve-me");
+    });
+});
+
+describe("R254 host reference baseline separation", () => {
+    it("publishes core source, tag and bundled-frontend facts as distinct values", () => {
+        expect(HOST_CORE_REFERENCE).toEqual({
+            sourceRevision: "31dfbd4c",
+            sourceDescribe: "v0.34.0-46-g31dfbd4c",
+            version: "0.34.0",
+            tag: "v0.34.0",
+            tagRevision: "12d52794",
+            bundledFrontendVersion: "1.51.9",
+        });
+        expect(HOST_CORE_REFERENCE.sourceRevision).not.toBe(HOST_CORE_REFERENCE.tagRevision);
+    });
+
+    it("keeps the reviewed frontend source head distinct from the runnable release", () => {
+        const standalone = HOST_SURFACE_REFERENCES[HOST_SURFACES.standaloneFrontend];
+        expect(standalone.sourceRevision).not.toBe(standalone.releaseRevision);
+        expect(standalone.sourceDescribe.startsWith(`${standalone.releaseTag}-`)).toBe(true);
+    });
+
+    it("reports real-host validation as pending", () => {
+        // CRITICAL: source review and the local gate are not runtime proof. Only
+        // an authorized pinned real-host lane run may change this.
+        expect(HOST_REAL_VALIDATION_STATE).toBe("pending");
+    });
+
+    it("stamps the separated reference facts on every host surface", () => {
+        for (const surface of Object.values(HOST_SURFACES)) {
+            const container = document.createElement("div");
+            stampHostSurfaceMetadata(container, { hostSurface: surface, win: {} });
+
+            expect(container.dataset.openclawCoreSourceRevision, surface).toBe("31dfbd4c");
+            expect(container.dataset.openclawCoreVersion, surface).toBe("0.34.0");
+            expect(container.dataset.openclawCoreTagRevision, surface).toBe("12d52794");
+            expect(container.dataset.openclawCoreBundledFrontend, surface).toBe("1.51.9");
+            expect(container.dataset.openclawFrontendSourceRevision, surface).toBe("9ff3fd7f0e");
+            expect(container.dataset.openclawFrontendReleaseVersion, surface).toBe("1.54.3");
+            expect(container.dataset.openclawFrontendReleaseRevision, surface).toBe("b2f55875");
+            expect(container.dataset.openclawRealHostValidation, surface).toBe("pending");
+        }
+    });
+
+    it("lists every new attribute in the acquire/restore contract", () => {
+        const required = [
+            "data-openclaw-core-source-revision",
+            "data-openclaw-core-version",
+            "data-openclaw-core-tag-revision",
+            "data-openclaw-core-bundled-frontend",
+            "data-openclaw-frontend-source-revision",
+            "data-openclaw-frontend-release-version",
+            "data-openclaw-frontend-release-revision",
+            "data-openclaw-real-host-validation",
+        ];
+        for (const name of required) {
+            expect(OPENCLAW_HOST_SURFACE_ATTRIBUTE_NAMES, name).toContain(name);
+        }
+    });
+
+    it("exposes no local path or internal record in the stamped metadata", () => {
+        const container = document.createElement("div");
+        stampHostSurfaceMetadata(container, {
+            hostSurface: HOST_SURFACES.standaloneFrontend,
+            win: {},
+        });
+        const serialized = JSON.stringify({ ...container.dataset });
+        for (const forbidden of [".planning", "reference/docs", "/mnt/", ".tmp", String.fromCharCode(92)]) {
+            expect(serialized, forbidden).not.toContain(forbidden);
+        }
     });
 });

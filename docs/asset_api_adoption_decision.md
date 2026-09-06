@@ -2,7 +2,7 @@
 
 ## 2026-08-19 reference anchor update
 
-- Current reference anchor is ComfyUI `3aba3dae` (`v0.33.0-27-g3aba3dae`, pyproject `0.33.0`).
+- Current reference anchor is ComfyUI `31dfbd4c` (`v0.34.0-46-g31dfbd4c`, pyproject `0.34.0`).
 - SaveImage output sockets, 3D preview refs, typed asset dimensions, grouped asset downloads, and optional `hash` / `asset_hash` aliases do not change the no-go decision.
 - ComfyUI asset hashing is host-side opt-in through `--enable-asset-hashing`, so normal filename-backed output refs must not require hash metadata.
 - Current host asset metadata may expose `loader_path`; model uploads require `model_type:<folder_name>` tags, and `/features.supports_model_type_tags` advertises that contract. OpenClaw does not upload through or directly consume `/api/assets`, so these facts do not change the no-go decision.
@@ -35,7 +35,7 @@
   - optional asset-hash-backed refs that still resolve through `/view?filename=blake3:...` when host metadata is present
   - media-aware output groups (`images`, `video`, `audio`, `3d`, and bounded `text`)
   - HDR `.exr` / `.hdr` image refs as explicit `/view` source-preview fallback links, not normal thumbnails
-- Current ComfyUI `3aba3dae` / `v0.33.0-27-g3aba3dae` / pyproject `0.33.0` reference facts:
+- Current ComfyUI `31dfbd4c` / `v0.34.0-46-g31dfbd4c` / pyproject `0.34.0` reference facts:
   - `/api/assets*` routes exist, but operational use is feature-gated behind `--enable-assets`
   - content hashing is opt-in through `--enable-asset-hashing`, so normal filename-backed refs may omit `asset_hash` / `hash`
   - `/features` exposes the `assets` capability flag so hosts can report whether the asset system is enabled

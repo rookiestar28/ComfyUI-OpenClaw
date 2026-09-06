@@ -9,6 +9,24 @@ Current release notes: [v1.1.0](v1.1.0.md).
 
 <details>
 
+<summary><strong>Host reference baseline refreshed with separated evidence states</strong></summary>
+
+- Refreshed the reviewed host baseline to ComfyUI `31dfbd4c` / `0.34.0` with its bundled
+  frontend pin `1.51.9`, and recorded the reproducible standalone frontend release `1.54.3`
+  (tag `v1.54.3`) separately from the later reviewed frontend source head `9ff3fd7f0e`.
+- Split compatibility evidence into independent source-review, repository-validation, and
+  real-host states. Real-host validation stays `pending` until an authorized pinned
+  real-host lane run succeeds, so a reviewed checkout can no longer read as a validated
+  running host.
+- Extended the published host-surface metadata with separate core source/tag/bundled-frontend
+  and frontend source/release attributes instead of redefining existing ones.
+- Legacy Desktop `0.9.4` and current managed-install Comfy-Desktop `1.0.32-rc.1` facts and the
+  active Python support tiers are unchanged.
+
+</details>
+
+<details>
+
 <summary><strong>Current host support and startup verification refreshed</strong></summary>
 
 - Refreshed the active references to ComfyUI `3aba3dae` / `0.33.0` and standalone frontend

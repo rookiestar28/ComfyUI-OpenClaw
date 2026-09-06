@@ -19,8 +19,45 @@ from typing import Any, Dict, List, Optional, Tuple
 META_BLOCK_TAG = "openclaw-compat-matrix-meta"
 DEFAULT_WARN_AGE_DAYS = 30
 DEFAULT_MAX_AGE_DAYS = 45
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
+# CRITICAL: schema 2 stays explicitly supported. R254 added `reference_baselines`
+# and `evidence_states` additively; a schema-2 document is still a valid, if
+# less precise, matrix and must not start failing validation.
+SUPPORTED_SCHEMA_VERSIONS = (2, 3)
 ANCHOR_KEYS = ("comfyui", "comfyui_frontend", "desktop", "comfy_desktop")
+
+# R254: source review, repository validation and real-host validation are three
+# separate evidence states. Conflating them is what let a reviewed source
+# checkout read as a validated running host.
+EVIDENCE_KEYS = ("source_review", "repository_validation", "real_host")
+EVIDENCE_STATES = ("pending", "reviewed", "validated", "failed")
+ALLOWED_EVIDENCE_STATES: dict[str, tuple[str, ...]] = {
+    "source_review": ("pending", "reviewed"),
+    "repository_validation": ("pending", "validated", "failed"),
+    "real_host": ("pending", "validated", "failed"),
+}
+# A non-pending evidence state must name the run that produced it.
+EVIDENCE_RUN_REQUIRED_STATES = ("validated", "failed")
+
+REFERENCE_BASELINE_KEYS = ("comfyui", "comfyui_frontend")
+REFERENCE_BASELINE_FIELDS: dict[str, tuple[str, ...]] = {
+    "comfyui": (
+        "source_head",
+        "source_describe",
+        "project_version",
+        "tag",
+        "tag_commit",
+        "bundled_frontend_version",
+    ),
+    "comfyui_frontend": (
+        "source_head",
+        "source_describe",
+        "package_version",
+        "release_version",
+        "release_tag",
+        "release_tag_commit",
+    ),
+}
 DEFAULT_HOST_SURFACES: dict[str, dict[str, Any]] = {
     "desktop": {
         "generation": "legacy_fixed_bundle",
@@ -56,6 +93,13 @@ COMFY_DESKTOP_ANCHOR_RE = re.compile(
     r"^(?P<desktop>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\s+"
     r"\((?P<revision>[0-9a-fA-F]{7,40})\s+/\s+(?P<describe>v[^\s)]+)\)$"
 )
+# R254: baseline commits are recorded in full so a short-SHA collision cannot
+# silently retarget the reviewed subject.
+FULL_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+DESCRIBE_RE = re.compile(r"^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
+TAG_RE = re.compile(r"^v\d+\.\d+\.\d+$")
+EXACT_SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
+EVIDENCE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{2,63}$")
 
 
 def _utc_now() -> datetime:
@@ -90,6 +134,14 @@ def _default_metadata() -> Dict[str, Any]:
         },
         "anchors": {key: "unknown" for key in ANCHOR_KEYS},
         "host_surfaces": copy.deepcopy(DEFAULT_HOST_SURFACES),
+        # IMPORTANT: bootstrap metadata is deliberately incomplete so missing
+        # facts surface as violations instead of silently reading as validated.
+        # Empty baselines flag; all-pending evidence is the honest starting state.
+        "reference_baselines": {},
+        "evidence_states": {
+            key: {"state": "pending", "evidence_id": None, "run_id": None}
+            for key in EVIDENCE_KEYS
+        },
         "evidence": {
             "evidence_id": f"compat-matrix-{today.replace('-', '')}",
             "updated_at": _utc_now().isoformat(),
@@ -162,6 +214,249 @@ def read_matrix_document(path: Path | str) -> Dict[str, Any]:
     }
 
 
+def _validate_reference_baselines(baselines: Any) -> List[Dict[str, Any]]:
+    """R254: typed, bounded source/tag/release facts for each upstream subject."""
+    violations: List[Dict[str, Any]] = []
+    if not isinstance(baselines, dict):
+        return [
+            {
+                "code": "R254_BASELINES_MISSING",
+                "message": "Missing reference_baselines object",
+            }
+        ]
+
+    unknown = sorted(set(baselines) - set(REFERENCE_BASELINE_KEYS))
+    for key in unknown:
+        violations.append(
+            {
+                "code": "R254_BASELINE_UNKNOWN",
+                "message": f"Unknown reference_baselines key: {key}",
+            }
+        )
+
+    field_patterns = {
+        "source_head": FULL_COMMIT_RE,
+        "source_describe": DESCRIBE_RE,
+        "project_version": EXACT_SEMVER_RE,
+        "package_version": EXACT_SEMVER_RE,
+        "release_version": EXACT_SEMVER_RE,
+        "bundled_frontend_version": EXACT_SEMVER_RE,
+        "tag": TAG_RE,
+        "release_tag": TAG_RE,
+        "tag_commit": FULL_COMMIT_RE,
+        "release_tag_commit": FULL_COMMIT_RE,
+    }
+
+    for key in REFERENCE_BASELINE_KEYS:
+        entry = baselines.get(key)
+        if not isinstance(entry, dict):
+            violations.append(
+                {
+                    "code": "R254_BASELINE_MISSING",
+                    "message": f"Missing reference_baselines.{key}",
+                }
+            )
+            continue
+        for field_name in REFERENCE_BASELINE_FIELDS[key]:
+            value = entry.get(field_name)
+            if not isinstance(value, str) or not value.strip():
+                violations.append(
+                    {
+                        "code": "R254_BASELINE_FIELD_MISSING",
+                        "message": f"Missing reference_baselines.{key}.{field_name}",
+                    }
+                )
+            elif field_patterns[field_name].match(value.strip()) is None:
+                violations.append(
+                    {
+                        "code": "R254_BASELINE_FIELD_FORMAT",
+                        "message": f"Malformed reference_baselines.{key}.{field_name}",
+                    }
+                )
+
+    frontend = baselines.get("comfyui_frontend")
+    if isinstance(frontend, dict):
+        source_head = str(frontend.get("source_head", "")).strip()
+        release_commit = str(frontend.get("release_tag_commit", "")).strip()
+        # CRITICAL: the reviewed source head is ahead of the release tag. If the
+        # two collapse into one value the matrix can no longer distinguish
+        # "reviewed" from "reproducible", which is the whole point of R254.
+        if source_head and source_head == release_commit:
+            violations.append(
+                {
+                    "code": "R254_BASELINE_SUBJECT_COLLAPSE",
+                    "message": (
+                        "comfyui_frontend source_head and release_tag_commit must "
+                        "stay distinct subjects"
+                    ),
+                }
+            )
+        describe = str(frontend.get("source_describe", "")).strip()
+        release_tag = str(frontend.get("release_tag", "")).strip()
+        if describe and release_tag and not describe.startswith(f"{release_tag}-"):
+            violations.append(
+                {
+                    "code": "R254_BASELINE_DESCRIBE_MISMATCH",
+                    "message": (
+                        "comfyui_frontend source_describe must derive from its "
+                        "release_tag"
+                    ),
+                }
+            )
+    return violations
+
+
+def _validate_evidence_states(states: Any) -> List[Dict[str, Any]]:
+    """R254: keep source review, repository validation and real-host proof disjoint."""
+    violations: List[Dict[str, Any]] = []
+    if not isinstance(states, dict):
+        return [
+            {
+                "code": "R254_EVIDENCE_MISSING",
+                "message": "Missing evidence_states object",
+            }
+        ]
+
+    unknown = sorted(set(states) - set(EVIDENCE_KEYS))
+    for key in unknown:
+        violations.append(
+            {
+                "code": "R254_EVIDENCE_UNKNOWN_KEY",
+                "message": f"Unknown evidence_states key: {key}",
+            }
+        )
+
+    evidence_ids: List[str] = []
+    for key in EVIDENCE_KEYS:
+        entry = states.get(key)
+        if not isinstance(entry, dict):
+            violations.append(
+                {
+                    "code": "R254_EVIDENCE_ENTRY_MISSING",
+                    "message": f"Missing evidence_states.{key}",
+                }
+            )
+            continue
+
+        state = entry.get("state")
+        if not isinstance(state, str) or state not in EVIDENCE_STATES:
+            # CRITICAL: fail closed. An unknown or missing state must never be
+            # read as validated by a later reader.
+            violations.append(
+                {
+                    "code": "R254_EVIDENCE_STATE_UNKNOWN",
+                    "message": f"Unknown evidence_states.{key}.state: {state!r}",
+                }
+            )
+            continue
+        if state not in ALLOWED_EVIDENCE_STATES[key]:
+            violations.append(
+                {
+                    "code": "R254_EVIDENCE_STATE_NOT_ALLOWED",
+                    "message": (
+                        f"evidence_states.{key}.state {state!r} is not allowed for "
+                        "this evidence kind"
+                    ),
+                }
+            )
+            continue
+
+        run_id = entry.get("run_id")
+        if state in EVIDENCE_RUN_REQUIRED_STATES:
+            if not isinstance(run_id, str) or not run_id.strip():
+                violations.append(
+                    {
+                        "code": "R254_EVIDENCE_RUN_ID_REQUIRED",
+                        "message": (
+                            f"evidence_states.{key}.state {state!r} requires a run_id"
+                        ),
+                    }
+                )
+        elif run_id not in (None, ""):
+            # CRITICAL: a pending state carrying a run identifier is how a
+            # fabricated real-host run would enter the matrix.
+            violations.append(
+                {
+                    "code": "R254_EVIDENCE_PENDING_RUN_ID",
+                    "message": f"evidence_states.{key} is pending but names a run_id",
+                }
+            )
+
+        evidence_id = entry.get("evidence_id")
+        if state == "pending":
+            if evidence_id not in (None, ""):
+                violations.append(
+                    {
+                        "code": "R254_EVIDENCE_PENDING_ID",
+                        "message": (
+                            f"evidence_states.{key} is pending but names an evidence_id"
+                        ),
+                    }
+                )
+        elif not isinstance(evidence_id, str) or EVIDENCE_ID_RE.match(evidence_id) is None:
+            violations.append(
+                {
+                    "code": "R254_EVIDENCE_ID_FORMAT",
+                    "message": f"Missing/malformed evidence_states.{key}.evidence_id",
+                }
+            )
+        else:
+            evidence_ids.append(evidence_id)
+
+    duplicates = sorted({v for v in evidence_ids if evidence_ids.count(v) > 1})
+    for duplicate in duplicates:
+        violations.append(
+            {
+                "code": "R254_EVIDENCE_ID_SHARED",
+                "message": (
+                    f"evidence_id {duplicate!r} is shared across evidence kinds; "
+                    "states must be independently traceable"
+                ),
+            }
+        )
+    return violations
+
+
+def build_reference_evidence_projection(
+    metadata: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Coarse, public-safe evidence projection for operator diagnostics.
+
+    IMPORTANT: this returns states and upstream version facts only. It must never
+    surface local paths, command logs, raw run content, or internal document
+    names, because Operator Doctor output reaches operators over HTTP.
+    """
+    metadata = metadata if isinstance(metadata, dict) else {}
+    states = metadata.get("evidence_states")
+    states = states if isinstance(states, dict) else {}
+    projection: Dict[str, Any] = {"schema_version": metadata.get("schema_version")}
+
+    for key in EVIDENCE_KEYS:
+        entry = states.get(key)
+        entry = entry if isinstance(entry, dict) else {}
+        state = entry.get("state")
+        if not isinstance(state, str) or state not in ALLOWED_EVIDENCE_STATES[key]:
+            # Fail closed: anything unrecognized degrades to `unknown`, never to
+            # a validated-looking state.
+            state = "unknown"
+        projection[key] = state
+
+    baselines = metadata.get("reference_baselines")
+    baselines = baselines if isinstance(baselines, dict) else {}
+    core = baselines.get("comfyui") if isinstance(baselines.get("comfyui"), dict) else {}
+    frontend = (
+        baselines.get("comfyui_frontend")
+        if isinstance(baselines.get("comfyui_frontend"), dict)
+        else {}
+    )
+    projection["core_version"] = core.get("project_version") or "unknown"
+    projection["core_bundled_frontend_version"] = (
+        core.get("bundled_frontend_version") or "unknown"
+    )
+    projection["frontend_release_version"] = frontend.get("release_version") or "unknown"
+    return projection
+
+
 def validate_metadata(
     metadata: Optional[Dict[str, Any]], *, today: Optional[date] = None
 ) -> Dict[str, Any]:
@@ -181,10 +476,13 @@ def validate_metadata(
         violations.append(
             {
                 "code": "R90_META_SCHEMA_UPGRADE_REQUIRED",
-                "message": "schema_version 1 must be refreshed to schema_version 2",
+                "message": (
+                    "schema_version 1 must be refreshed to schema_version "
+                    f"{CURRENT_SCHEMA_VERSION}"
+                ),
             }
         )
-    elif schema_version != CURRENT_SCHEMA_VERSION:
+    elif schema_version not in SUPPORTED_SCHEMA_VERSIONS:
         violations.append(
             {
                 "code": "R90_META_SCHEMA_VERSION",
@@ -284,7 +582,7 @@ def validate_metadata(
                     }
                 )
 
-    if schema_version == CURRENT_SCHEMA_VERSION:
+    if schema_version in SUPPORTED_SCHEMA_VERSIONS:
         host_surfaces = metadata.get("host_surfaces")
         if not isinstance(host_surfaces, dict):
             host_surfaces = {}
@@ -340,6 +638,10 @@ def validate_metadata(
                         ),
                     }
                 )
+
+    if schema_version == 3:
+        violations.extend(_validate_reference_baselines(metadata.get("reference_baselines")))
+        violations.extend(_validate_evidence_states(metadata.get("evidence_states")))
 
     age_days: Optional[int] = None
     if parsed_last is not None:

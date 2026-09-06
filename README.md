@@ -162,8 +162,10 @@ Deployment profiles and hardening references:
   authoritative summary. The connector validates the response contract, displays only
   aggregate counts and short job IDs, and uses a coarse queue-count fallback only for
   explicit host-contract/backend unavailability.
-- Published host compatibility notes now pin ComfyUI `3aba3dae` / `0.33.0`, standalone frontend
-  `1.52.1`, legacy Desktop, and current managed-install Comfy-Desktop as separate references.
+- Published host compatibility notes pin ComfyUI source review `31dfbd4c` / `0.34.0` with its
+  bundled frontend `1.51.9`, the reproducible standalone frontend release `1.54.3`, legacy
+  Desktop, and current managed-install Comfy-Desktop as separate references. Source review,
+  repository validation, and real-host validation are recorded as independent evidence states.
 - Python 3.13 is the current locally validated baseline. Python 3.10-3.12 remain compatibility
   targets pending current exact-version evidence, Python 3.14 remains best effort, and versions
   below 3.10 are unsupported by the package contract.
@@ -507,7 +509,7 @@ Canonical DOM/class ownership is now centered on `openclaw-*`; legacy `moltbot-*
 
 The sidebar now also resolves and stamps its active host surface (`standalone_frontend`, legacy
 `desktop`, or current managed-install `comfy_desktop`) and reference metadata at mount time, so
-Desktop `0.9.4` embedded-frontend lag against standalone frontend `1.52.1` is explicit and
+Desktop `0.9.4` embedded-frontend lag against standalone frontend `1.54.3` is explicit and
 testable. The current Comfy-Desktop `1.0.32-rc.1` reference keeps hosted component versions
 installation-specific and recognizes `window.__comfyDesktop2` as presence metadata only; bridge
 detection does not authorize privileged capability calls.
