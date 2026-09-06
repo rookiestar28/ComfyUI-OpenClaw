@@ -8,6 +8,17 @@ from pathlib import Path
 
 from scripts import verify_production_dependencies as verifier
 
+# PEP 695 `type X = ...` statements only parse on Python 3.12 and newer. The
+# fixtures below are written in that syntax on purpose, because modeling the
+# scope it introduces is the behavior under test. On an older interpreter the
+# fixture is unparseable, and the analyzer's correct response is to fail closed
+# with SOURCE_PARSE rather than to report nothing and look clean. Both outcomes
+# are asserted, so neither interpreter is left proving nothing: without the
+# older-interpreter branch, `assertNotIn`-style checks below pass vacuously on
+# Python 3.10 because a file that never parsed cannot produce a finding.
+SUPPORTS_PEP695_TYPE_ALIAS = sys.version_info >= (3, 12)
+PARSE_FAILURE_RULE = "SOURCE_PARSE"
+
 
 class ProductionDependencyFixture:
     def __init__(self, root: Path):
@@ -3899,10 +3910,16 @@ class Governed:
             policy["domains"]["alpha"].append("alpha/type_alias_bindings.py")
 
         findings = self._evaluate(files, configure=configure)
+        rule_ids = {finding.rule_id for finding in findings}
 
-        self.assertNotIn(
-            "ENV_ALIAS_DIRECT_READ", {finding.rule_id for finding in findings}
-        )
+        if not SUPPORTS_PEP695_TYPE_ALIAS:
+            # Without this branch the assertion below would pass for the wrong
+            # reason: the file never parsed, so of course it reported no direct
+            # read. Assert the fail-closed signal instead.
+            self.assertIn(PARSE_FAILURE_RULE, rule_ids)
+            return
+
+        self.assertNotIn("ENV_ALIAS_DIRECT_READ", rule_ids)
 
     def test_environment_alias_contract_models_type_alias_parameter_scope(self):
         files = self._base_files()
@@ -3920,11 +3937,13 @@ type Governed[other] = os.getenv("MOLTBOT_FLAG")
             policy["domains"]["alpha"].append("alpha/type_alias_parameters.py")
 
         findings = self._evaluate(files, configure=configure)
+        rule_ids = [finding.rule_id for finding in findings]
 
-        self.assertEqual(
-            [finding.rule_id for finding in findings].count("ENV_ALIAS_DIRECT_READ"),
-            1,
-        )
+        if not SUPPORTS_PEP695_TYPE_ALIAS:
+            self.assertIn(PARSE_FAILURE_RULE, rule_ids)
+            return
+
+        self.assertEqual(rule_ids.count("ENV_ALIAS_DIRECT_READ"), 1)
 
     def test_environment_alias_contract_applies_effective_keyword_mapping(self):
         files = self._base_files()
@@ -4241,10 +4260,14 @@ from fake import *
                         policy
                     ),
                 )
-                self.assertIn(
-                    "ENV_ALIAS_REGISTRY_UNREADABLE",
-                    [finding.rule_id for finding in findings],
-                )
+                rule_ids = [finding.rule_id for finding in findings]
+                if not SUPPORTS_PEP695_TYPE_ALIAS:
+                    # The registry itself is the unparseable file here, so the
+                    # analyzer never reaches the shadowing it would otherwise
+                    # report. Failing closed is the behavior worth pinning.
+                    self.assertIn(PARSE_FAILURE_RULE, rule_ids)
+                    continue
+                self.assertIn("ENV_ALIAS_REGISTRY_UNREADABLE", rule_ids)
 
         files["alpha/env_aliases.py"] = (
             environment_alias_owner_source() + "type frozenset = int\n"
@@ -4253,6 +4276,12 @@ from fake import *
             files,
             configure=lambda policy: configure_environment_alias_contract(policy),
         )
+        if not SUPPORTS_PEP695_TYPE_ALIAS:
+            # Same file, same parse failure. Asserting the absence of
+            # ENV_ALIAS_REGISTRY_UNREADABLE here would be true for a reason that
+            # has nothing to do with the shadowing this case is about.
+            self.assertIn(PARSE_FAILURE_RULE, [f.rule_id for f in findings])
+            return
         self.assertNotIn(
             "ENV_ALIAS_REGISTRY_UNREADABLE",
             [finding.rule_id for finding in findings],
