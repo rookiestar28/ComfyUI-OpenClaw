@@ -30,7 +30,7 @@
           "expected_count": 1,
           "classification": "allowed_boundary_guard",
           "reason": "Legacy-route telemetry must not break compatibility routing.",
-          "regression_owner": "tests/test_r180_exception_boundary_governance.py",
+          "regression_owner": "tests/test_exception_boundary_governance.py",
           "review_after": "2027-01-11"
         },
         {
@@ -38,7 +38,7 @@
           "expected_count": 1,
           "classification": "allowed_boundary_guard",
           "reason": "Fallback registration retains compatibility when optional router integration fails.",
-          "regression_owner": "tests/test_r180_exception_boundary_governance.py",
+          "regression_owner": "tests/test_exception_boundary_governance.py",
           "review_after": "2027-01-11"
         },
         {
@@ -122,7 +122,7 @@
           "expected_count": 1,
           "classification": "allowed_boundary_guard",
           "reason": "Bootstrap initialization logs context and re-raises fail-closed.",
-          "regression_owner": "tests/test_r180_exception_boundary_governance.py",
+          "regression_owner": "tests/test_exception_boundary_governance.py",
           "review_after": "2027-01-11"
         },
         {

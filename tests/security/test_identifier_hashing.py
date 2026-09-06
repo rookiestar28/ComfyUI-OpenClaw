@@ -5,7 +5,7 @@ import services.audit as audit_module
 from services.bridge_token_lifecycle import BridgeTokenStore
 
 
-class TestS79AuditHashing(unittest.TestCase):
+class TestAuditIdentifierHashing(unittest.TestCase):
     def test_chain_hash_is_keyed(self):
         entry = {"action": "config.update", "target": "settings.json"}
 
@@ -27,7 +27,7 @@ class TestS79AuditHashing(unittest.TestCase):
         self.assertEqual(hash_a, hash_b)
 
 
-class TestS79BridgeTokenHashing(unittest.TestCase):
+class TestBridgeTokenHashing(unittest.TestCase):
     def test_constant_time_lookup_accepts_issued_token(self):
         store = BridgeTokenStore()
         token = store.issue_token("device-1")

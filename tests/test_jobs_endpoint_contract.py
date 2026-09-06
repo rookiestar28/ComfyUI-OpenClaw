@@ -1,4 +1,8 @@
-"""R213 authoritative jobs read-model and route contract tests."""
+"""The jobs endpoint must report authoritative queue state, not a stub.
+
+Covers the read model, the route contract, adapter error handling, and the
+public shape callers depend on.
+"""
 
 from __future__ import annotations
 
@@ -307,9 +311,9 @@ def _five_state_queue():
 
 
 @unittest.skipIf(web is None, "aiohttp not installed")
-class TestR213PrefFixReproduction(unittest.IsolatedAsyncioTestCase):
+class TestAuthoritativeQueueStateReproduction(unittest.IsolatedAsyncioTestCase):
     async def test_non_empty_prompt_queue_is_not_reported_as_stub_empty(self):
-        """RED: the secured S100 route still ignores authoritative non-empty state."""
+        """A non-empty prompt queue must never be reported as an empty stub."""
 
         from api import routes
 
@@ -690,7 +694,7 @@ class TestJobsLowMockTransaction(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("job-running", json.dumps(details))
 
 
-class TestR213PublicContract(unittest.TestCase):
+class TestJobsPublicContract(unittest.TestCase):
     def test_public_contract_describes_versioned_authoritative_jobs(self):
         from pathlib import Path
 

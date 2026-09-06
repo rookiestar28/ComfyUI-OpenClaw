@@ -13,7 +13,7 @@ from services.request_ip import get_trusted_proxies
 from services.safe_io import safe_request_json, safe_request_text_stream
 
 
-class TestS78BridgeAuthRedaction(unittest.TestCase):
+class TestBridgeAuthRedaction(unittest.TestCase):
     def setUp(self):
         self.env_keys = [
             "OPENCLAW_BRIDGE_ENABLED",
@@ -79,7 +79,7 @@ class TestS78BridgeAuthRedaction(unittest.TestCase):
         self.assertIn("cert:", output)
 
 
-class TestS78BridgeWorkerRedaction(unittest.TestCase):
+class TestBridgeWorkerRedaction(unittest.TestCase):
     def setUp(self):
         os.environ["OPENCLAW_BRIDGE_ENABLED"] = "1"
         os.environ["OPENCLAW_BRIDGE_DEVICE_TOKEN"] = "bridge-auth-sample"
@@ -150,7 +150,7 @@ class TestS78BridgeWorkerRedaction(unittest.TestCase):
         self.assertIn("idem:", output)
 
 
-class TestS78AuditRedaction(unittest.TestCase):
+class TestAuditRedaction(unittest.TestCase):
     def setUp(self):
         self.test_log = "test_s78_audit.log"
         self.test_key = f"{self.test_log}.key"
@@ -248,7 +248,7 @@ class TestS78AuditRedaction(unittest.TestCase):
         self.assertIn("AUDIT action=config.update", output)
 
 
-class TestS83StableRedactionTag(unittest.TestCase):
+class TestStableRedactionTag(unittest.TestCase):
     def test_tag_is_keyed_and_stable_for_same_process_key(self):
         with patch.object(
             redaction_module, "_REDACTION_TAG_KEY", b"fixed-redaction-key"
@@ -269,7 +269,7 @@ class TestS83StableRedactionTag(unittest.TestCase):
         self.assertNotEqual(first, second)
 
 
-class TestS78DefensiveLogRedaction(unittest.TestCase):
+class TestDefensiveLogRedaction(unittest.TestCase):
     def test_invalid_trusted_proxy_log_omits_raw_value(self):
         with patch.dict(
             os.environ,

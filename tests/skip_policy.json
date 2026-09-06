@@ -20,7 +20,7 @@
     "tests.test_connector_callback_contract",
     "tests.test_workspace_isolation",
     "tests.test_s100_jobs_security_contract",
-    "tests.test_r213_jobs_endpoint",
+    "tests.test_jobs_endpoint_contract",
     "tests.connector.test_r214_jobs_command",
     "tests.test_s70_ssrf_pinning_regression",
     "tests.test_r216_file_backed_text_output",
@@ -105,7 +105,7 @@
       "reason": "Jobs authorization, tenant isolation, and privacy projection are security-critical and must remain non-skippable.",
       "review_after": "2026-10-31"
     },
-    "tests.test_r213_jobs_endpoint": {
+    "tests.test_jobs_endpoint_contract": {
       "reason": "The authoritative jobs read model protects tenant-filtered bounded job metadata and must remain non-skippable.",
       "review_after": "2026-10-31"
     },

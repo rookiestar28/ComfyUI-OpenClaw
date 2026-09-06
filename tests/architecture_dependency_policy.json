@@ -153,6 +153,7 @@
       "scripts/verify_platform_adapter_contract.py",
       "scripts/verify_production_dependencies.py",
       "scripts/verify_provenance.py",
+      "scripts/verify_public_semantic_naming.py",
       "scripts/verify_quality_governance.py",
       "scripts/verify_static_analysis_policy.py",
       "scripts/verify_test_debt_governance.py"
