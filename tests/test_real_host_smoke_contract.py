@@ -691,9 +691,7 @@ class TestTheHostCanActuallyLoadTheProduct(unittest.TestCase):
                 captured["command"] = command
                 captured["env"] = kwargs.get("env")
 
-        with unittest.mock.patch(
-            "scripts.real_host_smoke.subprocess.Popen", FakePopen
-        ):
+        with unittest.mock.patch("scripts.real_host_smoke.subprocess.Popen", FakePopen):
             workspace = Path(tempfile.mkdtemp())
             _process, handle = start_host(
                 POLICY, resolve_subject(POLICY, "bundled"), HostPaths(workspace), 18188
