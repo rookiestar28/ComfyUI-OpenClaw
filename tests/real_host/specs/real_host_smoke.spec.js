@@ -33,6 +33,7 @@ import {
   evaluatePromotedWidget,
   evaluateSidebarGeometry,
   parseHostWebRoot,
+  partitionBrowserErrors,
   resolveSubject,
 } from '../helpers/real_host_subjects.js';
 
@@ -65,22 +66,48 @@ const FRONTEND_VERSION_BUDGET_MS = 30_000;
  * only works on hosts the lane installed itself, and 404s on a real installation
  * under the repository's own name. The path is read back from the host instead.
  */
-async function resolveOpenClawExtensionBase(page) {
-  const base = await page.evaluate(async () => {
+async function readExtensionBases(page) {
+  return page.evaluate(async () => {
+    const directoryOf = (entries, suffix) => {
+      const marker = entries.find(
+        (entry) => typeof entry === 'string' && entry.endsWith(suffix),
+      );
+      return marker ? marker.slice(0, marker.lastIndexOf('/')) : null;
+    };
     const response = await fetch('/extensions');
     if (!response.ok) {
-      return null;
+      return { openclaw: null, peer: null };
     }
     const entries = await response.json();
-    const marker = entries.find(
-      (entry) => typeof entry === 'string' && entry.endsWith('/openclaw_asset_refs.js'),
-    );
-    return marker ? marker.slice(0, marker.lastIndexOf('/')) : null;
+    return {
+      openclaw: directoryOf(entries, '/openclaw_asset_refs.js'),
+      peer: directoryOf(entries, '/peer_sidebar_tab.js'),
+    };
   });
-  if (!base) {
+}
+
+async function resolveOpenClawExtensionBase(page) {
+  const { openclaw } = await readExtensionBases(page);
+  if (!openclaw) {
     throw new Error('the host serves no OpenClaw modules under /extensions');
   }
-  return base;
+  return openclaw;
+}
+
+// Resolved once from the host and reused, so a failed page later in the run does
+// not silently change how errors are attributed.
+let cachedExtensionBases = null;
+
+async function extensionBases(page) {
+  if (cachedExtensionBases?.openclaw) {
+    return cachedExtensionBases;
+  }
+  try {
+    cachedExtensionBases = await readExtensionBases(page);
+  } catch {
+    return null;
+  }
+  return cachedExtensionBases?.openclaw ? cachedExtensionBases : null;
 }
 
 function readHostLog() {
@@ -347,9 +374,37 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
     expect(after.openclawRootRemoved).toBe(true);
   });
 
-  test.afterEach(async () => {
-    expect(pageErrors, pageErrors.join('\n')).toEqual([]);
-    expect(consoleErrors, consoleErrors.join('\n')).toEqual([]);
+  test.afterEach(async ({ page }) => {
+    // A stock pinned host runs only OpenClaw and the peer fixture, so "no errors
+    // at all" is right there. A real installation also runs whatever else the user
+    // installed, and those packs emit their own missing assets and exceptions.
+    // Failing on those reports a problem that is not this product's, which is
+    // exactly where the check would otherwise be most valuable. The assertion is
+    // scoped, not dropped: anything attributable to OpenClaw, to the peer fixture,
+    // or to no extension at all still fails.
+    const bases = await extensionBases(page);
+    if (bases === null) {
+      // The host could not say which path is ours, so nothing may be excused.
+      expect(pageErrors, pageErrors.join('\n')).toEqual([]);
+      expect(consoleErrors, consoleErrors.join('\n')).toEqual([]);
+      return;
+    }
+
+    const options = { extensionBase: bases.openclaw, peerBase: bases.peer ?? '' };
+    const fromPage = partitionBrowserErrors(pageErrors, options);
+    const fromConsole = partitionBrowserErrors(consoleErrors, options);
+    const setAside = [...fromPage.foreign, ...fromConsole.foreign];
+    if (setAside.length > 0) {
+      // Recorded rather than discarded, so the run still shows what the host was
+      // doing around the product.
+      console.log(
+        `[real-host] ${setAside.length} error(s) from other node packs, not attributed to ` +
+          `${bases.openclaw}:\n  ${setAside.join('\n  ')}`,
+      );
+    }
+
+    expect(fromPage.ours, fromPage.ours.join('\n')).toEqual([]);
+    expect(fromConsole.ours, fromConsole.ours.join('\n')).toEqual([]);
   });
 });
 

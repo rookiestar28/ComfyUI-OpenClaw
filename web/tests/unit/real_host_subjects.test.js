@@ -14,6 +14,7 @@ import {
     evaluatePromotedWidget,
     evaluateSidebarGeometry,
     evidenceUpdateIsAllowed,
+    partitionBrowserErrors,
     parseHostWebRoot,
     resolveSubject,
 } from "../../../tests/real_host/helpers/real_host_subjects.js";
@@ -403,5 +404,62 @@ describe("real host evidence gating", () => {
             }).allowed,
         ).toBe(true);
         expect(POLICY.evidence.current_state).toBe("pending");
+    });
+});
+
+describe("browser error attribution", () => {
+    const BASE = "/extensions/ComfyUI-OpenClaw";
+    const PEER = "/extensions/openclaw-smoke-peer";
+
+    it("refuses to guess the extension base", () => {
+        expect(() => partitionBrowserErrors(["anything"], {})).toThrow(SubjectError);
+    });
+
+    it("keeps this product's own errors on the failing side", () => {
+        const { ours, foreign } = partitionBrowserErrors(
+            [
+                `Failed to fetch dynamically imported module: http://h${BASE}/openclaw_ui.js`,
+                "TypeError: openclaw sidebar mount is undefined",
+            ],
+            { extensionBase: BASE, peerBase: PEER },
+        );
+
+        expect(ours).toHaveLength(2);
+        expect(foreign).toEqual([]);
+    });
+
+    it("sets other node packs aside instead of failing on them", () => {
+        const { ours, foreign } = partitionBrowserErrors(
+            [
+                "Failed to fetch: http://h/extensions/ComfyUI-Impact-Pack/impact-sam-editor.js",
+                "Failed to fetch: http://h/extensions/comfyui-rookieui/tests/helpers/x.js",
+            ],
+            { extensionBase: BASE, peerBase: PEER },
+        );
+
+        expect(ours).toEqual([]);
+        expect(foreign).toHaveLength(2);
+    });
+
+    it("treats the peer fixture as part of this lane, not a stranger", () => {
+        const { ours, foreign } = partitionBrowserErrors(
+            [`Failed to fetch: http://h${PEER}/peer_sidebar_tab.js`],
+            { extensionBase: BASE, peerBase: PEER },
+        );
+
+        expect(ours).toHaveLength(1);
+        expect(foreign).toEqual([]);
+    });
+
+    it("keeps an unattributable error on the failing side", () => {
+        // A bare error naming no extension could be the product's own. Discarding
+        // it would be how a real regression disappears into third-party noise.
+        const { ours, foreign } = partitionBrowserErrors(["Uncaught RangeError: bad index"], {
+            extensionBase: BASE,
+            peerBase: PEER,
+        });
+
+        expect(ours).toEqual(["Uncaught RangeError: bad index"]);
+        expect(foreign).toEqual([]);
     });
 });

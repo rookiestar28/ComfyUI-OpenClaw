@@ -276,3 +276,49 @@ export function evidenceUpdateIsAllowed(policy, { state, runId, evidenceId }) {
     }
     return { allowed: failures.length === 0, failures };
 }
+
+/**
+ * Split browser errors into the ones this product is answerable for and the rest.
+ *
+ * The lane was written for a host holding only OpenClaw and the peer fixture, where
+ * "no console errors at all" is the right assertion. On a real installation the host
+ * also loads whatever else the user installed, and those packs are noisy: missing
+ * assets, double registration, and their own exceptions. Failing on those reports a
+ * problem that is not the product's, which makes the check useless exactly where it
+ * would be most valuable.
+ *
+ * The assertion is therefore scoped rather than dropped. An error is attributable
+ * when it names the path this host serves OpenClaw's own modules from, or names the
+ * peer fixture the lane installed; everything else is returned separately so the run
+ * can still record it as context. Anything that cannot be attributed either way is
+ * treated as attributable, because an unexplained error in a lane that owns the page
+ * is not something to discard silently.
+ */
+export function partitionBrowserErrors(errors, { extensionBase, peerBase = "" } = {}) {
+    if (!extensionBase) {
+        throw new SubjectError(
+            "partitionBrowserErrors needs the extension base the host actually serves; " +
+                "guessing it is how the hardcoded-path defect happened",
+        );
+    }
+    const ours = [];
+    const foreign = [];
+    for (const raw of errors ?? []) {
+        const text = String(raw);
+        const namesAnotherExtension =
+            /\/extensions\/[^/\s"']+/.test(text) &&
+            !text.includes(extensionBase) &&
+            !(peerBase && text.includes(peerBase));
+        if (namesAnotherExtension) {
+            foreign.push(text);
+        } else if (text.includes(extensionBase) || (peerBase && text.includes(peerBase))) {
+            ours.push(text);
+        } else if (/\bopenclaw\b/i.test(text)) {
+            ours.push(text);
+        } else {
+            // Unattributable. Kept on the failing side on purpose.
+            ours.push(text);
+        }
+    }
+    return { ours, foreign };
+}
