@@ -214,9 +214,20 @@ def read_matrix_document(path: Path | str) -> Dict[str, Any]:
     }
 
 
-def _validate_reference_baselines(baselines: Any) -> List[Dict[str, Any]]:
+def _mapping_field(source: dict[str, Any], key: str) -> dict[str, Any]:
+    """Return a nested mapping, or an empty one when absent or the wrong shape.
+
+    IMPORTANT: keeps the projection total. A malformed nested object degrades to
+    empty rather than raising, so diagnostics stay available while the validator
+    is the surface that reports the defect.
+    """
+    value = source.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _validate_reference_baselines(baselines: Any) -> list[dict[str, Any]]:
     """R254: typed, bounded source/tag/release facts for each upstream subject."""
-    violations: List[Dict[str, Any]] = []
+    violations: list[dict[str, Any]] = []
     if not isinstance(baselines, dict):
         return [
             {
@@ -306,9 +317,9 @@ def _validate_reference_baselines(baselines: Any) -> List[Dict[str, Any]]:
     return violations
 
 
-def _validate_evidence_states(states: Any) -> List[Dict[str, Any]]:
+def _validate_evidence_states(states: Any) -> list[dict[str, Any]]:
     """R254: keep source review, repository validation and real-host proof disjoint."""
-    violations: List[Dict[str, Any]] = []
+    violations: list[dict[str, Any]] = []
     if not isinstance(states, dict):
         return [
             {
@@ -326,7 +337,7 @@ def _validate_evidence_states(states: Any) -> List[Dict[str, Any]]:
             }
         )
 
-    evidence_ids: List[str] = []
+    evidence_ids: list[str] = []
     for key in EVIDENCE_KEYS:
         entry = states.get(key)
         if not isinstance(entry, dict):
@@ -418,22 +429,20 @@ def _validate_evidence_states(states: Any) -> List[Dict[str, Any]]:
 
 
 def build_reference_evidence_projection(
-    metadata: Optional[Dict[str, Any]],
-) -> Dict[str, Any]:
+    metadata: dict[str, Any] | None,
+) -> dict[str, Any]:
     """Coarse, public-safe evidence projection for operator diagnostics.
 
     IMPORTANT: this returns states and upstream version facts only. It must never
     surface local paths, command logs, raw run content, or internal document
     names, because Operator Doctor output reaches operators over HTTP.
     """
-    metadata = metadata if isinstance(metadata, dict) else {}
-    states = metadata.get("evidence_states")
-    states = states if isinstance(states, dict) else {}
-    projection: Dict[str, Any] = {"schema_version": metadata.get("schema_version")}
+    resolved: dict[str, Any] = metadata if isinstance(metadata, dict) else {}
+    states = _mapping_field(resolved, "evidence_states")
+    projection: dict[str, Any] = {"schema_version": resolved.get("schema_version")}
 
     for key in EVIDENCE_KEYS:
-        entry = states.get(key)
-        entry = entry if isinstance(entry, dict) else {}
+        entry = _mapping_field(states, key)
         state = entry.get("state")
         if not isinstance(state, str) or state not in ALLOWED_EVIDENCE_STATES[key]:
             # Fail closed: anything unrecognized degrades to `unknown`, never to
@@ -441,19 +450,16 @@ def build_reference_evidence_projection(
             state = "unknown"
         projection[key] = state
 
-    baselines = metadata.get("reference_baselines")
-    baselines = baselines if isinstance(baselines, dict) else {}
-    core = baselines.get("comfyui") if isinstance(baselines.get("comfyui"), dict) else {}
-    frontend = (
-        baselines.get("comfyui_frontend")
-        if isinstance(baselines.get("comfyui_frontend"), dict)
-        else {}
-    )
+    baselines = _mapping_field(resolved, "reference_baselines")
+    core = _mapping_field(baselines, "comfyui")
+    frontend = _mapping_field(baselines, "comfyui_frontend")
     projection["core_version"] = core.get("project_version") or "unknown"
     projection["core_bundled_frontend_version"] = (
         core.get("bundled_frontend_version") or "unknown"
     )
-    projection["frontend_release_version"] = frontend.get("release_version") or "unknown"
+    projection["frontend_release_version"] = (
+        frontend.get("release_version") or "unknown"
+    )
     return projection
 
 
