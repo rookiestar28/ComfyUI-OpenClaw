@@ -3684,65 +3684,9 @@
     },
     {
       "tool": "ruff",
-      "path": "models/schemas.py",
-      "code": "F401",
-      "message": "`typing.List` imported but unused",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "models/schemas.py",
-      "code": "F401",
-      "message": "`typing.Union` imported but unused",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "models/schemas.py",
-      "code": "UP006",
-      "message": "Use `dict` instead of `Dict` for type annotation",
-      "count": 10
-    },
-    {
-      "tool": "ruff",
-      "path": "models/schemas.py",
-      "code": "UP035",
-      "message": "`typing.Dict` is deprecated, use `dict` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "models/schemas.py",
-      "code": "UP035",
-      "message": "`typing.List` is deprecated, use `list` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "models/schemas.py",
-      "code": "UP045",
-      "message": "Use `X | None` for type annotations",
-      "count": 6
-    },
-    {
-      "tool": "ruff",
       "path": "nodes/__init__.py",
       "code": "N999",
       "message": "Invalid module name: 'ComfyUI-OpenClaw'",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "nodes/batch_variants.py",
-      "code": "F401",
-      "message": "`typing.Any` imported but unused",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "nodes/batch_variants.py",
-      "code": "F401",
-      "message": "`typing.Dict` imported but unused",
       "count": 1
     },
     {
@@ -3761,41 +3705,6 @@
     },
     {
       "tool": "ruff",
-      "path": "nodes/batch_variants.py",
-      "code": "UP006",
-      "message": "Use `list` instead of `List` for type annotation",
-      "count": 3
-    },
-    {
-      "tool": "ruff",
-      "path": "nodes/batch_variants.py",
-      "code": "UP006",
-      "message": "Use `tuple` instead of `Tuple` for type annotation",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "nodes/batch_variants.py",
-      "code": "UP035",
-      "message": "`typing.Dict` is deprecated, use `dict` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "nodes/batch_variants.py",
-      "code": "UP035",
-      "message": "`typing.List` is deprecated, use `list` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "nodes/batch_variants.py",
-      "code": "UP035",
-      "message": "`typing.Tuple` is deprecated, use `tuple` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
       "path": "nodes/image_to_prompt.py",
       "code": "N802",
       "message": "Function name `INPUT_TYPES` should be lowercase",
@@ -3803,51 +3712,9 @@
     },
     {
       "tool": "ruff",
-      "path": "nodes/image_to_prompt.py",
-      "code": "UP006",
-      "message": "Use `tuple` instead of `Tuple` for type annotation",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "nodes/image_to_prompt.py",
-      "code": "UP035",
-      "message": "`typing.Tuple` is deprecated, use `tuple` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "nodes/portability_contract.py",
-      "code": "UP006",
-      "message": "Use `dict` instead of `Dict` for type annotation",
-      "count": 4
-    },
-    {
-      "tool": "ruff",
-      "path": "nodes/portability_contract.py",
-      "code": "UP035",
-      "message": "`typing.Dict` is deprecated, use `dict` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
       "path": "nodes/prompt_planner.py",
       "code": "N802",
       "message": "Function name `INPUT_TYPES` should be lowercase",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "nodes/prompt_planner.py",
-      "code": "UP006",
-      "message": "Use `tuple` instead of `Tuple` for type annotation",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "nodes/prompt_planner.py",
-      "code": "UP035",
-      "message": "`typing.Tuple` is deprecated, use `tuple` instead",
       "count": 1
     },
     {
@@ -3866,20 +3733,6 @@
     },
     {
       "tool": "ruff",
-      "path": "nodes/prompt_refiner.py",
-      "code": "UP006",
-      "message": "Use `tuple` instead of `Tuple` for type annotation",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "nodes/prompt_refiner.py",
-      "code": "UP035",
-      "message": "`typing.Tuple` is deprecated, use `tuple` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
       "path": "scripts/check_deployment_profile.py",
       "code": "E402",
       "message": "Module level import not at top of file",
@@ -3890,13 +3743,6 @@
       "path": "scripts/check_openapi_sync.py",
       "code": "UP022",
       "message": "Prefer `capture_output` over sending `stdout` and `stderr` to `PIPE`",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/check_openapi_sync.py",
-      "code": "UP035",
-      "message": "Import from `collections.abc` instead: `Callable`, `Iterable`",
       "count": 1
     },
     {
@@ -3915,13 +3761,6 @@
     },
     {
       "tool": "ruff",
-      "path": "scripts/check_supply_chain_hardening.py",
-      "code": "UP035",
-      "message": "Import from `collections.abc` instead: `Iterable`",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
       "path": "scripts/devtools/debug_s35_import.py",
       "code": "E402",
       "message": "Module level import not at top of file",
@@ -3932,62 +3771,6 @@
       "path": "scripts/devtools/verify_s30_doctor.py",
       "code": "E402",
       "message": "Module level import not at top of file",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/generate_provenance.py",
-      "code": "F401",
-      "message": "`typing.Dict` imported but unused",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/generate_provenance.py",
-      "code": "UP035",
-      "message": "`typing.Dict` is deprecated, use `dict` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/lint_implementation_record.py",
-      "code": "F401",
-      "message": "`typing.Iterable` imported but unused",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/lint_implementation_record.py",
-      "code": "UP006",
-      "message": "Use `list` instead of `List` for type annotation",
-      "count": 7
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/lint_implementation_record.py",
-      "code": "UP006",
-      "message": "Use `tuple` instead of `Tuple` for type annotation",
-      "count": 2
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/lint_implementation_record.py",
-      "code": "UP035",
-      "message": "Import from `collections.abc` instead: `Iterable`, `Sequence`",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/lint_implementation_record.py",
-      "code": "UP035",
-      "message": "`typing.List` is deprecated, use `list` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/lint_implementation_record.py",
-      "code": "UP035",
-      "message": "`typing.Tuple` is deprecated, use `tuple` instead",
       "count": 1
     },
     {
@@ -4009,13 +3792,6 @@
       "path": "scripts/precommit_block_sensitive_files.py",
       "code": "UP022",
       "message": "Prefer `capture_output` over sending `stdout` and `stderr` to `PIPE`",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/quality_governance_common.py",
-      "code": "UP035",
-      "message": "Import from `collections.abc` instead: `Iterable`",
       "count": 1
     },
     {
@@ -4049,114 +3825,9 @@
     {
       "tool": "ruff",
       "path": "scripts/run_adversarial_gate.py",
-      "code": "UP006",
-      "message": "Use `dict` instead of `Dict` for type annotation",
-      "count": 9
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_adversarial_gate.py",
-      "code": "UP006",
-      "message": "Use `list` instead of `List` for type annotation",
-      "count": 16
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_adversarial_gate.py",
-      "code": "UP006",
-      "message": "Use `set` instead of `Set` for type annotation",
-      "count": 4
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_adversarial_gate.py",
-      "code": "UP006",
-      "message": "Use `tuple` instead of `Tuple` for type annotation",
-      "count": 5
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_adversarial_gate.py",
       "code": "UP015",
       "message": "Unnecessary mode argument",
       "count": 2
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_adversarial_gate.py",
-      "code": "UP035",
-      "message": "`typing.Dict` is deprecated, use `dict` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_adversarial_gate.py",
-      "code": "UP035",
-      "message": "`typing.List` is deprecated, use `list` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_adversarial_gate.py",
-      "code": "UP035",
-      "message": "`typing.Set` is deprecated, use `set` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_adversarial_gate.py",
-      "code": "UP035",
-      "message": "`typing.Tuple` is deprecated, use `tuple` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_adversarial_gate.py",
-      "code": "UP045",
-      "message": "Use `X | None` for type annotations",
-      "count": 10
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_mutation_test.py",
-      "code": "F401",
-      "message": "`typing.Any` imported but unused",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_mutation_test.py",
-      "code": "F401",
-      "message": "`typing.Dict` imported but unused",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_mutation_test.py",
-      "code": "F401",
-      "message": "`typing.List` imported but unused",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_mutation_test.py",
-      "code": "F401",
-      "message": "`typing.Optional` imported but unused",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_mutation_test.py",
-      "code": "F401",
-      "message": "`typing.Tuple` imported but unused",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_mutation_test.py",
-      "code": "F401",
-      "message": "`typing.Union` imported but unused",
-      "count": 1
     },
     {
       "tool": "ruff",
@@ -4171,27 +3842,6 @@
       "code": "UP015",
       "message": "Unnecessary mode argument",
       "count": 2
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_mutation_test.py",
-      "code": "UP035",
-      "message": "`typing.Dict` is deprecated, use `dict` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_mutation_test.py",
-      "code": "UP035",
-      "message": "`typing.List` is deprecated, use `list` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_mutation_test.py",
-      "code": "UP035",
-      "message": "`typing.Tuple` is deprecated, use `tuple` instead",
-      "count": 1
     },
     {
       "tool": "ruff",
@@ -4216,65 +3866,9 @@
     },
     {
       "tool": "ruff",
-      "path": "scripts/run_unittests.py",
-      "code": "UP006",
-      "message": "Use `dict` instead of `Dict` for type annotation",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_unittests.py",
-      "code": "UP006",
-      "message": "Use `list` instead of `List` for type annotation",
-      "count": 9
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_unittests.py",
-      "code": "UP006",
-      "message": "Use `tuple` instead of `Tuple` for type annotation",
-      "count": 4
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_unittests.py",
-      "code": "UP035",
-      "message": "Import from `collections.abc` instead: `Iterable`",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_unittests.py",
-      "code": "UP035",
-      "message": "`typing.Dict` is deprecated, use `dict` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_unittests.py",
-      "code": "UP035",
-      "message": "`typing.List` is deprecated, use `list` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_unittests.py",
-      "code": "UP035",
-      "message": "`typing.Tuple` is deprecated, use `tuple` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
       "path": "scripts/start_sidecar.py",
       "code": "SIM105",
       "message": "Use `contextlib.suppress(KeyboardInterrupt)` instead of `try`-`except`-`pass`",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/verify_exception_boundary_policy.py",
-      "code": "UP035",
-      "message": "Import from `collections.abc` instead: `Iterable`",
       "count": 1
     },
     {
@@ -4300,93 +3894,9 @@
     },
     {
       "tool": "ruff",
-      "path": "scripts/verify_quality_governance.py",
-      "code": "UP006",
-      "message": "Use `list` instead of `List` for type annotation",
-      "count": 3
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/verify_quality_governance.py",
-      "code": "UP035",
-      "message": "`typing.List` is deprecated, use `list` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/verify_quality_governance.py",
-      "code": "UP045",
-      "message": "Use `X | None` for type annotations",
-      "count": 4
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/verify_test_debt_governance.py",
-      "code": "F401",
-      "message": "`typing.Iterable` imported but unused",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/verify_test_debt_governance.py",
-      "code": "F401",
-      "message": "`typing.Optional` imported but unused",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
       "path": "scripts/verify_test_debt_governance.py",
       "code": "SIM118",
       "message": "Use `key in dict` instead of `key in dict.keys()`",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/verify_test_debt_governance.py",
-      "code": "UP006",
-      "message": "Use `dict` instead of `Dict` for type annotation",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/verify_test_debt_governance.py",
-      "code": "UP006",
-      "message": "Use `list` instead of `List` for type annotation",
-      "count": 9
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/verify_test_debt_governance.py",
-      "code": "UP006",
-      "message": "Use `tuple` instead of `Tuple` for type annotation",
-      "count": 2
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/verify_test_debt_governance.py",
-      "code": "UP035",
-      "message": "Import from `collections.abc` instead: `Iterable`",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/verify_test_debt_governance.py",
-      "code": "UP035",
-      "message": "`typing.Dict` is deprecated, use `dict` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/verify_test_debt_governance.py",
-      "code": "UP035",
-      "message": "`typing.List` is deprecated, use `list` instead",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/verify_test_debt_governance.py",
-      "code": "UP035",
-      "message": "`typing.Tuple` is deprecated, use `tuple` instead",
       "count": 1
     },
     {

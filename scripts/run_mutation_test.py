@@ -7,7 +7,6 @@ import shutil
 import subprocess
 import sys
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Config
 TARGET_FILES = ["services/access_control.py"]

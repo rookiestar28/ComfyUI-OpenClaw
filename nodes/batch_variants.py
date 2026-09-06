@@ -1,7 +1,7 @@
 import json
 import logging
 import random
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 try:
     from ..models.schemas import GenerationParams
@@ -21,11 +21,11 @@ class OpenClawBatchVariants:
     Generates deterministic variants for batch processing.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     @classmethod
-    def INPUT_TYPES(cls):
+    def INPUT_TYPES(cls) -> dict[str, Any]:
         return {
             "required": {
                 "positive": ("STRING", {"multiline": True}),
@@ -69,7 +69,7 @@ class OpenClawBatchVariants:
         params_json: str = "{}",
         sweep_start: float = 0.0,
         sweep_end: float = 0.0,
-    ) -> Tuple[List[str], List[str], List[str]]:
+    ) -> tuple[list[str], list[str], list[str]]:
         metrics.increment("variants_calls")
 
         # 1. Parse Baseline Params

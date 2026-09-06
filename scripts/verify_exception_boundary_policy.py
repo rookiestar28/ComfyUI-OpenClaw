@@ -13,11 +13,11 @@ import ast
 import json
 import symtable
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 VALID_CLASSIFICATIONS = {
     "allowed_boundary_guard",

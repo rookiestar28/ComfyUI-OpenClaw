@@ -13,8 +13,9 @@ import os
 import sys
 import time
 import unittest
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any
 
 
 def _build_suite(args: argparse.Namespace) -> unittest.TestSuite:
@@ -27,7 +28,7 @@ def _build_suite(args: argparse.Namespace) -> unittest.TestSuite:
     )
 
 
-def _load_skip_policy(path: str) -> Dict[str, Any]:
+def _load_skip_policy(path: str) -> dict[str, Any]:
     raw = Path(path).read_text(encoding="utf-8")
     data = json.loads(raw)
     if not isinstance(data, dict):
@@ -48,8 +49,8 @@ def _load_skip_policy(path: str) -> Dict[str, Any]:
     }
 
 
-def _collect_skips(result: unittest.TestResult) -> List[Tuple[str, str]]:
-    skips: List[Tuple[str, str]] = []
+def _collect_skips(result: unittest.TestResult) -> list[tuple[str, str]]:
+    skips: list[tuple[str, str]] = []
     for test_case, reason in result.skipped:
         if hasattr(test_case, "id"):
             test_id = test_case.id()
@@ -61,11 +62,11 @@ def _collect_skips(result: unittest.TestResult) -> List[Tuple[str, str]]:
 
 def _evaluate_skip_policy(
     *,
-    skips: Iterable[Tuple[str, str]],
+    skips: Iterable[tuple[str, str]],
     max_skipped: int | None,
     no_skip_modules: Iterable[str],
-) -> List[str]:
-    violations: List[str] = []
+) -> list[str]:
+    violations: list[str] = []
     skip_list = list(skips)
     if max_skipped is not None and len(skip_list) > max_skipped:
         violations.append(
@@ -88,10 +89,10 @@ def _write_skip_report(
     *,
     tests_run: int,
     duration_sec: float,
-    skips: List[Tuple[str, str]],
+    skips: list[tuple[str, str]],
     max_skipped: int | None,
-    no_skip_modules: List[str],
-    violations: List[str],
+    no_skip_modules: list[str],
+    violations: list[str],
 ) -> None:
     report_path = Path(path)
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -179,7 +180,7 @@ def main() -> int:
             print(tb, file=sys.stdout)
 
     policy_max_skipped: int | None = None
-    policy_no_skip_modules: List[str] = []
+    policy_no_skip_modules: list[str] = []
     skip_policy_active = bool(
         args.enforce_skip_policy or args.max_skipped is not None or args.no_skip_module
     )
@@ -202,7 +203,7 @@ def main() -> int:
         dict.fromkeys(policy_no_skip_modules + args.no_skip_module)
     )
     skips = _collect_skips(result)
-    policy_violations: List[str] = []
+    policy_violations: list[str] = []
     if skip_policy_active:
         # CRITICAL: this gate is opt-in by flag to avoid breaking ad-hoc local runs.
         policy_violations = _evaluate_skip_policy(

@@ -1,7 +1,8 @@
+import builtins
 import json
 import re
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 if __package__ and "." in __package__:
     from ..services.request_contracts import (
@@ -37,11 +38,11 @@ class Profile:
     id: str
     version: str
     label: str
-    description: Optional[str] = None
-    model_config_data: Dict[str, Any] = field(default_factory=dict)
+    description: str | None = None
+    model_config_data: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Profile":
+    def from_dict(cls, data: dict[str, Any]) -> "Profile":
         return cls(**{k: v for k, v in data.items() if k in cls.__annotations__})
 
 
@@ -57,10 +58,10 @@ class GenerationParams:
     cfg: float = 7.0
     sampler_name: str = "euler"
     scheduler: str = "normal"
-    seed: Optional[int] = None
-    extra: Dict[str, Any] = field(default_factory=dict)
+    seed: int | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # Validation / Clamping logic
         # Clamp ranges
         self.width = max(256, min(4096, self.width))
@@ -72,11 +73,11 @@ class GenerationParams:
         self.width = (self.width // 8) * 8
         self.height = (self.height // 8) * 8
 
-    def dict(self) -> Dict[str, Any]:
+    def dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "GenerationParams":
+    def from_dict(cls, data: builtins.dict[str, Any]) -> "GenerationParams":
         # Filter unrelated keys to avoid TypeError on init
         valid_keys = cls.__annotations__.keys()
         filtered = {k: v for k, v in data.items() if k in valid_keys}
@@ -93,7 +94,7 @@ class JobSpec:
     negative_prompt: str
     params: GenerationParams
     schema_version: str = SCHEMA_VERSION  # Literal equivalent
-    metadata: Dict[str, Any] = field(
+    metadata: dict[str, Any] = field(
         default_factory=dict
     )  # R25: Trace context, user tags, etc.
 
@@ -111,7 +112,7 @@ class ParamPatch:
 
     target_field: str
     value: Any
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 @dataclass
@@ -124,12 +125,12 @@ class WebhookJobRequest:
     version: int
     template_id: str
     profile_id: str
-    inputs: Dict[str, Any] = field(default_factory=dict)
-    job_id: Optional[str] = None
-    trace_id: Optional[str] = None
-    callback: Optional[Dict[str, Any]] = None  # F16: { url, method?, headers?, mode? }
+    inputs: dict[str, Any] = field(default_factory=dict)
+    job_id: str | None = None
+    trace_id: str | None = None
+    callback: dict[str, Any] | None = None  # F16: { url, method?, headers?, mode? }
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # Version validation
         if self.version != 1:
             raise ValueError(f"Unsupported version: {self.version}")
@@ -159,7 +160,7 @@ class WebhookJobRequest:
                 )
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "WebhookJobRequest":
+    def from_dict(cls, data: dict[str, Any]) -> "WebhookJobRequest":
         """Parse and validate from dict."""
         # 1. Check for unknown keys (Strict validation)
         allowed_top_level = set(WEBHOOK_JOB_REQUEST_CONTRACT["allowed_top_level"])
@@ -183,7 +184,7 @@ class WebhookJobRequest:
             callback=data.get("callback"),
         )
 
-    def to_normalized(self) -> Dict[str, Any]:
+    def to_normalized(self) -> dict[str, Any]:
         """Return normalized, validated representation."""
         return {
             "version": self.version,

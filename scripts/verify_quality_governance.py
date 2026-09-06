@@ -14,7 +14,6 @@ import re
 import sys
 from datetime import date
 from pathlib import Path
-from typing import List, Optional
 
 from quality_governance_common import (
     MIN_PROMOTION_REVIEW_CYCLES,
@@ -33,7 +32,7 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8-sig")
 
 
-def _extract_toml_section(text: str, header: str) -> Optional[str]:
+def _extract_toml_section(text: str, header: str) -> str | None:
     pattern = re.compile(rf"(?ms)^\[{re.escape(header)}\]\s*$\n(?P<body>.*?)(?=^\[|\Z)")
     match = pattern.search(text)
     if not match:
@@ -41,7 +40,7 @@ def _extract_toml_section(text: str, header: str) -> Optional[str]:
     return match.group("body")
 
 
-def _extract_float_assignment(section_text: str, key: str) -> Optional[float]:
+def _extract_float_assignment(section_text: str, key: str) -> float | None:
     match = re.search(
         rf"(?m)^\s*{re.escape(key)}\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*$",
         section_text,
@@ -51,14 +50,14 @@ def _extract_float_assignment(section_text: str, key: str) -> Optional[float]:
     return float(match.group(1))
 
 
-def _extract_bool_assignment(section_text: str, key: str) -> Optional[bool]:
+def _extract_bool_assignment(section_text: str, key: str) -> bool | None:
     match = re.search(rf"(?m)^\s*{re.escape(key)}\s*=\s*(true|false)\s*$", section_text)
     if not match:
         return None
     return match.group(1) == "true"
 
 
-def _extract_python_constant(text: str, name: str) -> Optional[float]:
+def _extract_python_constant(text: str, name: str) -> float | None:
     match = re.search(
         rf"(?m)^\s*{re.escape(name)}\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*$", text
     )
@@ -67,7 +66,7 @@ def _extract_python_constant(text: str, name: str) -> Optional[float]:
     return float(match.group(1))
 
 
-def _require_phrase(text: str, phrase: str, failures: List[str], label: str) -> None:
+def _require_phrase(text: str, phrase: str, failures: list[str], label: str) -> None:
     if phrase not in text:
         failures.append(f"{label}: missing required phrase: {phrase}")
 
@@ -81,8 +80,8 @@ def verify_governance(
     coverage_policy_path: Path,
     coverage_review_evidence_path: Path,
     release_policy_doc_path: Path,
-) -> List[str]:
-    failures: List[str] = []
+) -> list[str]:
+    failures: list[str] = []
     policy_payload, policy_failures = load_and_validate_policy(coverage_policy_path)
     failures.extend(policy_failures)
     review_payload = None

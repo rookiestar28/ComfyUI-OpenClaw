@@ -1,7 +1,7 @@
 import json
 import logging
 from functools import partial
-from typing import Any, Tuple
+from typing import Any
 
 try:
     from ..services.image_utils import tensor_to_base64_png
@@ -35,11 +35,11 @@ class OpenClawPromptRefiner:
     DELEGATES to services.refiner.RefinerService (F21 Refactor).
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.service = RefinerService()
 
     @classmethod
-    def INPUT_TYPES(cls):
+    def INPUT_TYPES(cls) -> dict[str, Any]:
         return {
             "required": {
                 "image": ("IMAGE",),
@@ -92,7 +92,7 @@ class OpenClawPromptRefiner:
         params_json: str = "{}",
         goal: str = "Fix the issues",
         max_image_side: int = 1024,
-    ) -> Tuple[str, str, str, str]:
+    ) -> tuple[str, str, str, str]:
 
         # 1. Preprocess Image (Node responsibility)
         try:

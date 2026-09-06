@@ -105,6 +105,16 @@ module = [
 ]
 ignore_missing_imports = true
 
+# R250 tranche 1: strictness advances one package at a time, never globally.
+# These two packages carry zero untyped definitions, so the rule is enforceable
+# here today. Extend this list only with the measured cost of the next package.
+[[tool.mypy.overrides]]
+module = [
+    "models.*",
+    "nodes.*",
+]
+disallow_untyped_defs = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

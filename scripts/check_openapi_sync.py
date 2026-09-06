@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Callable, Iterable
 
 OPENAPI_SYNC_TRIGGER_PATHS = {
     "docs/openapi.yaml",

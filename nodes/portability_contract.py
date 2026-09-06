@@ -8,11 +8,11 @@ entrypoint during ComfyUI custom-node loading.
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict
+from typing import Any
 
 PORTABILITY_CONTRACT_VERSION = 1
 
-_NODE_PORTABILITY_MAPPINGS: Dict[str, Dict[str, Any]] = {
+_NODE_PORTABILITY_MAPPINGS: dict[str, dict[str, Any]] = {
     "MoltbotPromptPlanner": {
         "display_name": "openclaw: Prompt Planner",
         "portable_mode": "materialize_standard_fields",
@@ -90,7 +90,7 @@ _NODE_PORTABILITY_MAPPINGS: Dict[str, Dict[str, Any]] = {
 }
 
 
-def get_node_portability_mappings() -> Dict[str, Dict[str, Any]]:
+def get_node_portability_mappings() -> dict[str, dict[str, Any]]:
     return copy.deepcopy(_NODE_PORTABILITY_MAPPINGS)
 
 

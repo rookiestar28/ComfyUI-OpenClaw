@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from fnmatch import fnmatch
 from itertools import pairwise
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 REQUIRED_HOTSPOT_FAMILIES = (
     "safe_io",

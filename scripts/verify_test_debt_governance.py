@@ -12,10 +12,10 @@ import argparse
 import json
 from datetime import date
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 
 
-def _read_json_object(path: Path) -> Dict[str, Any]:
+def _read_json_object(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(payload, dict):
         raise ValueError(f"{path}: expected a JSON object")
@@ -26,7 +26,7 @@ def _normalize_repo_rel_path(path: str) -> str:
     return PurePosixPath(path.replace("\\", "/")).as_posix().lstrip("./")
 
 
-def _parse_review_after(value: Any, *, label: str, failures: List[str]) -> None:
+def _parse_review_after(value: Any, *, label: str, failures: list[str]) -> None:
     if not isinstance(value, str) or not value.strip():
         failures.append(f"{label}: missing review_after")
         return
@@ -39,7 +39,7 @@ def _parse_review_after(value: Any, *, label: str, failures: List[str]) -> None:
         failures.append(f"{label}: review_after {value} is in the past")
 
 
-def _validate_reason(value: Any, *, label: str, failures: List[str]) -> None:
+def _validate_reason(value: Any, *, label: str, failures: list[str]) -> None:
     if not isinstance(value, str) or not value.strip():
         failures.append(f"{label}: missing non-empty reason")
 
@@ -48,8 +48,8 @@ def _resolve_test_module_path(repo_root: Path, module_name: str) -> Path:
     return repo_root / Path(module_name.replace(".", "/")).with_suffix(".py")
 
 
-def _validate_skip_policy(repo_root: Path, path: Path) -> List[str]:
-    failures: List[str] = []
+def _validate_skip_policy(repo_root: Path, path: Path) -> list[str]:
+    failures: list[str] = []
     payload = _read_json_object(path)
 
     max_skipped = payload.get("max_skipped")
@@ -67,7 +67,7 @@ def _validate_skip_policy(repo_root: Path, path: Path) -> List[str]:
 
     seen = set()
     duplicates = set()
-    normalized_modules: List[str] = []
+    normalized_modules: list[str] = []
     for module in modules:
         normalized = module.strip()
         normalized_modules.append(normalized)
@@ -122,15 +122,15 @@ def _validate_skip_policy(repo_root: Path, path: Path) -> List[str]:
     return failures
 
 
-def _validate_mutation_allowlist(repo_root: Path, path: Path) -> List[str]:
-    failures: List[str] = []
+def _validate_mutation_allowlist(repo_root: Path, path: Path) -> list[str]:
+    failures: list[str] = []
     payload = _read_json_object(path)
     entries = payload.get("entries", [])
     if not isinstance(entries, list):
         return ["mutation allowlist: entries must be a list"]
 
-    seen: set[Tuple[str, int]] = set()
-    duplicates: set[Tuple[str, int]] = set()
+    seen: set[tuple[str, int]] = set()
+    duplicates: set[tuple[str, int]] = set()
     for index, raw_entry in enumerate(entries):
         label = f"mutation allowlist entry[{index}]"
         if not isinstance(raw_entry, dict):
@@ -170,8 +170,8 @@ def verify_test_debt_governance(
     repo_root: Path,
     skip_policy_path: Path,
     mutation_allowlist_path: Path,
-) -> List[str]:
-    failures: List[str] = []
+) -> list[str]:
+    failures: list[str] = []
     if not skip_policy_path.is_file():
         failures.append(f"missing skip policy: {skip_policy_path}")
     else:

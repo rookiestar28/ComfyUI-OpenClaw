@@ -1,6 +1,6 @@
 import logging
 from functools import partial
-from typing import Any, Tuple
+from typing import Any
 
 try:
     from ..services.image_utils import tensor_to_base64_png
@@ -32,10 +32,10 @@ class OpenClawImageToPrompt:
     Experimental node that uses Vision LLM to generate prompt starters from an image.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.llm_client = LLMClient()
 
-    def _get_request_llm_client(self):
+    def _get_request_llm_client(self) -> LLMClient:
         # CRITICAL: this node instance can persist across multiple UI runs.
         # Refresh the default LLMClient per call so provider/key changes from Settings/UI
         # apply without restarting ComfyUI. Preserve injected mocks/fakes for tests.
@@ -44,7 +44,7 @@ class OpenClawImageToPrompt:
         return self.llm_client
 
     @classmethod
-    def INPUT_TYPES(cls):
+    def INPUT_TYPES(cls) -> dict[str, Any]:
         return {
             "required": {
                 "image": ("IMAGE",),
@@ -73,7 +73,7 @@ class OpenClawImageToPrompt:
 
     def generate_prompt(
         self, image: Any, goal: str, detail_level: str, max_image_side: int
-    ) -> Tuple[str, str, str]:
+    ) -> tuple[str, str, str]:
         metrics.increment("vision_calls")
 
         # 1. Preprocess Image

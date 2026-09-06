@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Tuple
+from typing import Any
 
 try:
     from ..services.planner import PlannerService
@@ -24,11 +24,11 @@ class OpenClawPromptPlanner:
     DELEGATES to services.planner.PlannerService (F8 Refactor).
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.service = PlannerService()
 
     @classmethod
-    def INPUT_TYPES(cls):
+    def INPUT_TYPES(cls) -> dict[str, Any]:
         profile_keys = [
             profile.id for profile in get_planner_registry().list_profiles()
         ]
@@ -63,7 +63,7 @@ class OpenClawPromptPlanner:
 
     def plan_generation(
         self, profile: str, requirements: str, style_directives: str, seed: int
-    ) -> Tuple[str, str, str]:
+    ) -> tuple[str, str, str]:
         # Delegate to service
         positive, negative, params_dict = self.service.plan_generation(
             profile_id=profile,

@@ -31,7 +31,7 @@ import shutil
 import subprocess
 import sys
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 DEFAULT_HIGH_RISK_PATTERNS = [
     "services/access_control.py",
@@ -64,10 +64,10 @@ def _normalize_rel_path(path: str) -> str:
     return pathlib.PurePosixPath(normalized).as_posix()
 
 
-def _run_git_diff(base: Optional[str], head: Optional[str]) -> List[str]:
+def _run_git_diff(base: str | None, head: str | None) -> list[str]:
     if not shutil.which("git"):
         return []
-    cmd: List[str]
+    cmd: list[str]
     if base and head:
         # Prefer merge-base-aware comparison for branch-based refs.
         cmd = ["git", "diff", "--name-only", f"{base}...{head}"]
@@ -93,8 +93,8 @@ def _run_git_diff(base: Optional[str], head: Optional[str]) -> List[str]:
 
 
 def _collect_changed_files(
-    diff_base: Optional[str], diff_head: Optional[str]
-) -> Tuple[List[str], str]:
+    diff_base: str | None, diff_head: str | None
+) -> tuple[list[str], str]:
     files = _run_git_diff(diff_base, diff_head)
     if files:
         if diff_base and diff_head:
@@ -122,8 +122,8 @@ def _collect_changed_files(
     return [], "no git diff context"
 
 
-def _filter_high_risk_files(changed_files: List[str], patterns: List[str]) -> List[str]:
-    matched: Set[str] = set()
+def _filter_high_risk_files(changed_files: list[str], patterns: list[str]) -> list[str]:
+    matched: set[str] = set()
     normalized_patterns = [_normalize_rel_path(p) for p in patterns if p.strip()]
     for file_path in changed_files:
         normalized_file = _normalize_rel_path(file_path)
@@ -136,10 +136,10 @@ def _filter_high_risk_files(changed_files: List[str], patterns: List[str]) -> Li
 
 def _resolve_effective_profile(
     requested_profile: str,
-    diff_base: Optional[str],
-    diff_head: Optional[str],
-    high_risk_patterns: List[str],
-) -> Tuple[str, List[str], List[str], str]:
+    diff_base: str | None,
+    diff_head: str | None,
+    high_risk_patterns: list[str],
+) -> tuple[str, list[str], list[str], str]:
     if requested_profile != "auto":
         return requested_profile, [], [], "explicit profile"
 
@@ -150,14 +150,14 @@ def _resolve_effective_profile(
     return "smoke", changed_files, high_risk_changed, diff_source
 
 
-def _load_survivor_allowlist(path: str) -> Set[Tuple[str, int]]:
+def _load_survivor_allowlist(path: str) -> set[tuple[str, int]]:
     if not path or not os.path.isfile(path):
         return set()
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         entries = data.get("entries", []) if isinstance(data, dict) else []
-        allowlist: Set[Tuple[str, int]] = set()
+        allowlist: set[tuple[str, int]] = set()
         for entry in entries:
             file_path = _normalize_rel_path(str(entry.get("file", "")))
             mutation_index = entry.get("mutation_index")
@@ -168,7 +168,7 @@ def _load_survivor_allowlist(path: str) -> Set[Tuple[str, int]]:
         return set()
 
 
-def run_fuzz_suite(seed: int, max_runs: int, artifact_dir: str) -> Dict[str, Any]:
+def run_fuzz_suite(seed: int, max_runs: int, artifact_dir: str) -> dict[str, Any]:
     """
     Run R111 fuzz harness with deterministic seed and bounded iteration.
 
@@ -264,9 +264,9 @@ def run_mutation_suite(
     threshold: float,
     artifact_dir: str,
     *,
-    strict_zero_survivor_files: Optional[List[str]] = None,
-    survivor_allowlist: Optional[Set[Tuple[str, int]]] = None,
-) -> Dict[str, Any]:
+    strict_zero_survivor_files: list[str] | None = None,
+    survivor_allowlist: set[tuple[str, int]] | None = None,
+) -> dict[str, Any]:
     """
     Run R113 mutation test with kill-rate threshold enforcement.
 
@@ -304,7 +304,7 @@ def run_mutation_suite(
 
         # Parse report
         score = 0.0
-        report_data: Dict[str, Any] = {}
+        report_data: dict[str, Any] = {}
 
         if os.path.isfile(report_path):
             with open(report_path, "r", encoding="utf-8") as f:
@@ -349,13 +349,13 @@ def run_mutation_suite(
         raw_details = (
             report_data.get("details", []) if isinstance(report_data, dict) else []
         )
-        surviving_details: List[Dict[str, Any]] = []
+        surviving_details: list[dict[str, Any]] = []
         for detail in raw_details:
             if isinstance(detail, dict) and detail.get("status") == "SURVIVED":
                 surviving_details.append(detail)
 
-        strict_violations: List[Dict[str, Any]] = []
-        allowlisted_survivors: List[Dict[str, Any]] = []
+        strict_violations: list[dict[str, Any]] = []
+        allowlisted_survivors: list[dict[str, Any]] = []
         if strict_targets:
             strict_set = set(strict_targets)
             for detail in surviving_details:
@@ -419,14 +419,14 @@ def build_manifest(
     requested_profile: str,
     effective_profile: str,
     seed: int,
-    fuzz_result: Dict[str, Any],
-    mutation_result: Dict[str, Any],
+    fuzz_result: dict[str, Any],
+    mutation_result: dict[str, Any],
     artifact_dir: str,
     elapsed_sec: float,
-    changed_files: Optional[List[str]] = None,
-    high_risk_changed_files: Optional[List[str]] = None,
+    changed_files: list[str] | None = None,
+    high_risk_changed_files: list[str] | None = None,
     diff_source: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build machine-readable JSON manifest for CI artifact upload."""
     overall_passed = fuzz_result["passed"] and mutation_result["passed"]
 
@@ -572,7 +572,7 @@ def main() -> int:
 
     # Run mutation suite
     print("\n[R113] Running mutation suite...")
-    strict_zero_survivor_files: List[str] = []
+    strict_zero_survivor_files: list[str] = []
     if (
         not args.no_enforce_zero_survivor_hotspots
         and high_risk_changed_files

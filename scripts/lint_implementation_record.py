@@ -8,21 +8,21 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple
 
 DEFAULT_KEYWORD_PATTERN = r"(bug|regression|security[ _-]?fix|hotfix|漏洞|瑕疵|修補)"
 
 
-def _discover_record_files(paths: Sequence[str]) -> List[Path]:
-    files: List[Path] = []
+def _discover_record_files(paths: Sequence[str]) -> list[Path]:
+    files: list[Path] = []
     for raw in paths:
         p = Path(raw)
         if p.is_dir():
             files.extend(sorted(p.glob("*_IMPLEMENTATION_RECORD.md")))
         elif p.is_file():
             files.append(p)
-    dedup: List[Path] = []
+    dedup: list[Path] = []
     seen = set()
     for f in files:
         resolved = f.resolve()
@@ -38,14 +38,14 @@ def lint_record_text(
     *,
     strict: bool,
     keyword_pattern: str = DEFAULT_KEYWORD_PATTERN,
-) -> Tuple[bool, List[str]]:
+) -> tuple[bool, list[str]]:
     enforce = strict
     if not enforce:
         enforce = re.search(keyword_pattern, text, re.IGNORECASE) is not None
     if not enforce:
         return True, []
 
-    issues: List[str] = []
+    issues: list[str] = []
     if not re.search(r"(?im)^##\s+Regression Evidence\b", text):
         issues.append("missing section: '## Regression Evidence'")
 
@@ -67,12 +67,12 @@ def lint_records(
     *,
     strict: bool,
     keyword_pattern: str = DEFAULT_KEYWORD_PATTERN,
-) -> Tuple[bool, List[str]]:
+) -> tuple[bool, list[str]]:
     files = _discover_record_files(paths)
     if not files:
         return True, []
 
-    errors: List[str] = []
+    errors: list[str] = []
     for file_path in files:
         text = file_path.read_text(encoding="utf-8", errors="replace")
         ok, issues = lint_record_text(
