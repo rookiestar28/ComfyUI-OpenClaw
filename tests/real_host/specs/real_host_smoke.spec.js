@@ -51,6 +51,37 @@ const OPENCLAW_MOUNT = '[data-openclaw-host-surface]';
 // The root element OpenClaw builds inside that mount.
 const OPENCLAW_ROOT = '.openclaw-sidebar-container';
 const PEER_CONTENT = '#openclaw-smoke-peer-content';
+// How long the served frontend gets to announce its own version before the
+// subject is treated as unidentifiable.
+const FRONTEND_VERSION_BUDGET_MS = 30_000;
+
+/**
+ * Find the path the host actually serves OpenClaw's modules under.
+ *
+ * `reference/ComfyUI/nodes.py` registers a web directory under the pyproject
+ * `project_name` only when `tool.comfy.web` is set; OpenClaw sets `WEB_DIRECTORY`
+ * instead, so it registers under the *module* name, which is the directory a user
+ * installed it into. Hardcoding the lane's own `CUSTOM_NODE_DIR_NAME` therefore
+ * only works on hosts the lane installed itself, and 404s on a real installation
+ * under the repository's own name. The path is read back from the host instead.
+ */
+async function resolveOpenClawExtensionBase(page) {
+  const base = await page.evaluate(async () => {
+    const response = await fetch('/extensions');
+    if (!response.ok) {
+      return null;
+    }
+    const entries = await response.json();
+    const marker = entries.find(
+      (entry) => typeof entry === 'string' && entry.endsWith('/openclaw_asset_refs.js'),
+    );
+    return marker ? marker.slice(0, marker.lastIndexOf('/')) : null;
+  });
+  if (!base) {
+    throw new Error('the host serves no OpenClaw modules under /extensions');
+  }
+  return base;
+}
 
 function readHostLog() {
   if (!HOST_LOG_PATH) {
@@ -115,18 +146,22 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
 
   test('the host served the requested frontend subject and not a fallback', async ({ page }) => {
     await page.goto('/');
-    const reportedFrontendVersion = await page.evaluate(async () => {
-      const direct = window.__COMFYUI_FRONTEND_VERSION__;
-      if (typeof direct === 'string' && direct !== '') {
-        return direct;
+    const reportedFrontendVersion = await page.evaluate(async (budgetMs) => {
+      // The frontend assigns this global when its Vue application mounts, which
+      // happens after navigation resolves - reading it immediately loses a race
+      // on a real host and reports "(none)". Wait for it instead of guessing.
+      const deadline = Date.now() + budgetMs;
+      for (;;) {
+        const direct = window.__COMFYUI_FRONTEND_VERSION__;
+        if (typeof direct === 'string' && direct !== '') {
+          return direct;
+        }
+        if (Date.now() >= deadline) {
+          return null;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
       }
-      const response = await fetch('/api/system_stats');
-      if (!response.ok) {
-        return null;
-      }
-      const stats = await response.json();
-      return stats?.system?.comfyui_frontend_version ?? null;
-    });
+    }, FRONTEND_VERSION_BUDGET_MS);
 
     const hostLogText = readHostLog();
     const failures = detectSubjectMismatch({
@@ -253,8 +288,9 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
   }) => {
     await openOpenClawSidebar(page);
 
-    const result = await page.evaluate(async () => {
-      const module = await import('/extensions/comfyui-openclaw/openclaw_asset_refs.js');
+    const extensionBase = await resolveOpenClawExtensionBase(page);
+    const result = await page.evaluate(async (base) => {
+      const module = await import(`${base}/openclaw_asset_refs.js`);
       // The annotated form is a flat entry: result[0] is the string itself, not
       // a nested array. A nested fixture normalizes to nothing and would make
       // this check vacuously report "no refs" rather than exercise the path.
@@ -279,7 +315,7 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
         visible: response.status < 500,
         directoryType: first.type,
       };
-    });
+    }, extensionBase);
 
     const failures = evaluateAnnotatedTempResult(result);
     expect(failures, failures.join('\n')).toEqual([]);
