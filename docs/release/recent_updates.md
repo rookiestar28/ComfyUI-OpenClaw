@@ -9,6 +9,33 @@ Current release notes: [v1.1.0](v1.1.0.md).
 
 <details>
 
+<summary><strong>Frontend test files no longer shipped to browsers, and real-host verification executed</strong></summary>
+
+- The frontend test suite no longer lives inside the served web directory. ComfyUI publishes
+  every JavaScript file under a registered web directory and its frontend imports all of them,
+  so those files were previously fetched and run by every browser on every page load, where
+  they failed to resolve their test-runner imports and left a standing cluster of console
+  errors. Entries served by this pack dropped from 90 to 56, all of them runtime modules.
+- A guard test now fails if any test file or test directory reappears under the served web
+  directory, so the layout cannot regress quietly. The served directory name is unchanged, so
+  existing installations keep working.
+- The pinned real-host frontend compatibility smoke lane has now been executed against a
+  running ComfyUI rather than only reviewed. Both pinned frontend subjects were confirmed in
+  the browser from the frontend's own reported version: the bundled `1.51.9` and the
+  reproducible standalone release `1.54.3`.
+- That lane now attributes browser errors by the failing request URL instead of by console
+  text, because the browser does not name the failing file in its console output. Requests the
+  host makes for its own optional files, and errors raised by other installed packs, are
+  reported separately instead of being charged to this pack.
+- Published compatibility evidence still records real-host validation as pending. Promoting it
+  requires an authorized scheduled lane run, so the recorded state stays conservative.
+- Public names and comments are now held to a ratchet that blocks new internal-code-only
+  naming, and type annotations were modernized in the best-covered packages.
+
+</details>
+
+<details>
+
 <summary><strong>Host reference baseline refreshed with separated evidence states</strong></summary>
 
 - Refreshed the reviewed host baseline to ComfyUI `31dfbd4c` / `0.34.0` with its bundled
