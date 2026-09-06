@@ -5,7 +5,7 @@ The README now keeps only the most recent 3-5 update summaries and links here fo
 
 Newest entries appear first.
 
-Current release notes: [v1.1.0](v1.1.0.md).
+Current release notes: [v1.2.0](v1.2.0.md). Previous: [v1.1.0](v1.1.0.md).
 
 <details>
 
