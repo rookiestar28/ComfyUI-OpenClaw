@@ -25,6 +25,7 @@ Exception:
 Scope note:
 - `tests/E2E_TESTING_SOP.md` is frontend Playwright harness SOP.
 - Backend real-E2E lanes (`tests.test_r122_real_backend_lane`, `tests.test_r123_real_backend_model_list_lane`) are governed by `tests/TEST_SOP.md`.
+- The pinned real-host frontend smoke lane (`playwright.real-host.config.js`, `tests/real_host/`) is a separate, non-blocking compatibility lane. It runs a real ComfyUI host at the pinned anchor and is never part of repository acceptance; executing it requires separate authorization. Its repository-side contracts are enforced by `tests/test_real_host_smoke_contract.py`, which does run in the standard gate.
 
 For public/admin/webhook/connector or other user-facing transaction changes, acceptance evidence must include at least one transaction-level probe that verifies the actual submitted outcome; route load or redirect-only evidence is not sufficient on its own.
 <!-- ROOKIEUI-GLOBAL-E2E-NOTICE:START -->

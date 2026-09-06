@@ -23,6 +23,12 @@ against a local **test harness** (no live ComfyUI backend required).
 Boundary:
 - This file covers frontend Playwright harness E2E only.
 - Backend low-mock real lanes (`R122`, `R123`) are specified in `tests/TEST_SOP.md`.
+- The pinned real-host frontend smoke lane is not covered here. It uses its own
+  configuration (`playwright.real-host.config.js`) and its own spec directory
+  (`tests/real_host/specs/`) precisely so this harness never collects it: a spec that
+  needs a real host could only fail or skip during repository acceptance. That lane runs
+  scheduled or manually, never blocks a change, and requires separate authorization to
+  execute.
 
 ## 1. Requirements
 
