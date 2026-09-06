@@ -294,7 +294,7 @@ export function evidenceUpdateIsAllowed(policy, { state, runId, evidenceId }) {
  * treated as attributable, because an unexplained error in a lane that owns the page
  * is not something to discard silently.
  */
-export function partitionBrowserErrors(errors, { extensionBase, peerBase = "" } = {}) {
+export function partitionBrowserErrors(errors, { extensionBase, peerBase = "", policy } = {}) {
     if (!extensionBase) {
         throw new SubjectError(
             "partitionBrowserErrors needs the extension base the host actually serves; " +
@@ -303,8 +303,23 @@ export function partitionBrowserErrors(errors, { extensionBase, peerBase = "" } 
     }
     const ours = [];
     const foreign = [];
+    const host = [];
+    const echoes = [];
     for (const raw of errors ?? []) {
         const text = String(raw);
+        // Only once a policy is supplied is there a request classifier to defer
+        // to. Without one, nothing here may be set aside, because the caller has
+        // given this function no second place for the failure to be judged.
+        if (policy) {
+            if (isContentlessSubresourceEcho(text)) {
+                echoes.push(text);
+                continue;
+            }
+            if (isHostOwnedConsoleMessage(policy, text)) {
+                host.push(text);
+                continue;
+            }
+        }
         const namesAnotherExtension =
             /\/extensions\/[^/\s"']+/.test(text) &&
             !text.includes(extensionBase) &&
@@ -320,5 +335,131 @@ export function partitionBrowserErrors(errors, { extensionBase, peerBase = "" } 
             ours.push(text);
         }
     }
-    return { ours, foreign };
+    return { ours, foreign, host, echoes };
+}
+
+/**
+ * The console text a browser emits when a subresource fails.
+ *
+ * It carries no URL. That is the whole reason this module classifies requests
+ * rather than console prose: the only object that knows which file failed is the
+ * network event, and judging the console echo as well would count one failure
+ * twice while still being unable to say what it was.
+ */
+const CONTENTLESS_SUBRESOURCE_ECHO = /^Failed to load resource:/;
+
+export function isContentlessSubresourceEcho(text) {
+    return CONTENTLESS_SUBRESOURCE_ECHO.test(String(text ?? "").trim());
+}
+
+function pathOf(url) {
+    const raw = String(url ?? "");
+    try {
+        return new URL(raw).pathname;
+    } catch {
+        // Not absolute. Take everything before the query, which is what the
+        // pinned entries are written against.
+        const cut = raw.search(/[?#]/);
+        return cut === -1 ? raw : raw.slice(0, cut);
+    }
+}
+
+function hostOwnedRequestPaths(policy) {
+    const entries = policy?.host_owned_noise?.requests ?? [];
+    return entries.map((entry) => String(entry?.path ?? "")).filter(Boolean);
+}
+
+/**
+ * Recognise a frontend log line the host emits about itself.
+ *
+ * These have no companion request and name no extension, so exact text is the
+ * only signal there is. Matching is exact rather than substring: a message that
+ * merely quotes one of these while reporting something else is not excused.
+ */
+export function isHostOwnedConsoleMessage(policy, text) {
+    const subject = String(text ?? "").trim();
+    if (!subject) {
+        return false;
+    }
+    const entries = policy?.host_owned_noise?.console_messages ?? [];
+    return entries.some((entry) => String(entry?.text ?? "").trim() === subject);
+}
+
+/**
+ * Decide who owns each failed request.
+ *
+ * Ownership is settled before the host allowlist is ever consulted, so a URL
+ * under this product's extension base is ours no matter what the allowlist says.
+ * That ordering is what makes a crafted path such as
+ * `/extensions/ComfyUI-OpenClaw/api/userdata/user.css` safe by construction
+ * rather than by the allowlist patterns being written carefully.
+ */
+function pathAndQueryOf(url) {
+    const raw = String(url ?? "");
+    try {
+        const parsed = new URL(raw);
+        return `${parsed.pathname}${parsed.search}`;
+    } catch {
+        const cut = raw.indexOf("#");
+        return cut === -1 ? raw : raw.slice(0, cut);
+    }
+}
+
+export function classifyFailedRequests(
+    requests,
+    { extensionBase, peerBase = "", policy, expectedUrls = [] } = {},
+) {
+    if (!extensionBase) {
+        throw new SubjectError(
+            "classifyFailedRequests needs the extension base the host actually serves; " +
+                "guessing it is how the hardcoded-path defect happened",
+        );
+    }
+    const hostPaths = hostOwnedRequestPaths(policy);
+    // A check may deliberately provoke a request it knows will fail - probing
+    // which directory the host addresses, for instance. Such a request is
+    // declared by the check that causes it, matched whole including its query,
+    // and scoped to that check alone. That is narrower than any allowlist: it
+    // cannot excuse a failure nobody asked for.
+    const expected = new Set(
+        (expectedUrls ?? []).map((entry) => pathAndQueryOf(entry)).filter(Boolean),
+    );
+    const ours = [];
+    const foreign = [];
+    const host = [];
+    const declared = [];
+
+    for (const request of requests ?? []) {
+        const url = typeof request === "string" ? request : String(request?.url ?? "");
+        const label = typeof request === "string" ? url : String(request?.label ?? url);
+        const path = pathOf(url);
+
+        if (expected.has(pathAndQueryOf(url))) {
+            declared.push(label);
+            continue;
+        }
+        if (path.startsWith(extensionBase) || (peerBase && path.startsWith(peerBase))) {
+            ours.push(label);
+            continue;
+        }
+        const otherExtension = /^\/extensions\/[^/]+\//.exec(path);
+        if (otherExtension) {
+            foreign.push(label);
+            continue;
+        }
+        // Only now may the allowlist speak. Equality or a path-segment boundary,
+        // never a bare substring, so `/api/userdata-of-ours` is not excused by an
+        // entry pinning `/api/userdata`.
+        const excused = hostPaths.some(
+            (pinned) => path === pinned || path.startsWith(`${pinned}/`),
+        );
+        if (excused) {
+            host.push(label);
+            continue;
+        }
+        // Unattributable. Kept on the failing side on purpose.
+        ours.push(label);
+    }
+
+    return { ours, foreign, host, declared };
 }

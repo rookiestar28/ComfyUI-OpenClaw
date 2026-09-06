@@ -724,3 +724,60 @@ class TestTheHostCanActuallyLoadTheProduct(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheLaneKnowsWhichNoiseTheHostOwns(unittest.TestCase):
+    """The lane may excuse the host's own startup noise, but only on the record.
+
+    Measured on an isolated host running this product and the peer fixture alone,
+    a stock ComfyUI still produces four 404s for optional files it asks about and
+    one frontend log line about its own initialization. The browser's console text
+    for those 404s carries no URL, so before this block existed they were
+    permanently unattributable and permanently charged to this product.
+    """
+
+    def setUp(self) -> None:
+        with open(POLICY_PATH, encoding="utf-8") as handle:
+            self.policy = json.load(handle)
+        self.noise = self.policy.get("host_owned_noise")
+
+    def test_the_excusable_set_is_pinned_in_the_policy(self) -> None:
+        self.assertIsInstance(
+            self.noise,
+            dict,
+            "host_owned_noise must live in the policy, not hardcoded in the spec, so "
+            "that widening it is a reviewable change to a tracked file.",
+        )
+        self.assertTrue(self.noise.get("requests"))
+        self.assertTrue(self.noise.get("console_messages"))
+
+    def test_every_excused_item_says_why_it_is_the_hosts(self) -> None:
+        for entry in self.noise["requests"]:
+            self.assertTrue(
+                str(entry.get("reason", "")).strip(),
+                f"pinned request {entry.get('path')!r} carries no reason; an "
+                "unexplained exclusion is how an allowlist rots",
+            )
+            self.assertTrue(str(entry.get("path", "")).startswith("/"))
+        for entry in self.noise["console_messages"]:
+            self.assertTrue(str(entry.get("reason", "")).strip())
+            self.assertTrue(str(entry.get("text", "")).strip())
+
+    def test_no_excused_request_belongs_to_this_product(self) -> None:
+        for entry in self.noise["requests"]:
+            path = str(entry["path"])
+            self.assertFalse(
+                path.startswith("/extensions/"),
+                f"pinned request {path!r} sits under /extensions, so it could excuse a "
+                "failure this product owns. Host-owned entries are core routes only.",
+            )
+            self.assertNotIn("openclaw", path.lower())
+
+    def test_the_measurement_behind_the_pins_is_recorded(self) -> None:
+        measured = str(self.noise.get("measured_on", ""))
+        self.assertIn(
+            "0.34.0",
+            measured,
+            "the policy must say which host version these entries were measured on, "
+            "so a future reader can tell whether they still apply",
+        )

@@ -82,5 +82,33 @@
       "validated",
       "failed"
     ]
+  },
+  "host_owned_noise": {
+    "summary": "Requests and frontend messages a stock ComfyUI produces on its own, measured on an isolated host running only this product and the peer fixture. Entries here are only ever consulted for URLs already known not to belong to this product, so nothing here can excuse an OpenClaw failure.",
+    "requests": [
+      {
+        "path": "/api/userdata/user.css",
+        "reason": "ComfyUI asks for the operator's optional custom stylesheet on every load and 404s when they have not created one. Measured on ComfyUI 0.34.0."
+      },
+      {
+        "path": "/user.css",
+        "reason": "The same optional stylesheet, requested a second time at the web root. Same condition, same host."
+      },
+      {
+        "path": "/api/userdata/comfy.templates.json",
+        "reason": "ComfyUI reads the operator's saved workflow templates and 404s when they have saved none. Measured on ComfyUI 0.34.0."
+      },
+      {
+        "path": "/api/userdata",
+        "reason": "The subgraph listing, requested as /api/userdata?dir=subgraphs&recurse=true&split=false&full_info=true, which 404s when the user directory holds no subgraphs. Matched on the path so the query string does not have to be pinned."
+      }
+    ],
+    "console_messages": [
+      {
+        "text": "ComfyApp graph accessed before initialization",
+        "reason": "A ComfyUI frontend log line emitted while its own app object is still constructing. It names no extension and has no companion request, so it can only be recognised by its exact text."
+      }
+    ],
+    "measured_on": "ComfyUI 0.34.0 with frontend package 1.51.9, started with --disable-all-custom-nodes --whitelist-custom-nodes ComfyUI-OpenClaw openclaw-smoke-peer, so that /extensions listed 93 entries: 56 OpenClaw, 36 core, 1 peer, 0 test files."
   }
 }

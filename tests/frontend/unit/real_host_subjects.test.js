@@ -14,6 +14,9 @@ import {
     evaluatePromotedWidget,
     evaluateSidebarGeometry,
     evidenceUpdateIsAllowed,
+    classifyFailedRequests,
+    isContentlessSubresourceEcho,
+    isHostOwnedConsoleMessage,
     partitionBrowserErrors,
     parseHostWebRoot,
     resolveSubject,
@@ -461,5 +464,166 @@ describe("browser error attribution", () => {
 
         expect(ours).toEqual(["Uncaught RangeError: bad index"]);
         expect(foreign).toEqual([]);
+    });
+});
+
+describe("failed request attribution", () => {
+    const BASE = "/extensions/ComfyUI-OpenClaw";
+    const PEER = "/extensions/openclaw-smoke-peer";
+    const options = { extensionBase: BASE, peerBase: PEER, policy: POLICY };
+
+    it("refuses to classify without the base the host actually serves", () => {
+        expect(() => classifyFailedRequests(["/anything"], { policy: POLICY })).toThrow(
+            SubjectError,
+        );
+    });
+
+    it("excuses the host's own optional-file requests, which the console text cannot name", () => {
+        const { ours, host, foreign } = classifyFailedRequests(
+            [
+                "http://127.0.0.1:8199/api/userdata/user.css",
+                "http://127.0.0.1:8199/user.css",
+                "http://127.0.0.1:8199/api/userdata/comfy.templates.json",
+                "http://127.0.0.1:8199/api/userdata?dir=subgraphs&recurse=true",
+            ],
+            options,
+        );
+        expect(ours).toEqual([]);
+        expect(foreign).toEqual([]);
+        expect(host).toHaveLength(4);
+    });
+
+    it("never excuses one of our own requests, even dressed as a host route", () => {
+        // The adversarial case the roadmap named: a URL whose tail matches a
+        // pinned host entry but which is served from our own extension base.
+        const { ours, host } = classifyFailedRequests(
+            [`http://127.0.0.1:8199${BASE}/api/userdata/user.css`],
+            options,
+        );
+        expect(host).toEqual([]);
+        expect(ours).toHaveLength(1);
+    });
+
+    it("does not excuse a path that merely starts with a pinned one", () => {
+        const { ours, host } = classifyFailedRequests(
+            ["http://127.0.0.1:8199/api/userdata-of-ours/secret.json"],
+            options,
+        );
+        expect(host).toEqual([]);
+        expect(ours).toHaveLength(1);
+    });
+
+    it("sets another pack's failed request aside", () => {
+        const { ours, foreign } = classifyFailedRequests(
+            ["http://127.0.0.1:8199/extensions/some-other-pack/thing.js"],
+            options,
+        );
+        expect(ours).toEqual([]);
+        expect(foreign).toHaveLength(1);
+    });
+
+    it("keeps an unattributable failed request on the failing side", () => {
+        const { ours, host, foreign } = classifyFailedRequests(
+            ["http://127.0.0.1:8199/some/route/nobody/claims"],
+            options,
+        );
+        expect(host).toEqual([]);
+        expect(foreign).toEqual([]);
+        expect(ours).toHaveLength(1);
+    });
+
+    it("treats the peer fixture's own requests as ours, not as another pack", () => {
+        const { ours, foreign } = classifyFailedRequests(
+            [`http://127.0.0.1:8199${PEER}/peer_sidebar_tab.js`],
+            options,
+        );
+        expect(foreign).toEqual([]);
+        expect(ours).toHaveLength(1);
+    });
+});
+
+describe("console messages the host owns", () => {
+    it("recognises the contentless subresource echo, which names no file", () => {
+        expect(
+            isContentlessSubresourceEcho(
+                "Failed to load resource: the server responded with a status of 404 (Not Found)",
+            ),
+        ).toBe(true);
+        expect(isContentlessSubresourceEcho("Uncaught TypeError: x is not a function")).toBe(
+            false,
+        );
+    });
+
+    it("matches a pinned host message exactly, not by substring", () => {
+        expect(
+            isHostOwnedConsoleMessage(POLICY, "ComfyApp graph accessed before initialization"),
+        ).toBe(true);
+        expect(
+            isHostOwnedConsoleMessage(
+                POLICY,
+                "OpenClaw broke because ComfyApp graph accessed before initialization",
+            ),
+        ).toBe(false);
+    });
+
+    it("defers the echo to the request classifier and sets the host's own line aside", () => {
+        const { ours, host, echoes } = partitionBrowserErrors(
+            [
+                "Failed to load resource: the server responded with a status of 404 (Not Found)",
+                "ComfyApp graph accessed before initialization",
+                "Uncaught RangeError: bad index",
+            ],
+            { extensionBase: "/extensions/ComfyUI-OpenClaw", policy: POLICY },
+        );
+        expect(echoes).toHaveLength(1);
+        expect(host).toEqual(["ComfyApp graph accessed before initialization"]);
+        expect(ours).toEqual(["Uncaught RangeError: bad index"]);
+    });
+
+    it("sets nothing aside when no policy is supplied, because there is no second judge", () => {
+        const { ours, host, echoes } = partitionBrowserErrors(
+            [
+                "Failed to load resource: the server responded with a status of 404 (Not Found)",
+                "ComfyApp graph accessed before initialization",
+            ],
+            { extensionBase: "/extensions/ComfyUI-OpenClaw" },
+        );
+        expect(host).toEqual([]);
+        expect(echoes).toEqual([]);
+        expect(ours).toHaveLength(2);
+    });
+});
+
+describe("probes a check declares for itself", () => {
+    const BASE = "/extensions/ComfyUI-OpenClaw";
+    const PROBE = "/api/view?filename=scene.glb&type=temp";
+
+    it("sets aside exactly the request the check said it would provoke", () => {
+        const { ours, declared } = classifyFailedRequests(
+            [{ url: `http://127.0.0.1:8199${PROBE}`, label: `404 HEAD ${PROBE}` }],
+            { extensionBase: BASE, policy: POLICY, expectedUrls: [PROBE] },
+        );
+        expect(ours).toEqual([]);
+        expect(declared).toHaveLength(1);
+    });
+
+    it("matches the whole request including its query, not just the route", () => {
+        // Declaring the temp probe must not excuse a different view request that
+        // happens to hit the same route.
+        const { ours, declared } = classifyFailedRequests(
+            ["http://127.0.0.1:8199/api/view?filename=real_output.png&type=output"],
+            { extensionBase: BASE, policy: POLICY, expectedUrls: [PROBE] },
+        );
+        expect(declared).toEqual([]);
+        expect(ours).toHaveLength(1);
+    });
+
+    it("excuses nothing when a check declares nothing", () => {
+        const { ours, declared } = classifyFailedRequests(
+            [`http://127.0.0.1:8199${PROBE}`],
+            { extensionBase: BASE, policy: POLICY },
+        );
+        expect(declared).toEqual([]);
+        expect(ours).toHaveLength(1);
     });
 });

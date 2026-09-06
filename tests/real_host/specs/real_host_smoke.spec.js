@@ -28,6 +28,7 @@ import { expect, test } from '@playwright/test';
 
 import {
   buildHostArgs,
+  classifyFailedRequests,
   detectSubjectMismatch,
   evaluateAnnotatedTempResult,
   evaluatePromotedWidget,
@@ -159,16 +160,40 @@ async function openOpenClawSidebar(page) {
 test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
   const consoleErrors = [];
   const pageErrors = [];
+  // The browser's console text for a failed subresource carries no URL, so the
+  // only object that knows which file failed is the network event. Collecting
+  // these is what lets the run say "this 404 was the host's own optional
+  // stylesheet" instead of charging an unnamed 404 to this product.
+  const failedRequests = [];
+  // A check that deliberately provokes a failing request declares it here, so
+  // the run does not report the check's own probe as an unexplained failure.
+  const declaredProbes = [];
 
   test.beforeEach(async ({ page }) => {
     consoleErrors.length = 0;
     pageErrors.length = 0;
+    failedRequests.length = 0;
+    declaredProbes.length = 0;
     page.on('console', (message) => {
       if (message.type() === 'error') {
         consoleErrors.push(message.text());
       }
     });
     page.on('pageerror', (error) => pageErrors.push(String(error)));
+    page.on('response', (response) => {
+      if (response.status() >= 400) {
+        failedRequests.push({
+          url: response.url(),
+          label: `${response.status()} ${response.request().method()} ${response.url()}`,
+        });
+      }
+    });
+    page.on('requestfailed', (request) => {
+      failedRequests.push({
+        url: request.url(),
+        label: `FAILED ${request.method()} ${request.url()} :: ${request.failure()?.errorText}`,
+      });
+    });
   });
 
   test('the host served the requested frontend subject and not a fallback', async ({ page }) => {
@@ -344,6 +369,14 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
       };
     }, extensionBase);
 
+    // This check asks the host about a temp file it does not have, on purpose:
+    // a 404 still proves which directory was addressed, which is the whole point
+    // of the assertion. Declaring the probe keeps the run from reporting the
+    // check's own deliberate request as an unexplained product failure.
+    if (result?.viewUrl) {
+      declaredProbes.push(result.viewUrl);
+    }
+
     const failures = evaluateAnnotatedTempResult(result);
     expect(failures, failures.join('\n')).toEqual([]);
   });
@@ -390,10 +423,16 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
       return;
     }
 
-    const options = { extensionBase: bases.openclaw, peerBase: bases.peer ?? '' };
+    const options = {
+      extensionBase: bases.openclaw,
+      peerBase: bases.peer ?? '',
+      policy: POLICY,
+    };
+    const requestOptions = { ...options, expectedUrls: declaredProbes };
     const fromPage = partitionBrowserErrors(pageErrors, options);
     const fromConsole = partitionBrowserErrors(consoleErrors, options);
-    const setAside = [...fromPage.foreign, ...fromConsole.foreign];
+    const fromRequests = classifyFailedRequests(failedRequests, requestOptions);
+    const setAside = [...fromPage.foreign, ...fromConsole.foreign, ...fromRequests.foreign];
     if (setAside.length > 0) {
       // Recorded rather than discarded, so the run still shows what the host was
       // doing around the product.
@@ -402,9 +441,19 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
           `${bases.openclaw}:\n  ${setAside.join('\n  ')}`,
       );
     }
+    const hostOwned = [...fromPage.host, ...fromConsole.host, ...fromRequests.host];
+    if (hostOwned.length > 0) {
+      // Also recorded. If one of these ever stops being the host's own, the
+      // pinned entry that excused it is named right here in the run output.
+      console.log(
+        `[real-host] ${hostOwned.length} item(s) excused as the host's own, per ` +
+          `host_owned_noise in tests/real_host_smoke_policy.json:\n  ${hostOwned.join('\n  ')}`,
+      );
+    }
 
     expect(fromPage.ours, fromPage.ours.join('\n')).toEqual([]);
     expect(fromConsole.ours, fromConsole.ours.join('\n')).toEqual([]);
+    expect(fromRequests.ours, fromRequests.ours.join('\n')).toEqual([]);
   });
 });
 
