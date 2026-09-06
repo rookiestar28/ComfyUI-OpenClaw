@@ -1,0 +1,132 @@
+name: Real-Host Frontend Smoke
+
+# A pinned, non-blocking compatibility lane. It starts a real ComfyUI host at an
+# exact commit and checks the surfaces the mocked harness can only imitate.
+#
+# It is deliberately never attached to pull_request or push: repository
+# acceptance stays with the local Windows Full Gate, and a lane that depends on
+# upstream availability must not be able to block a change.
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Mondays 05:00 UTC. Drift is detected on a cadence, not on every push.
+    - cron: '0 5 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-host-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: Resolve pinned subjects
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    outputs:
+      core_head: ${{ steps.pins.outputs.core_head }}
+      release_digest_pinned: ${{ steps.pins.outputs.release_digest_pinned }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+      - name: Read the pinned lane policy
+        id: pins
+        run: python scripts/real_host_smoke.py --emit-pins --github-output "$GITHUB_OUTPUT"
+      - name: Report an unpinned release asset
+        if: steps.pins.outputs.release_digest_pinned != 'true'
+        run: |
+          echo "::notice title=Standalone release subject skipped::The release asset digest in tests/real_host_smoke_policy.json is unset, so the standalone release subject cannot be verified and will not run. Pin it from an authorized download to enable that subject."
+
+  bundled-frontend:
+    name: Bundled frontend subject
+    needs: prepare
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+      - name: Install lane dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Preflight the subject without external actions
+        run: python scripts/real_host_smoke.py --subject bundled --port 18188 --preflight-only
+      - name: Run the real-host smoke
+        env:
+          OPENCLAW_REAL_HOST_SMOKE_AUTHORIZED: '1'
+          OPENCLAW_STATE_DIR: ${{ runner.temp }}/openclaw_state/real_host_bundled
+        run: |
+          python scripts/real_host_smoke.py \
+            --subject bundled \
+            --port 18188 \
+            --workspace "${{ runner.temp }}/real-host-bundled"
+      - name: Upload safe diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: real-host-smoke-bundled
+          path: |
+            .tmp/real-host-smoke/
+            ${{ runner.temp }}/real-host-bundled/host.log
+          retention-days: 14
+
+  standalone-release-frontend:
+    name: Standalone release subject
+    needs: prepare
+    if: needs.prepare.outputs.release_digest_pinned == 'true'
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+      - name: Install lane dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Preflight the subject without external actions
+        run: python scripts/real_host_smoke.py --subject standalone_release --port 18189 --preflight-only
+      - name: Download the pinned release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "${{ runner.temp }}/release-asset"
+          gh release download v1.54.3 \
+            --repo Comfy-Org/ComfyUI_frontend \
+            --pattern dist.zip \
+            --dir "${{ runner.temp }}/release-asset"
+      - name: Run the real-host smoke
+        env:
+          OPENCLAW_REAL_HOST_SMOKE_AUTHORIZED: '1'
+          OPENCLAW_STATE_DIR: ${{ runner.temp }}/openclaw_state/real_host_release
+        run: |
+          python scripts/real_host_smoke.py \
+            --subject standalone_release \
+            --port 18189 \
+            --workspace "${{ runner.temp }}/real-host-release" \
+            --release-asset "${{ runner.temp }}/release-asset/dist.zip"
+      - name: Upload safe diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: real-host-smoke-standalone-release
+          path: |
+            .tmp/real-host-smoke/
+            ${{ runner.temp }}/real-host-release/host.log
+          retention-days: 14

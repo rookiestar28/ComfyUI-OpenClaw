@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "lane": {
+    "name": "real-host-frontend-smoke",
+    "workflow": ".github/workflows/real_host_smoke.yml",
+    "blocking": false,
+    "triggers": [
+      "workflow_dispatch",
+      "schedule"
+    ],
+    "forbidden_triggers": [
+      "pull_request",
+      "push"
+    ]
+  },
+  "core": {
+    "repository": "https://github.com/comfyanonymous/ComfyUI.git",
+    "source_head": "31dfbd4ca0cb36ab6a573fc13daec8cc3a2e1e98",
+    "project_version": "0.34.0",
+    "bundled_frontend_version": "1.51.9"
+  },
+  "subjects": {
+    "bundled": {
+      "id": "bundled",
+      "frontend_version": "1.51.9",
+      "front_end_version_arg": null,
+      "summary": "The frontend package the core manifest pins. The host serves it when no frontend version is requested."
+    },
+    "standalone_release": {
+      "id": "standalone_release",
+      "frontend_version": "1.54.3",
+      "front_end_version_arg": "Comfy-Org/ComfyUI_frontend@v1.54.3",
+      "release_tag": "v1.54.3",
+      "release_tag_commit": "b2f5587509d744d7779accce193db53f36a91d4a",
+      "release_asset_name": "dist.zip",
+      "release_asset_sha256": null,
+      "web_root_relative": "web_custom_versions/Comfy-Org_ComfyUI_frontend/1.54.3",
+      "summary": "The reproducible standalone release. Its asset digest is unset, so this subject refuses to run until an authorized run pins it."
+    }
+  },
+  "not_executed": {
+    "frontend_source_head": "9ff3fd7f0e36b810a621288ceaf6e74e3846bedd",
+    "frontend_source_describe": "v1.54.3-21-g9ff3fd7f0e",
+    "reason": "A reviewed checkout 21 commits ahead of the release. The host can reproduce the release, not this commit, so no runtime evidence may name it."
+  },
+  "deadlines_seconds": {
+    "install": 1800,
+    "startup": 300,
+    "smoke": 900,
+    "teardown": 120
+  },
+  "runtime": {
+    "bind_host": "127.0.0.1",
+    "required_args": [
+      "--cpu",
+      "--disable-auto-launch"
+    ],
+    "forbidden_args": [
+      "--enable-cors-header",
+      "--tls-keyfile",
+      "--tls-certfile",
+      "--front-end-root"
+    ],
+    "allowed_bind_hosts": [
+      "127.0.0.1",
+      "::1"
+    ],
+    "health_path": "/openclaw/health"
+  },
+  "geometry": {
+    "sidebar_min_width_px": 560
+  },
+  "evidence": {
+    "matrix_path": "docs/release/compatibility_matrix.md",
+    "surface_module": "web/openclaw_host_surface.js",
+    "evidence_key": "real_host",
+    "current_state": "pending",
+    "states_requiring_run_id": [
+      "validated",
+      "failed"
+    ]
+  }
+}
