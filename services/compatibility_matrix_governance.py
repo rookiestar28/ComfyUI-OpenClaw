@@ -404,7 +404,10 @@ def _validate_evidence_states(states: Any) -> list[dict[str, Any]]:
                         ),
                     }
                 )
-        elif not isinstance(evidence_id, str) or EVIDENCE_ID_RE.match(evidence_id) is None:
+        elif (
+            not isinstance(evidence_id, str)
+            or EVIDENCE_ID_RE.match(evidence_id) is None
+        ):
             violations.append(
                 {
                     "code": "R254_EVIDENCE_ID_FORMAT",
@@ -646,7 +649,9 @@ def validate_metadata(
                 )
 
     if schema_version == 3:
-        violations.extend(_validate_reference_baselines(metadata.get("reference_baselines")))
+        violations.extend(
+            _validate_reference_baselines(metadata.get("reference_baselines"))
+        )
         violations.extend(_validate_evidence_states(metadata.get("evidence_states")))
 
     age_days: Optional[int] = None

@@ -13,8 +13,8 @@ from datetime import date
 from pathlib import Path
 
 from services.compatibility_matrix_governance import (
-    build_reference_evidence_projection,
     build_host_surface_contract,
+    build_reference_evidence_projection,
     detect_anchor_drift,
     read_matrix_document,
     run_refresh_workflow,
@@ -491,9 +491,7 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
             "policy": {"warn_age_days": 30, "max_age_days": 45},
             "anchors": dict(EXPECTED_CURRENT_ANCHORS),
             "host_surfaces": json.loads(json.dumps(EXPECTED_HOST_SURFACES)),
-            "reference_baselines": json.loads(
-                json.dumps(EXPECTED_REFERENCE_BASELINES)
-            ),
+            "reference_baselines": json.loads(json.dumps(EXPECTED_REFERENCE_BASELINES)),
             "evidence_states": {
                 "source_review": {
                     "state": "reviewed",
@@ -601,9 +599,9 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
 
     def test_evidence_identifiers_must_be_distinct(self):
         metadata = self._schema3()
-        metadata["evidence_states"]["repository_validation"]["evidence_id"] = (
-            "source-review-20260905"
-        )
+        metadata["evidence_states"]["repository_validation"][
+            "evidence_id"
+        ] = "source-review-20260905"
         validation, codes = self._codes(metadata)
         self.assertFalse(validation["ok"])
         self.assertIn("R254_EVIDENCE_ID_SHARED", codes)
