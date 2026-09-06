@@ -20,7 +20,9 @@ import zipfile
 from pathlib import Path
 
 from scripts.real_host_smoke import (
+    ADMIN_TOKEN_ENV,
     AUTHORIZATION_ENV,
+    DANGEROUS_BIND_OVERRIDE_ENV,
     PEER_FIXTURE_SOURCE,
     HostPaths,
     SmokeError,
@@ -33,6 +35,7 @@ from scripts.real_host_smoke import (
     readiness_url,
     release_digest_is_pinned,
     resolve_subject,
+    start_host,
     stop_host,
     verify_and_extract_release_asset,
     verify_core_checkout,
@@ -675,6 +678,50 @@ class TestTheFetchBudgetBoundsThePhase(unittest.TestCase):
             )
 
         self.assertIn("exceeded its 100.0s budget", str(caught.exception))
+
+
+class TestTheHostCanActuallyLoadTheProduct(unittest.TestCase):
+    """A lane whose own startup argument makes the product refuse to load is useless."""
+
+    def _start_and_capture_env(self):
+        captured = {}
+
+        class FakePopen:
+            def __init__(self, command, **kwargs):
+                captured["command"] = command
+                captured["env"] = kwargs.get("env")
+
+        with unittest.mock.patch(
+            "scripts.real_host_smoke.subprocess.Popen", FakePopen
+        ):
+            workspace = Path(tempfile.mkdtemp())
+            _process, handle = start_host(
+                POLICY, resolve_subject(POLICY, "bundled"), HostPaths(workspace), 18188
+            )
+            handle.close()
+        return captured
+
+    def test_the_lane_authenticates_the_host_it_binds_explicitly(self):
+        # services/security_gate.py treats any --listen as exposure and raises
+        # rather than warns, so a host started without a token loads no OpenClaw
+        # at all and every assertion in this lane would pass over an absent
+        # product.
+        captured = self._start_and_capture_env()
+
+        self.assertIn("--listen", captured["command"])
+        token = captured["env"][ADMIN_TOKEN_ENV]
+        self.assertIsInstance(token, str)
+        self.assertGreaterEqual(len(token), 16)
+
+    def test_the_lane_never_disables_the_products_own_bind_check(self):
+        # The gate offers an override. A compatibility lane that used it would be
+        # validating the product with the product's safety check switched off.
+        captured = self._start_and_capture_env()
+
+        self.assertNotIn(DANGEROUS_BIND_OVERRIDE_ENV, captured["env"])
+        source = Path("scripts/real_host_smoke.py").read_text(encoding="utf-8")
+        self.assertNotIn(f'{DANGEROUS_BIND_OVERRIDE_ENV}"] = ', source)
+        self.assertNotIn("DANGEROUS_BIND_OVERRIDE_ENV] = ", source)
 
 
 if __name__ == "__main__":

@@ -30,6 +30,7 @@ import hashlib
 import json
 import ntpath
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -51,6 +52,10 @@ PEER_FIXTURE_SOURCE = (
 )
 PEER_FIXTURE_DIR_NAME = "openclaw-smoke-peer"
 AUTHORIZATION_ENV = "OPENCLAW_REAL_HOST_SMOKE_AUTHORIZED"
+# The product refuses to start when it is bound explicitly without authentication,
+# so the lane supplies a token rather than disabling the check that says so.
+ADMIN_TOKEN_ENV = "OPENCLAW_ADMIN_TOKEN"
+DANGEROUS_BIND_OVERRIDE_ENV = "OPENCLAW_SECURITY_DANGEROUS_BIND_OVERRIDE"
 SHA256_HEX_LENGTH = 64
 READINESS_POLL_SECONDS = 2.0
 COPY_EXCLUSIONS = (
@@ -417,9 +422,22 @@ def start_host(
 
     The log handle is returned rather than left to the garbage collector, so
     teardown can close it deterministically on every path.
+
+    The host is given a per-run admin token because the lane binds explicitly.
+    `services/security_gate.py` treats the presence of `--listen` as exposure -
+    deliberately, since a bare `--listen` means every interface - and refuses to
+    start without authentication. Without a token the product does not merely warn:
+    it raises and ComfyUI reports `IMPORT FAILED`, so every assertion in this lane
+    would run against a host with no OpenClaw in it. A random per-run token is what
+    a correct operator binding explicitly would set, and it is used rather than
+    `OPENCLAW_SECURITY_DANGEROUS_BIND_OVERRIDE` because a compatibility lane must
+    not validate the product with the product's own safety check disabled.
     """
     args = build_host_args(policy, subject, port)
     paths.log_file.parent.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    env[ADMIN_TOKEN_ENV] = secrets.token_urlsafe(32)
+    env.pop(DANGEROUS_BIND_OVERRIDE_ENV, None)
     handle = paths.log_file.open("wb")
     try:
         process = subprocess.Popen(
@@ -427,6 +445,7 @@ def start_host(
             cwd=str(paths.core),
             stdout=handle,
             stderr=subprocess.STDOUT,
+            env=env,
         )
     except BaseException:
         handle.close()
