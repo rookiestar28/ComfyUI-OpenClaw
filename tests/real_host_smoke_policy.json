@@ -44,6 +44,7 @@
     "reason": "A reviewed checkout 21 commits ahead of the release. The host can reproduce the release, not this commit, so no runtime evidence may name it."
   },
   "deadlines_seconds": {
+    "fetch": 900,
     "install": 1800,
     "startup": 300,
     "smoke": 900,

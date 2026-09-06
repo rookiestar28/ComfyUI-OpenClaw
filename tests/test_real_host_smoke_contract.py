@@ -11,6 +11,9 @@ evidence cannot advance without a run identifier.
 
 import io
 import json
+import re
+import subprocess
+import tempfile
 import unittest
 import zipfile
 from pathlib import Path
@@ -27,6 +30,7 @@ from scripts.real_host_smoke import (
     readiness_url,
     release_digest_is_pinned,
     resolve_subject,
+    stop_host,
     verify_and_extract_release_asset,
     verify_core_checkout,
     wait_for_host,
@@ -221,7 +225,9 @@ class TestHostStartupIsBoundedAndLoopbackOnly(unittest.TestCase):
     def test_every_phase_declares_a_finite_deadline(self):
         deadlines = POLICY["deadlines_seconds"]
 
-        self.assertEqual(set(deadlines), {"install", "startup", "smoke", "teardown"})
+        self.assertEqual(
+            set(deadlines), {"fetch", "install", "startup", "smoke", "teardown"}
+        )
         for phase, seconds in deadlines.items():
             with self.subTest(phase=phase):
                 self.assertIsInstance(seconds, int)
@@ -415,6 +421,187 @@ class TestRuntimeEvidenceNeverNamesAnUnexecutedCommit(unittest.TestCase):
         self.assertIn(f"core_head={POLICY['core']['source_head']}", rendered)
         self.assertIn("release_digest_pinned=false", rendered)
         self.assertNotIn(POLICY["not_executed"]["frontend_source_head"], rendered)
+
+
+class TestSpecUsesSurfacesThatExistOutsideTheMock(unittest.TestCase):
+    """A real-host spec built on harness-only selectors fails on every real host.
+
+    The mocked harness creates DOM that the real frontend does not: it gives the
+    custom-tab mount an id, while the real frontend mounts a custom tab into a
+    bare div. Borrowing those selectors produces a spec that reviews well and can
+    never pass, so each surface the spec depends on is checked against product
+    code here.
+    """
+
+    def setUp(self):
+        self.spec = SPEC_PATH.read_text(encoding="utf-8")
+        self.asset_refs = (REPO_ROOT / "web" / "openclaw_asset_refs.js").read_text(
+            encoding="utf-8"
+        )
+
+    def test_the_spec_never_uses_the_harness_only_mount_id(self):
+        harness_only = "sidebar-tab-comfyui-openclaw"
+        product_files = list((REPO_ROOT / "web").rglob("*.js"))
+        in_product = [
+            path.name
+            for path in product_files
+            if "tests" not in path.parts
+            and harness_only in path.read_text(encoding="utf-8")
+        ]
+
+        self.assertEqual(
+            in_product,
+            [],
+            "the mount id is created by the mocked harness, not by the product",
+        )
+        # The spec is allowed to name it in prose - it explains why it is not
+        # used - so only executable code is checked.
+        code = re.sub(r"/\*.*?\*/", "", self.spec, flags=re.S)
+        code = re.sub(r"^\s*//.*$", "", code, flags=re.M)
+        hits = [line.strip() for line in code.splitlines() if harness_only in line]
+        self.assertEqual(hits, [], f"harness-only selector used in spec code: {hits}")
+
+    def test_the_spec_finds_the_mount_by_the_attribute_openclaw_itself_stamps(self):
+        self.assertIn("[data-openclaw-host-surface]", self.spec)
+        surface = (REPO_ROOT / "web" / "openclaw_host_surface.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("openclawHostSurface", surface)
+
+    def test_every_asset_ref_function_the_spec_calls_is_exported_by_the_product(self):
+        called = set(re.findall(r"module\.([A-Za-z0-9_]+)\(", self.spec))
+        exported = set(
+            re.findall(r"^export function ([A-Za-z0-9_]+)", self.asset_refs, re.M)
+        )
+
+        self.assertTrue(
+            called, "the spec should exercise at least one asset-ref export"
+        )
+        self.assertEqual(called - exported, set(), f"exported: {sorted(exported)}")
+
+    def test_the_spec_uses_a_settings_selector_the_product_actually_renders(self):
+        settings = (REPO_ROOT / "web" / "tabs" / "settings_tab.js").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("openclaw-settings-scroll", self.spec)
+        self.assertIn("openclaw-settings-scroll", settings)
+
+    def test_the_rightmost_control_is_measured_rather_than_guessed_by_position(self):
+        # The tab count varies with capabilities, so a fixed position would
+        # silently measure a middle tab and miss an overflow at the right edge.
+        self.assertNotIn("nth-child(4)", self.spec)
+        self.assertIn("getBoundingClientRect().right", self.spec)
+
+    def test_the_spec_switches_tabs_through_an_api_the_host_provides(self):
+        self.assertIn("toggleSidebarTab", self.spec)
+        # A setter by this name does not exist on the host store; relying on it
+        # would leave the real call path untested.
+        self.assertNotIn("setSidebarTab", self.spec)
+
+    def test_the_peer_fixture_registers_the_way_the_product_does(self):
+        peer = (PEER_FIXTURE_SOURCE / "web" / "peer_sidebar_tab.js").read_text(
+            encoding="utf-8"
+        )
+        helper = (REPO_ROOT / "web" / "openclaw_sidebar_registration.js").read_text(
+            encoding="utf-8"
+        )
+
+        for source in (peer, helper):
+            self.assertIn("sidebarTab?.registerSidebarTab", source)
+        # A missing API must throw, not optional-chain into a silent no-op.
+        self.assertIn("no sidebar registration API", peer)
+
+
+class TestTheCopyStepExcludesWhatItClaims(unittest.TestCase):
+    def test_the_repository_is_copied_with_exclusions_and_never_symlinked(self):
+        source = (REPO_ROOT / "scripts" / "real_host_smoke.py").read_text(
+            encoding="utf-8"
+        )
+
+        # A symlink of the repository root would place the git directory, the
+        # virtualenv and the read-only reference checkout inside a live host.
+        hits = [line.strip() for line in source.splitlines() if "symlink_to" in line]
+        self.assertEqual(hits, [], f"repository must be copied, not symlinked: {hits}")
+        self.assertIn("shutil.copytree", source)
+        for excluded in ("reference", ".git", ".venv", ".planning"):
+            self.assertIn(f'"{excluded}"', source)
+
+    def test_this_repository_declares_dependencies_the_host_does_not_provide(self):
+        own = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
+        source = (REPO_ROOT / "scripts" / "real_host_smoke.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("cryptography", own)
+        # Installing only the host requirements would run the product in a
+        # weaker environment than any real install.
+        self.assertIn('REPO_ROOT / "requirements.txt"', source)
+
+    def test_an_absolute_or_drive_relative_archive_member_is_refused(self):
+        import hashlib
+        import tempfile
+        import zipfile as zf
+
+        for member in ("/etc/passwd", "C:evil.txt", "C:\\Windows\\evil.txt"):
+            with self.subTest(member=member):
+                directory = Path(tempfile.mkdtemp())
+                archive = directory / "dist.zip"
+                buffer = io.BytesIO()
+                with zf.ZipFile(buffer, "w") as bundle:
+                    bundle.writestr(member, b"nope")
+                archive.write_bytes(buffer.getvalue())
+
+                release = dict(resolve_subject(POLICY, "standalone_release"))
+                release["release_asset_sha256"] = hashlib.sha256(
+                    archive.read_bytes()
+                ).hexdigest()
+                with self.assertRaises(SmokeError) as caught:
+                    verify_and_extract_release_asset(
+                        archive, release, directory / "out"
+                    )
+                self.assertIn("member", str(caught.exception))
+
+
+class TestTeardownReleasesWhatItOpened(unittest.TestCase):
+    def test_the_host_log_handle_is_closed_by_teardown(self):
+        class FakeProcess:
+            returncode = 0
+
+            def poll(self):
+                return 0
+
+        handle = (Path(tempfile.mkdtemp()) / "host.log").open("wb")
+        self.addCleanup(lambda: handle.closed or handle.close())
+
+        stop_host(FakeProcess(), 1.0, handle)
+
+        self.assertTrue(handle.closed)
+
+    def test_teardown_closes_the_log_even_when_the_host_will_not_stop(self):
+        class StubbornProcess:
+            returncode = None
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                return None
+
+            def kill(self):
+                self.returncode = -9
+
+            def wait(self, timeout=None):
+                if self.returncode is None:
+                    raise subprocess.TimeoutExpired("host", timeout)
+                return self.returncode
+
+        handle = (Path(tempfile.mkdtemp()) / "host.log").open("wb")
+        self.addCleanup(lambda: handle.closed or handle.close())
+
+        stop_host(StubbornProcess(), 0.01, handle)
+
+        self.assertTrue(handle.closed)
 
 
 if __name__ == "__main__":

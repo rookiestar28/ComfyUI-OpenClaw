@@ -19,6 +19,27 @@ export const STANDALONE_RELEASE_SUBJECT = "standalone_release";
  */
 export const FRONTEND_FALLBACK_LOG_MARKER = "Falling back to the default frontend.";
 
+/**
+ * The host prints the directory it actually resolved the frontend from.
+ *
+ * This has to be read back from the host, not computed from the same policy the
+ * lane used to request the subject. Comparing a policy value against itself
+ * would look like a third signal while being incapable of ever disagreeing.
+ */
+export const HOST_WEB_ROOT_LOG_PREFIX = "[Prompt Server] web root:";
+
+export function parseHostWebRoot(logText) {
+    const lines = String(logText ?? "").split(/\r?\n/);
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+        const at = lines[index].indexOf(HOST_WEB_ROOT_LOG_PREFIX);
+        if (at !== -1) {
+            const value = lines[index].slice(at + HOST_WEB_ROOT_LOG_PREFIX.length).trim();
+            return value === "" ? null : value;
+        }
+    }
+    return null;
+}
+
 export class SubjectError extends Error {}
 
 export function resolveSubject(policy, subjectId) {
@@ -96,6 +117,13 @@ export function buildHostArgs(policy, subject, { port, extraArgs = [] } = {}) {
  * All three signals are returned together rather than short-circuiting, because
  * a fallback that trips only one of them is the interesting case: it means the
  * lane's other detectors would have missed it.
+ *
+ * Every input must be something the host reported: the version the browser sees,
+ * the host's own log, and the web root parsed out of that log. A caller that
+ * passes back the policy value it requested turns the third check into a
+ * comparison of one constant against itself, so `resolvedWebRoot` is documented
+ * as host-observed and a missing value is treated as a failure rather than a
+ * pass.
  */
 export function detectSubjectMismatch({
     subject,
@@ -119,12 +147,18 @@ export function detectSubjectMismatch({
     }
 
     if (subject.web_root_relative) {
-        const normalized = String(resolvedWebRoot ?? "").replace(/\\/g, "/");
-        if (!normalized.endsWith(subject.web_root_relative)) {
+        if (resolvedWebRoot === null || resolvedWebRoot === "") {
             failures.push(
-                `host served web root ${resolvedWebRoot ?? "(unknown)"}, expected one ending in ` +
-                    subject.web_root_relative,
+                "host never reported the web root it resolved, so the served frontend is unverified",
             );
+        } else {
+            const normalized = String(resolvedWebRoot).replace(/\\/g, "/").replace(/\/+$/, "");
+            if (!normalized.endsWith(subject.web_root_relative)) {
+                failures.push(
+                    `host served web root ${resolvedWebRoot}, expected one ending in ` +
+                        subject.web_root_relative,
+                );
+            }
         }
     }
 

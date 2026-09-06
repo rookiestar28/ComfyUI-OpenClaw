@@ -19,7 +19,23 @@ export const PEER_CONTENT_ID = "openclaw-smoke-peer-content";
 app.registerExtension({
     name: "openclaw.smoke.peer",
     async setup() {
-        app.extensionManager?.registerSidebarTab?.({
+        // Register through the same two-step the product uses: the current
+        // sidebar store first, the deprecated facade only as a fallback. An
+        // optional-chained call on a missing API would silently do nothing and
+        // turn the handover check into an unexplained timeout, so a missing API
+        // throws instead.
+        const current = app?.extensionManager?.sidebarTab?.registerSidebarTab;
+        const legacy = app?.extensionManager?.registerSidebarTab;
+        const register =
+            typeof current === "function"
+                ? current.bind(app.extensionManager.sidebarTab)
+                : typeof legacy === "function"
+                  ? legacy.bind(app.extensionManager)
+                  : null;
+        if (register === null) {
+            throw new Error("smoke peer: host exposes no sidebar registration API");
+        }
+        register({
             id: PEER_TAB_ID,
             icon: "pi pi-bookmark",
             title: "Smoke Peer",

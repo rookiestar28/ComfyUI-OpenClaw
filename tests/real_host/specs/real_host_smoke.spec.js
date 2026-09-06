@@ -9,6 +9,13 @@
  * the temporary directory, and that OpenClaw releases the shared mount when the
  * host hands it to another custom tab without calling a destroy callback.
  *
+ * HOTSPOT: selectors here must be owned by the host or by OpenClaw, never by the
+ * mocked harness. `#sidebar-tab-comfyui-openclaw`, for example, exists only
+ * because our own mock creates it; the real frontend mounts a custom tab into a
+ * bare `<div>` with no id. The mount is therefore found by the attribute OpenClaw
+ * itself stamps on it. Borrowing a selector from the harness would produce a spec
+ * that fails on every real host while passing in review.
+ *
  * The lane runs only through `scripts/real_host_smoke.py`, which starts the host,
  * waits for its health route, and tears it down. This file assumes a host is
  * already up at the configured loopback origin.
@@ -25,6 +32,7 @@ import {
   evaluateAnnotatedTempResult,
   evaluatePromotedWidget,
   evaluateSidebarGeometry,
+  parseHostWebRoot,
   resolveSubject,
 } from '../helpers/real_host_subjects.js';
 
@@ -34,9 +42,15 @@ const POLICY = JSON.parse(
 );
 const SUBJECT = resolveSubject(POLICY, process.env.OPENCLAW_REAL_HOST_SUBJECT ?? 'bundled');
 const HOST_LOG_PATH = process.env.OPENCLAW_REAL_HOST_LOG ?? '';
-const HOST_WEB_ROOT = process.env.OPENCLAW_REAL_HOST_WEB_ROOT || null;
-const OPENCLAW_MOUNT_ID = '#sidebar-tab-comfyui-openclaw';
+
+const OPENCLAW_TAB_ID = 'comfyui-openclaw';
 const PEER_TAB_ID = 'openclaw-smoke-peer';
+// OpenClaw stamps this on whatever container the host hands it, so it is the one
+// mount marker that exists on a real host.
+const OPENCLAW_MOUNT = '[data-openclaw-host-surface]';
+// The root element OpenClaw builds inside that mount.
+const OPENCLAW_ROOT = '.openclaw-sidebar-container';
+const PEER_CONTENT = '#openclaw-smoke-peer-content';
 
 function readHostLog() {
   if (!HOST_LOG_PATH) {
@@ -49,14 +63,39 @@ function readHostLog() {
   }
 }
 
+/**
+ * Open a sidebar tab through the host's own store.
+ *
+ * `toggleSidebarTab` is a toggle, not a setter: calling it on the already-active
+ * tab closes the panel. It is therefore only called when the tab is not already
+ * active, and a missing API throws rather than silently doing nothing, because a
+ * silent no-op would turn every downstream assertion into a timeout with no
+ * explanation.
+ */
+async function activateSidebarTab(page, tabId) {
+  await page.waitForFunction(
+    () => Boolean(window.app?.extensionManager?.sidebarTab),
+    null,
+    { timeout: 90_000 },
+  );
+  await page.evaluate((id) => {
+    const store = window.app.extensionManager.sidebarTab;
+    if (typeof store.toggleSidebarTab !== 'function') {
+      throw new Error('host sidebar store exposes no toggleSidebarTab');
+    }
+    const active =
+      store.activeSidebarTabId?.value ?? store.activeSidebarTabId ?? null;
+    if (active !== id) {
+      store.toggleSidebarTab(id);
+    }
+  }, tabId);
+}
+
 async function openOpenClawSidebar(page) {
   await page.goto('/');
-  await page.waitForFunction(() => Boolean(window.app?.extensionManager), null, { timeout: 90_000 });
-  await page.evaluate((tabId) => {
-    window.app.extensionManager.setSidebarTab?.(tabId) ??
-      window.app.extensionManager.sidebarTab?.toggleSidebarTab?.(tabId);
-  }, 'comfyui-openclaw');
-  await page.waitForSelector(OPENCLAW_MOUNT_ID, { timeout: 60_000 });
+  await activateSidebarTab(page, OPENCLAW_TAB_ID);
+  await page.waitForSelector(OPENCLAW_MOUNT, { timeout: 60_000 });
+  await page.waitForSelector(OPENCLAW_ROOT, { timeout: 60_000 });
 }
 
 test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
@@ -89,11 +128,14 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
       return stats?.system?.comfyui_frontend_version ?? null;
     });
 
+    const hostLogText = readHostLog();
     const failures = detectSubjectMismatch({
       subject: SUBJECT,
       reportedFrontendVersion,
-      hostLogText: readHostLog(),
-      resolvedWebRoot: HOST_WEB_ROOT,
+      hostLogText,
+      // Read back from the host's own log, never echoed from the policy that
+      // requested the subject.
+      resolvedWebRoot: parseHostWebRoot(hostLogText),
     });
 
     expect(failures, failures.join('\n')).toEqual([]);
@@ -112,7 +154,7 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
   test('the host loads the plugin and stamps its sidebar surface', async ({ page }) => {
     await openOpenClawSidebar(page);
 
-    const stamp = await page.getAttribute(OPENCLAW_MOUNT_ID, 'data-openclaw-host-surface');
+    const stamp = await page.getAttribute(OPENCLAW_MOUNT, 'data-openclaw-host-surface');
     expect(stamp).toBe('standalone_frontend');
 
     const capabilities = await page.evaluate(async () => {
@@ -133,8 +175,10 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
     expect(jobs.ok).toBe(true);
     expect(Array.isArray(jobs.body?.jobs)).toBe(true);
 
+    // The settings pane renders its own scroll region; that id is owned by
+    // OpenClaw, unlike any class the harness happens to add.
     await page.click('.openclaw-tabs .openclaw-tab:has-text("Settings")');
-    await expect(page.locator('.openclaw-settings')).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('#openclaw-settings-scroll')).toBeVisible({ timeout: 30_000 });
   });
 
   test('the sidebar reaches its floor and keeps every control inside the boundary', async ({
@@ -143,22 +187,35 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
     await openOpenClawSidebar(page);
 
     const geometry = await page.evaluate(() => {
-      const rect = (selector) => {
-        const element = document.querySelector(selector);
+      const rect = (element) => {
         if (!element) {
           return null;
         }
         const box = element.getBoundingClientRect();
         return { left: box.left, right: box.right, width: box.width };
       };
+      // The rightmost control has to be measured, not guessed by position: the
+      // tab count varies with capabilities, so a fixed nth-child would silently
+      // measure a middle tab and miss an overflow at the real right edge.
+      const tabs = Array.from(document.querySelectorAll('.openclaw-tabs .openclaw-tab'));
+      const rightmost = tabs.reduce((furthest, candidate) => {
+        if (furthest === null) {
+          return candidate;
+        }
+        return candidate.getBoundingClientRect().right > furthest.getBoundingClientRect().right
+          ? candidate
+          : furthest;
+      }, null);
       return {
-        panel: rect('.side-bar-panel'),
-        content: rect('.sidebar-content-container'),
-        mount: rect('#sidebar-tab-comfyui-openclaw'),
-        rightmostControl: rect('.openclaw-tabs .openclaw-tab:nth-child(4)'),
+        tabCount: tabs.length,
+        panel: rect(document.querySelector('.side-bar-panel')),
+        content: rect(document.querySelector('.sidebar-content-container')),
+        mount: rect(document.querySelector('[data-openclaw-host-surface]')),
+        rightmostControl: rect(rightmost),
       };
     });
 
+    expect(geometry.tabCount).toBeGreaterThan(0);
     const failures = evaluateSidebarGeometry(geometry, POLICY.geometry.sidebar_min_width_px);
     expect(failures, failures.join('\n')).toEqual([]);
   });
@@ -168,7 +225,9 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
 
     const widget = await page.evaluate(async () => {
       const graph = window.app?.graph;
-      const node = graph?.nodes?.find((candidate) => Array.isArray(candidate.widgets) && candidate.widgets.length > 0);
+      const node = graph?.nodes?.find(
+        (candidate) => Array.isArray(candidate.widgets) && candidate.widgets.length > 0,
+      );
       if (!node) {
         return null;
       }
@@ -196,15 +255,30 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
 
     const result = await page.evaluate(async () => {
       const module = await import('/extensions/comfyui-openclaw/openclaw_asset_refs.js');
-      const refs = module.collectAssetRefs({
+      // The annotated form is a flat entry: result[0] is the string itself, not
+      // a nested array. A nested fixture normalizes to nothing and would make
+      // this check vacuously report "no refs" rather than exercise the path.
+      const refs = module.extractHistoryOutputRefs({
         outputs: {
           9: {
-            result: [['scene.glb [temp]']],
+            result: ['scene.glb [temp]'],
           },
         },
       });
       const first = refs?.[0] ?? null;
-      return first === null ? null : { viewUrl: first.viewUrl ?? first.url ?? '', visible: true };
+      if (first === null) {
+        return null;
+      }
+      const params = new URLSearchParams(first.viewParams ?? {});
+      const response = await fetch(`/api/view?${params.toString()}`, { method: 'HEAD' });
+      return {
+        viewUrl: `/api/view?${params.toString()}`,
+        // The host answers for a temp path it does not have with 404; what this
+        // check proves is which directory was addressed, so any answer that is
+        // not a server error counts as the route having been reached.
+        visible: response.status < 500,
+        directoryType: first.type,
+      };
     });
 
     const failures = evaluateAnnotatedTempResult(result);
@@ -216,26 +290,25 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
   }) => {
     await openOpenClawSidebar(page);
 
-    const before = await page.getAttribute(OPENCLAW_MOUNT_ID, 'data-openclaw-host-surface');
+    const before = await page.getAttribute(OPENCLAW_MOUNT, 'data-openclaw-host-surface');
     expect(before).toBe('standalone_frontend');
 
-    await page.evaluate((tabId) => {
-      window.app.extensionManager.setSidebarTab?.(tabId) ??
-        window.app.extensionManager.sidebarTab?.toggleSidebarTab?.(tabId);
-    }, PEER_TAB_ID);
-    await page.waitForSelector('#openclaw-smoke-peer-content', { timeout: 30_000 });
+    await activateSidebarTab(page, PEER_TAB_ID);
+    await page.waitForSelector(PEER_CONTENT, { timeout: 30_000 });
 
-    const after = await page.evaluate(() => {
-      const mount = document.querySelector('.sidebar-content-container') ?? document.body;
-      const peer = document.querySelector('#openclaw-smoke-peer-content');
-      return {
-        peerMounted: peer?.dataset.openclawSmokePeer === 'mounted',
-        openclawMarkerRemoved: mount.querySelector('[data-openclaw-host-surface]') === null,
-      };
-    });
+    const after = await page.evaluate(
+      (selectors) => ({
+        peerMounted:
+          document.querySelector(selectors.peer)?.dataset.openclawSmokePeer === 'mounted',
+        openclawMarkerRemoved: document.querySelector(selectors.mount) === null,
+        openclawRootRemoved: document.querySelector(selectors.root) === null,
+      }),
+      { peer: PEER_CONTENT, mount: OPENCLAW_MOUNT, root: OPENCLAW_ROOT },
+    );
 
     expect(after.peerMounted).toBe(true);
     expect(after.openclawMarkerRemoved).toBe(true);
+    expect(after.openclawRootRemoved).toBe(true);
   });
 
   test.afterEach(async () => {

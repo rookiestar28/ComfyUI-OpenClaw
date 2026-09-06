@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import ntpath
 import os
 import shutil
 import subprocess
@@ -38,8 +39,8 @@ import urllib.request
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+from pathlib import Path, PurePosixPath
+from typing import IO, Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_POLICY_PATH = REPO_ROOT / "tests" / "real_host_smoke_policy.json"
@@ -84,10 +85,6 @@ class HostPaths:
     @property
     def log_file(self) -> Path:
         return self.workspace / "host.log"
-
-    @property
-    def artifact_dir(self) -> Path:
-        return self.workspace / "artifacts"
 
     def web_root_for(self, subject: dict[str, Any]) -> Path | None:
         relative = subject.get("web_root_relative")
@@ -223,18 +220,23 @@ def verify_core_checkout(core_dir: Path, expected_head: str) -> str:
 
 
 def install_dependencies(paths: HostPaths, timeout: float) -> None:
-    """Install the host's own declared requirements, and nothing beyond them."""
-    _run(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "-r",
-            str(paths.core / "requirements.txt"),
-        ],
-        timeout=timeout,
-    )
+    """Install the host's requirements and this repository's own.
+
+    Installing only the host's requirements would run OpenClaw in a weaker
+    environment than any real install: its own declared dependencies sit behind
+    import guards, so a missing one degrades silently rather than failing, and
+    the lane would then be reporting on a configuration no user has.
+    """
+    for requirements in (
+        paths.core / "requirements.txt",
+        REPO_ROOT / "requirements.txt",
+    ):
+        if not requirements.is_file():
+            raise SmokeError(f"requirements file is missing: {requirements}")
+        _run(
+            [sys.executable, "-m", "pip", "install", "-r", str(requirements)],
+            timeout=timeout,
+        )
 
 
 def digest_file(path: Path) -> str:
@@ -268,6 +270,18 @@ def verify_and_extract_release_asset(
     root = destination.resolve()
     with zipfile.ZipFile(archive) as bundle:
         for member in bundle.namelist():
+            # A drive-relative name such as "C:evil.txt" resolves *inside* the
+            # destination on Windows, so the shape has to be rejected before the
+            # resolved path is compared at all.
+            if (
+                member.startswith(("/", "\\"))
+                or ntpath.isabs(member)
+                or ntpath.splitdrive(member)[0]
+                or PurePosixPath(member).is_absolute()
+            ):
+                raise SmokeError(
+                    f"release archive member is not a relative path: {member}"
+                )
             resolved = (destination / member).resolve()
             if resolved != root and root not in resolved.parents:
                 raise SmokeError(
@@ -316,13 +330,19 @@ def install_custom_nodes(paths: HostPaths) -> list[Path]:
         target = paths.custom_nodes / name
         if target.exists() or target.is_symlink():
             raise SmokeError(f"custom node destination already exists: {target}")
-        try:
-            target.symlink_to(source, target_is_directory=True)
-        except (OSError, NotImplementedError):
-            # Runners without symlink permission still work; the host only reads
-            # these trees, so a filtered copy is equivalent.
-            shutil.copytree(
-                source, target, ignore=shutil.ignore_patterns(*COPY_EXCLUSIONS)
+        # CRITICAL: always copy with exclusions, never symlink. A symlink of the
+        # repository root would place `.git`, `.venv` and - on a developer
+        # machine - the read-only `reference/` checkout inside a live host's
+        # custom_nodes tree, which contradicts this module's own invariant that
+        # nothing is read from or executed out of a reference checkout. The host
+        # only reads what it is given, so a filtered copy loses nothing.
+        shutil.copytree(source, target, ignore=shutil.ignore_patterns(*COPY_EXCLUSIONS))
+        leaked = [
+            excluded for excluded in COPY_EXCLUSIONS if (target / excluded).exists()
+        ]
+        if leaked:
+            raise SmokeError(
+                f"custom node copy at {target} still contains excluded paths: {leaked}"
             )
         installed.append(target)
     return installed
@@ -365,34 +385,51 @@ def wait_for_host(
 
 def start_host(
     policy: dict[str, Any], subject: dict[str, Any], paths: HostPaths, port: int
-) -> subprocess.Popen[bytes]:
+) -> tuple[subprocess.Popen[bytes], IO[bytes]]:
     """Launch the host with its log captured to a file the lane can read back.
 
-    The log is not decoration: the fallback sentence the host prints when it
-    cannot serve a requested frontend is one of the three signals that decides
-    whether the release subject actually ran.
+    The log is not decoration: the host prints both the sentence it uses when it
+    cannot serve a requested frontend and the directory it actually resolved the
+    frontend from, and those are two of the three signals that decide whether the
+    release subject really ran.
+
+    The log handle is returned rather than left to the garbage collector, so
+    teardown can close it deterministically on every path.
     """
     args = build_host_args(policy, subject, port)
-    paths.artifact_dir.mkdir(parents=True, exist_ok=True)
+    paths.log_file.parent.mkdir(parents=True, exist_ok=True)
     handle = paths.log_file.open("wb")
-    return subprocess.Popen(
-        [sys.executable, "main.py", *args],
-        cwd=str(paths.core),
-        stdout=handle,
-        stderr=subprocess.STDOUT,
-    )
-
-
-def stop_host(process: subprocess.Popen[bytes], deadline_seconds: float) -> int | None:
-    """Terminate the host, escalating to a kill so teardown is also bounded."""
-    if process.poll() is not None:
-        return process.returncode
-    process.terminate()
     try:
-        return process.wait(timeout=deadline_seconds)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        return process.wait(timeout=deadline_seconds)
+        process = subprocess.Popen(
+            [sys.executable, "main.py", *args],
+            cwd=str(paths.core),
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+        )
+    except BaseException:
+        handle.close()
+        raise
+    return process, handle
+
+
+def stop_host(
+    process: subprocess.Popen[bytes],
+    deadline_seconds: float,
+    log_handle: IO[bytes] | None = None,
+) -> int | None:
+    """Terminate the host, escalating to a kill so teardown is also bounded."""
+    try:
+        if process.poll() is not None:
+            return process.returncode
+        process.terminate()
+        try:
+            return process.wait(timeout=deadline_seconds)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            return process.wait(timeout=deadline_seconds)
+    finally:
+        if log_handle is not None and not log_handle.closed:
+            log_handle.close()
 
 
 def run_playwright(
@@ -405,7 +442,6 @@ def run_playwright(
     )
     env["OPENCLAW_REAL_HOST_SUBJECT"] = subject["id"]
     env["OPENCLAW_REAL_HOST_LOG"] = str(paths.log_file)
-    env["OPENCLAW_REAL_HOST_WEB_ROOT"] = str(paths.web_root_for(subject) or "")
     completed = subprocess.run(
         ["npx", "playwright", "test", "--config", PLAYWRIGHT_CONFIG],
         cwd=str(REPO_ROOT),
@@ -501,7 +537,10 @@ def run_lane(
     deadlines = policy["deadlines_seconds"]
     paths = HostPaths(workspace=workspace)
 
-    resolved_head = fetch_core(policy, paths, deadlines["install"])
+    # Fetch and install are bounded separately. Sharing one budget would let a
+    # slow clone consume the whole allowance and leave the install effectively
+    # unbounded, so the deadline named for a phase actually bounds that phase.
+    resolved_head = fetch_core(policy, paths, deadlines["fetch"])
     print(f"REAL-HOST-SMOKE: core resolved to {resolved_head}")
     install_dependencies(paths, deadlines["install"])
     web_root = prepare_frontend_subject(subject, paths, asset_path)
@@ -509,12 +548,12 @@ def run_lane(
         print(f"REAL-HOST-SMOKE: verified frontend release seeded at {web_root}")
     install_custom_nodes(paths)
 
-    process = start_host(policy, subject, paths, port)
+    process, log_handle = start_host(policy, subject, paths, port)
     try:
         wait_for_host(readiness_url(policy, port), deadlines["startup"])
         return run_playwright(policy, subject, paths, port)
     finally:
-        stop_host(process, deadlines["teardown"])
+        stop_host(process, deadlines["teardown"], log_handle)
 
 
 def main(argv: list[str] | None = None) -> int:

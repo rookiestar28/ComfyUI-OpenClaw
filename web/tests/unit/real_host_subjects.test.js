@@ -14,6 +14,7 @@ import {
     evaluatePromotedWidget,
     evaluateSidebarGeometry,
     evidenceUpdateIsAllowed,
+    parseHostWebRoot,
     resolveSubject,
 } from "../../../tests/real_host/helpers/real_host_subjects.js";
 
@@ -185,6 +186,46 @@ describe("real host subject identity", () => {
                 resolvedWebRoot: null,
             }),
         ).toEqual([]);
+    });
+});
+
+describe("real host web root observation", () => {
+    it("reads the web root the host actually reported", () => {
+        const log = [
+            "[Prompt Server] some earlier line",
+            "[Prompt Server] web root: /tmp/c/web_custom_versions/Comfy-Org_ComfyUI_frontend/1.54.3",
+            "later noise",
+        ].join("\n");
+
+        expect(parseHostWebRoot(log)).toBe(
+            "/tmp/c/web_custom_versions/Comfy-Org_ComfyUI_frontend/1.54.3",
+        );
+    });
+
+    it("takes the last report and tolerates carriage returns", () => {
+        const log = "[Prompt Server] web root: /first\r\n[Prompt Server] web root: /second\r\n";
+
+        expect(parseHostWebRoot(log)).toBe("/second");
+    });
+
+    it("returns null when the host never reported one", () => {
+        for (const log of ["", "nothing here", "[Prompt Server] web root:   ", null, undefined]) {
+            expect(parseHostWebRoot(log)).toBeNull();
+        }
+    });
+
+    it("treats an unreported web root as a failure, never as a pass", () => {
+        const release = JSON.parse(JSON.stringify(POLICY.subjects.standalone_release));
+        const failures = detectSubjectMismatch({
+            subject: release,
+            reportedFrontendVersion: "1.54.3",
+            hostLogText: "",
+            resolvedWebRoot: parseHostWebRoot(""),
+        });
+
+        expect(failures).toEqual([
+            "host never reported the web root it resolved, so the served frontend is unverified",
+        ]);
     });
 });
 
