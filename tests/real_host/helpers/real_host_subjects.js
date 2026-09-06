@@ -54,10 +54,10 @@ export function resolveSubject(policy, subjectId) {
 /**
  * A subject that names a release asset must also name that asset's digest.
  *
- * The digest is deliberately unset in the tracked policy: pinning it requires
- * downloading the asset, which is an outward-facing fetch this repository does
- * not perform without authorization. Failing closed keeps an unauthorized or
- * unverified artifact from ever being presented as release evidence.
+ * The digest is pinned from the publisher's own release metadata. Failing closed
+ * on a missing or malformed one keeps an unverified artifact from ever being
+ * presented as release evidence, which still matters: the pin can be removed, and
+ * a subject added later may arrive without one.
  */
 export function assertSubjectRunnable(subject) {
     if (!subject.release_asset_name) {

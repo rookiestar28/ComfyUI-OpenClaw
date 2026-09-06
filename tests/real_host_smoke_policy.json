@@ -33,9 +33,11 @@
       "release_tag": "v1.54.3",
       "release_tag_commit": "b2f5587509d744d7779accce193db53f36a91d4a",
       "release_asset_name": "dist.zip",
-      "release_asset_sha256": null,
+      "release_asset_sha256": "5fda9339cd3bc6be95c78197072fb699c7eda398b58cccd9c69216fada38b04d",
+      "release_asset_size_bytes": 24710618,
+      "release_asset_digest_source": "GitHub release API, tag v1.54.3, asset dist.zip; publisher-reported and read twice. The lane still hashes the downloaded bytes and refuses a mismatch.",
       "web_root_relative": "web_custom_versions/Comfy-Org_ComfyUI_frontend/1.54.3",
-      "summary": "The reproducible standalone release. Its asset digest is unset, so this subject refuses to run until an authorized run pins it."
+      "summary": "The reproducible standalone release. Its asset digest is pinned from published release metadata, so the lane verifies the artifact before the host sees it; the subject still refuses to run without explicit authorization."
     }
   },
   "not_executed": {

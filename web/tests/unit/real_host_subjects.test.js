@@ -30,11 +30,21 @@ describe("real host frontend subjects", () => {
         expect(() => resolveSubject(POLICY, "nightly")).toThrow(SubjectError);
     });
 
-    it("refuses the release subject while its asset digest is unpinned", () => {
+    it("carries a pinned, well-formed release digest in the tracked policy", () => {
         const subject = resolveSubject(POLICY, STANDALONE_RELEASE_SUBJECT);
 
-        expect(subject.release_asset_sha256).toBeNull();
-        expect(() => assertSubjectRunnable(subject)).toThrow(/no pinned sha256/);
+        expect(subject.release_asset_sha256).toMatch(/^[0-9a-f]{64}$/);
+        expect(() => assertSubjectRunnable(subject)).not.toThrow();
+    });
+
+    it("still refuses a release subject whose digest is missing", () => {
+        // The pin can be removed and a later subject may arrive without one, so
+        // the refusal stays covered independently of today's policy value.
+        const subject = resolveSubject(POLICY, STANDALONE_RELEASE_SUBJECT);
+
+        expect(() => assertSubjectRunnable({ ...subject, release_asset_sha256: null })).toThrow(
+            /no pinned sha256/,
+        );
     });
 
     it("accepts the release subject once a real digest is pinned, and only then", () => {

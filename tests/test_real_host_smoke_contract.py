@@ -121,11 +121,31 @@ class TestPinsAgreeWithTrackedAnchors(unittest.TestCase):
 class TestUnverifiedReleaseArtifactCannotRun(unittest.TestCase):
     """An artifact nobody verified must never be able to produce release evidence."""
 
-    def test_the_release_digest_ships_unset_and_blocks_that_subject(self):
+    def test_the_tracked_release_digest_is_pinned_and_well_formed(self):
         release = resolve_subject(POLICY, "standalone_release")
+        digest = release["release_asset_sha256"]
 
-        self.assertIsNone(release["release_asset_sha256"])
-        self.assertFalse(release_digest_is_pinned(POLICY, "standalone_release"))
+        self.assertIsInstance(digest, str)
+        self.assertRegex(digest, r"^[0-9a-f]{64}$")
+        self.assertTrue(release_digest_is_pinned(POLICY, "standalone_release"))
+
+    def test_the_pinned_digest_says_where_it_came_from(self):
+        release = resolve_subject(POLICY, "standalone_release")
+        source = release["release_asset_digest_source"]
+
+        # A pinned hash with no stated provenance cannot be re-checked by anyone
+        # later, which is most of what makes it worth pinning.
+        self.assertIn(release["release_tag"], source)
+        self.assertIn(release["release_asset_name"], source)
+        self.assertIsInstance(release["release_asset_size_bytes"], int)
+        self.assertGreater(release["release_asset_size_bytes"], 0)
+
+    def test_a_release_subject_without_a_digest_still_fails_closed(self):
+        # The pin can be removed and a later subject may arrive without one, so
+        # the refusal has to stay covered independently of today's policy value.
+        release = dict(resolve_subject(POLICY, "standalone_release"))
+        release["release_asset_sha256"] = None
+
         with self.assertRaises(SmokeError) as caught:
             assert_subject_runnable(release)
         self.assertIn("no pinned sha256", str(caught.exception))
@@ -422,7 +442,7 @@ class TestRuntimeEvidenceNeverNamesAnUnexecutedCommit(unittest.TestCase):
         rendered = emit_pins(POLICY, None)
 
         self.assertIn(f"core_head={POLICY['core']['source_head']}", rendered)
-        self.assertIn("release_digest_pinned=false", rendered)
+        self.assertIn("release_digest_pinned=true", rendered)
         self.assertNotIn(POLICY["not_executed"]["frontend_source_head"], rendered)
 
 

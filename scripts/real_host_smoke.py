@@ -116,10 +116,12 @@ def resolve_subject(policy: dict[str, Any], subject_id: str) -> dict[str, Any]:
 def assert_subject_runnable(subject: dict[str, Any]) -> None:
     """Refuse a release subject whose artifact digest has not been pinned.
 
-    The tracked policy ships this digest unset on purpose. Pinning it requires
-    downloading the release asset, which is an outward-facing fetch this
-    repository does not perform without authorization, and a guessed value would
-    read as verification while proving nothing.
+    The digest is pinned from the publisher's own release metadata rather than
+    guessed, which is a narrower claim than it may look: it does not say the
+    artifact is good, only that the bytes the lane downloads are the bytes
+    published under this tag, and that a later re-upload is detected. That is why
+    the guard here is a shape check and the real comparison happens against bytes
+    in `verify_and_extract_release_asset`.
     """
     if not subject.get("release_asset_name"):
         return
