@@ -26,7 +26,9 @@ def _declared_web_directory() -> str:
     if the declaration ever moves behind an import guard.
     """
 
-    tree = ast.parse(PACKAGE_INIT.read_text(encoding="utf-8"), filename=str(PACKAGE_INIT))
+    tree = ast.parse(
+        PACKAGE_INIT.read_text(encoding="utf-8"), filename=str(PACKAGE_INIT)
+    )
     for node in ast.walk(tree):
         if not isinstance(node, ast.Assign):
             continue
