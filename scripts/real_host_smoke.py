@@ -173,20 +173,40 @@ def _run(
     )
 
 
-def fetch_core(policy: dict[str, Any], paths: HostPaths, timeout: float) -> str:
+def fetch_core(
+    policy: dict[str, Any],
+    paths: HostPaths,
+    timeout: float,
+    clock: Callable[[], float] = time.monotonic,
+) -> str:
     """Fetch exactly the pinned host commit into the run's own workspace.
 
     A single-commit fetch is used rather than a branch clone so the resolved head
     cannot drift with upstream, and the result is verified before anything else
     touches it.
+
+    The budget bounds the whole phase rather than each command in it. Handing the
+    full allowance to all four git calls would let the phase run to four times its
+    declared deadline, which is exactly the gap between a deadline that is
+    documented and one that holds.
     """
     core = policy["core"]
     expected_head = core["source_head"]
+    deadline = clock() + timeout
+
+    def remaining() -> float:
+        left = deadline - clock()
+        if left <= 0:
+            raise SmokeError(
+                f"pinned host fetch exceeded its {timeout}s budget before completing"
+            )
+        return left
+
     paths.core.mkdir(parents=True, exist_ok=True)
-    _run(["git", "init", "--quiet", str(paths.core)], timeout=timeout)
+    _run(["git", "init", "--quiet", str(paths.core)], timeout=remaining())
     _run(
         ["git", "-C", str(paths.core), "remote", "add", "origin", core["repository"]],
-        timeout=timeout,
+        timeout=remaining(),
     )
     _run(
         [
@@ -199,11 +219,11 @@ def fetch_core(policy: dict[str, Any], paths: HostPaths, timeout: float) -> str:
             "origin",
             expected_head,
         ],
-        timeout=timeout,
+        timeout=remaining(),
     )
     _run(
         ["git", "-C", str(paths.core), "checkout", "--quiet", expected_head],
-        timeout=timeout,
+        timeout=remaining(),
     )
     return verify_core_checkout(paths.core, expected_head)
 
@@ -537,9 +557,10 @@ def run_lane(
     deadlines = policy["deadlines_seconds"]
     paths = HostPaths(workspace=workspace)
 
-    # Fetch and install are bounded separately. Sharing one budget would let a
-    # slow clone consume the whole allowance and leave the install effectively
-    # unbounded, so the deadline named for a phase actually bounds that phase.
+    # Fetch and install are bounded separately, and the fetch budget is spent
+    # down across its four git calls rather than granted to each. Sharing one
+    # budget would leave the install effectively unbounded; granting the full
+    # budget per call would let the phase run to four times its deadline.
     resolved_head = fetch_core(policy, paths, deadlines["fetch"])
     print(f"REAL-HOST-SMOKE: core resolved to {resolved_head}")
     install_dependencies(paths, deadlines["install"])

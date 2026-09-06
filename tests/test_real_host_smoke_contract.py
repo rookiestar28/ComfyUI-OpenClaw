@@ -15,17 +15,20 @@ import re
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 import zipfile
 from pathlib import Path
 
 from scripts.real_host_smoke import (
     AUTHORIZATION_ENV,
     PEER_FIXTURE_SOURCE,
+    HostPaths,
     SmokeError,
     assert_subject_runnable,
     build_host_args,
     emit_pins,
     evidence_update_is_allowed,
+    fetch_core,
     load_policy,
     readiness_url,
     release_digest_is_pinned,
@@ -602,6 +605,56 @@ class TestTeardownReleasesWhatItOpened(unittest.TestCase):
         stop_host(StubbornProcess(), 0.01, handle)
 
         self.assertTrue(handle.closed)
+
+
+class TestTheFetchBudgetBoundsThePhase(unittest.TestCase):
+    """A deadline that each call may spend in full does not bound the phase."""
+
+    def test_the_budget_is_spent_down_across_the_git_calls(self):
+        ticks = iter([0.0, 0.0, 10.0, 20.0, 30.0])
+        handed = []
+
+        def fake_run(command, *, cwd=None, timeout):
+            handed.append(timeout)
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with (
+            unittest.mock.patch("scripts.real_host_smoke._run", side_effect=fake_run),
+            unittest.mock.patch(
+                "scripts.real_host_smoke.verify_core_checkout", return_value="head"
+            ),
+        ):
+            fetch_core(
+                POLICY,
+                HostPaths(workspace=Path(tempfile.mkdtemp())),
+                100.0,
+                clock=lambda: next(ticks),
+            )
+
+        self.assertEqual(handed, [100.0, 90.0, 80.0, 70.0])
+        self.assertTrue(
+            all(later <= earlier for earlier, later in zip(handed, handed[1:])),
+            f"each call must receive what is left, got {handed}",
+        )
+
+    def test_an_exhausted_budget_stops_the_phase(self):
+        ticks = iter([0.0, 0.0, 500.0])
+
+        def fake_run(command, *, cwd=None, timeout):
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with (
+            unittest.mock.patch("scripts.real_host_smoke._run", side_effect=fake_run),
+            self.assertRaises(SmokeError) as caught,
+        ):
+            fetch_core(
+                POLICY,
+                HostPaths(workspace=Path(tempfile.mkdtemp())),
+                100.0,
+                clock=lambda: next(ticks),
+            )
+
+        self.assertIn("exceeded its 100.0s budget", str(caught.exception))
 
 
 if __name__ == "__main__":
