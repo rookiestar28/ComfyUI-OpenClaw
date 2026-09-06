@@ -17,7 +17,15 @@ const ADVANCED_3D_RESULT_MAX_ENTRIES = 8;
 const ADVANCED_3D_RESULT_PATH_MAX_LENGTH = 1024;
 const UNSAFE_ADVANCED_3D_PATH_CHARACTERS = /[\p{Cc}\p{Cf}\p{Cs}]/u;
 const FILE_TEXT_EXTENSIONS = new Set(["txt", "md", "markdown", "json", "csv", "yaml", "yml", "xml", "log"]);
-const FILE_OUTPUT_TYPES = new Set(["input", "output", "temp"]);
+// The ComfyUI host directory vocabulary (`folder_paths` / `IO.FolderType`). One
+// definition serves file-text refs and the Advanced 3D annotation so the two
+// consumers cannot drift apart.
+const HOST_DIRECTORY_TYPES = new Set(["input", "output", "temp"]);
+const ADVANCED_3D_ANNOTATION_PATTERN = new RegExp(
+    ` \\[(${[...HOST_DIRECTORY_TYPES].sort().join("|")})\\]$`,
+);
+const ADVANCED_3D_RESULT_WIRE_MAX_LENGTH = ADVANCED_3D_RESULT_PATH_MAX_LENGTH
+    + Math.max(...[...HOST_DIRECTORY_TYPES].map((directoryType) => ` [${directoryType}]`.length));
 const FILE_OUTPUT_MAX_REFS = 64;
 const FILE_OUTPUT_FIELD_MAX_LENGTH = 1024;
 
@@ -171,6 +179,29 @@ function hasUnsafeAdvanced3dPathCharacters(value = "") {
     return UNSAFE_ADVANCED_3D_PATH_CHARACTERS.test(String(value));
 }
 
+function splitAdvanced3dAnnotation(rawPath) {
+    // HOTSPOT: `PreviewUI3DAdvanced` reports `<path> [input|output|temp]`, so the
+    // annotation must be separated *before* the 3D extension is validated.
+    // Checking the extension first sees a name ending in `]` and drops every
+    // current ComfyUI 3D preview. Everything after this split - length,
+    // character, traversal, segment and extension checks - applies to the
+    // canonical path only, and the returned type is always one of the
+    // HOST_DIRECTORY_TYPES literals, never attacker-supplied text.
+    //
+    // Requiring the single ASCII separator is deliberately stricter than the
+    // host's `folder_paths.annotated_filepath()`, which also accepts
+    // `scene.glb[output]` and then truncates a real path character. Do not relax
+    // the marker to match it.
+    const match = ADVANCED_3D_ANNOTATION_PATTERN.exec(rawPath);
+    if (!match) {
+        return { canonicalPath: rawPath, directoryType: "output" };
+    }
+    return {
+        canonicalPath: rawPath.slice(0, match.index),
+        directoryType: match[1],
+    };
+}
+
 function normalizeAdvanced3dResult(result) {
     if (
         !Array.isArray(result)
@@ -183,12 +214,16 @@ function normalizeAdvanced3dResult(result) {
     const rawPath = result[0];
     if (
         typeof rawPath !== "string"
-        || codePointLength(rawPath) > ADVANCED_3D_RESULT_PATH_MAX_LENGTH
+        || codePointLength(rawPath) > ADVANCED_3D_RESULT_WIRE_MAX_LENGTH
     ) {
         return null;
     }
 
-    const normalizedPath = rawPath.replaceAll("\\", "/");
+    // HOTSPOT: see splitAdvanced3dAnnotation. The wire bound above admits the
+    // longest annotation; the canonical bound below still guards the path.
+    const { canonicalPath, directoryType } = splitAdvanced3dAnnotation(rawPath);
+
+    const normalizedPath = canonicalPath.replaceAll("\\", "/");
     if (
         !normalizedPath
         || codePointLength(normalizedPath) > ADVANCED_3D_RESULT_PATH_MAX_LENGTH
@@ -219,7 +254,7 @@ function normalizeAdvanced3dResult(result) {
     return normalizeComfyOutputRef({
         filename,
         subfolder: segments.slice(0, -1).join("/"),
-        type: "output",
+        type: directoryType,
     }, "3d");
 }
 
@@ -278,7 +313,7 @@ function normalizeFileTextOutputRef(outputRef) {
     const type = typeof outputRef.type === "string" && outputRef.type.trim()
         ? outputRef.type.trim()
         : "output";
-    if (!FILE_OUTPUT_TYPES.has(type)) {
+    if (!HOST_DIRECTORY_TYPES.has(type)) {
         return null;
     }
 

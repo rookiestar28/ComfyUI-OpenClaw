@@ -121,8 +121,9 @@ Deployment profiles and hardening references:
   destinations.
 - Parameter Lab now accepts only bounded scalar values and correlates queued runs through exact
   request-ID receipts, failing explicitly on unsupported or ambiguous host queue shapes.
-- Advanced 3D `result` references are recognized as bounded output links without inspecting
-  later metadata or rendering binary content.
+- Advanced 3D `result` references, including the `<path> [temp]` form the current preview
+  nodes report, are recognized as bounded view links that carry the host directory type,
+  without inspecting later metadata or rendering binary content.
 - Native ComfyUI video/webcam inputs, audio and text-to-speech flows, and the Graph/Workflows
   workspace remain host-owned instead of being duplicated by OpenClaw.
 

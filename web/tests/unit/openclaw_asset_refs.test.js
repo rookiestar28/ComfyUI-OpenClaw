@@ -619,3 +619,205 @@ describe("openclaw asset refs", () => {
         })).toBe(false);
     });
 });
+
+describe("openclaw annotated advanced 3d results", () => {
+    // Mirrors tests/test_r236_advanced_3d_result.py::TestR255AnnotatedAdvanced3dResult.
+    // The upstream producer is PreviewUI3DAdvanced.as_dict(), which appends
+    // ` [<FolderType>]` only when a folder type is supplied, so the marker is
+    // always terminal, separated by one ASCII space, and lowercase.
+    const suffixes = [
+        "glb",
+        "gltf",
+        "obj",
+        "fbx",
+        "stl",
+        "ply",
+        "spz",
+        "splat",
+        "ksplat",
+        "usdz",
+    ];
+
+    const extract = (result) => extractHistoryOutputRefs({ outputs: { "9": { result } } });
+
+    const single = (result) => {
+        const outputs = extract(result);
+        // Only entry zero may be read, including inside a failure message.
+        expect(outputs, `expected exactly one ref for ${JSON.stringify(result[0])}`).toHaveLength(1);
+        return outputs[0];
+    };
+
+    it("projects the official temp preview as a temp view reference", () => {
+        expect(single(["preview.glb [temp]"])).toEqual(expect.objectContaining({
+            filename: "preview.glb",
+            subfolder: "",
+            type: "temp",
+            media_type: "3d",
+            resolution: "view",
+            viewParams: {
+                filename: "preview.glb",
+                type: "temp",
+            },
+        }));
+    });
+
+    it("accepts every lowercase terminal directory annotation", () => {
+        const cases = [
+            ["models/scene.splat [output]", "scene.splat", "models", "output"],
+            ["preview/scene.glb [temp]", "scene.glb", "preview", "temp"],
+            ["input/scene.GLB [input]", "scene.GLB", "input", "input"],
+            ["nested\\folder\\scene.glb [temp]", "scene.glb", "nested/folder", "temp"],
+            ["\u6a21\u578b/\u5834\u666f\u{1f600}.glb [temp]", "\u5834\u666f\u{1f600}.glb", "\u6a21\u578b", "temp"],
+        ];
+        for (const [path, filename, subfolder, type] of cases) {
+            expect(single([path])).toEqual(expect.objectContaining({ filename, subfolder, type }));
+        }
+    });
+
+    it("applies the annotation to every reviewed 3d extension", () => {
+        const outputs = extractHistoryOutputRefs({
+            outputs: Object.fromEntries(suffixes.map((suffix, index) => [
+                String(index),
+                { result: [`preview/scene.${suffix} [temp]`] },
+            ])),
+        });
+
+        expect(outputs).toHaveLength(suffixes.length);
+        expect(outputs.map((output) => output.filename.split(".").pop())).toEqual(suffixes);
+        expect(outputs.every((output) => output.type === "temp" && output.media_type === "3d")).toBe(true);
+    });
+
+    it("keeps bare and embedded bracket paths on the legacy output type", () => {
+        const legacy = [
+            ["scene.glb", "scene.glb", ""],
+            ["models [temp]/scene.glb", "scene.glb", "models [temp]"],
+            ["scene [output].glb", "scene [output].glb", ""],
+            ["a [temp] b/scene [input] c.glb", "scene [input] c.glb", "a [temp] b"],
+        ];
+        for (const [path, filename, subfolder] of legacy) {
+            expect(single([path])).toEqual(expect.objectContaining({
+                filename,
+                subfolder,
+                type: "output",
+            }));
+        }
+    });
+
+    it("rejects uppercase, repeated and malformed terminal annotations", () => {
+        const rejected = [
+            ["scene.glb [bogus]"],
+            ["scene.glb [TEMP]"],
+            ["scene.glb [Temp]"],
+            ["scene.glb [OUTPUT]"],
+            ["scene.glb [temp][temp]"],
+            ["scene.glb [temp] [temp]"],
+            ["scene.glb[temp]"],
+            ["scene.glb\u00a0[temp]"],
+            ["scene.glb\t[temp]"],
+            ["scene.glb [temp] "],
+            ["scene.glb [temp]\n"],
+            ["scene.glb  [temp]"],
+            ["scene.glb [ temp]"],
+            ["scene.glb [temp ]"],
+            ["[temp]"],
+            [" [temp]"],
+            ["scene.glb [temp].bak"],
+            ["scene.png [temp]"],
+            ["scene.glb.exe [temp]"],
+        ];
+        for (const result of rejected) {
+            expect(extract(result), `expected no ref for ${JSON.stringify(result[0])}`).toEqual([]);
+        }
+    });
+
+    it("keeps existing unsafe path families closed when annotated", () => {
+        const rejected = [
+            ["/absolute/scene.glb [temp]"],
+            ["//evil.example/scene.glb [temp]"],
+            ["https://evil.example/scene.glb [temp]"],
+            ["file:scene.glb [temp]"],
+            ["C:\\private\\scene.glb [temp]"],
+            ["../scene.glb [temp]"],
+            ["safe/../scene.glb [temp]"],
+            ["safe/./scene.glb [temp]"],
+            ["safe//scene.glb [temp]"],
+            ["safe/\u0000scene.glb [temp]"],
+            ["safe/\u0085scene.glb [temp]"],
+            ["safe/\u202escene.glb [temp]"],
+            ["safe/\ud800scene.glb [temp]"],
+            ["scene.glb?token=secret [temp]"],
+            [" scene.glb [temp]"],
+            ["scene.glb [temp]", {}, {}, {}, {}, {}, {}, {}, {}],
+        ];
+        for (const result of rejected) {
+            expect(extract(result), `expected no ref for ${JSON.stringify(result[0])}`).toEqual([]);
+        }
+    });
+
+    it("pins the raw wire and canonical bounds independently", () => {
+        const canonicalMax = `${"a".repeat(1024 - ".glb".length)}.glb`;
+        const annotatedMax = `${canonicalMax} [output]`;
+        expect([canonicalMax.length, annotatedMax.length]).toEqual([1024, 1033]);
+        expect(single([annotatedMax])).toEqual(expect.objectContaining({
+            filename: canonicalMax,
+            type: "output",
+        }));
+
+        const overCanonicalPath = `${"a".repeat(1025 - ".glb".length)}.glb`;
+
+        const overRaw = `${overCanonicalPath} [output]`;
+        expect(overRaw.length).toBe(1034);
+        expect(extract([overRaw])).toEqual([]);
+
+        const withinRawOverCanonical = `${overCanonicalPath} [temp]`;
+        expect(withinRawOverCanonical.length).toBe(1032);
+        expect(extract([withinRawOverCanonical])).toEqual([]);
+    });
+
+    it("still projects only the first entry for annotated results", () => {
+        const metadataCanary = "metadata-value-must-not-project";
+        const explosiveMetadata = new Proxy({}, {
+            get() {
+                throw new Error("later result metadata was inspected");
+            },
+            ownKeys() {
+                throw new Error("later result metadata was inspected");
+            },
+        });
+        const guardedResult = new Proxy([
+            "preview/scene one.splat [temp]",
+            explosiveMetadata,
+            [{ model: metadataCanary }],
+        ], {
+            get(target, property, receiver) {
+                if (property === "1" || property === "2") {
+                    throw new Error("later result entries were inspected");
+                }
+                return Reflect.get(target, property, receiver);
+            },
+        });
+
+        const output = single(guardedResult);
+        expect(output).toEqual(expect.objectContaining({
+            filename: "scene one.splat",
+            subfolder: "preview",
+            type: "temp",
+        }));
+        expect(JSON.stringify(output)).not.toContain(metadataCanary);
+    });
+
+    it("shares one host directory vocabulary with the file-text family", () => {
+        for (const type of ["input", "output", "temp"]) {
+            expect(single([`scene.glb [${type}]`])).toEqual(expect.objectContaining({ type }));
+            expect(extractHistoryOutputRefs({
+                outputs: { "9": { files: [{ filename: "report.txt", type }] } },
+            })[0]).toEqual(expect.objectContaining({ type }));
+        }
+        for (const type of ["cache", "user", "models"]) {
+            expect(extract([`scene.glb [${type}]`])).toEqual([]);
+            expect(extractHistoryOutputRefs({
+                outputs: { "9": { files: [{ filename: "report.txt", type }] } },
+            })).toEqual([]);
+        }
+    });
+});

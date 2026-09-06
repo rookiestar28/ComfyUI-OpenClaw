@@ -5,6 +5,7 @@ Parses ComfyUI /history/{prompt_id} responses and extracts image output metadata
 
 import json
 import logging
+import re
 import unicodedata
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
@@ -42,7 +43,16 @@ FILE_TEXT_EXTENSIONS = frozenset(
 )
 FILE_OUTPUT_MAX_REFS = 64
 FILE_OUTPUT_FIELD_MAX_LENGTH = 1024
-FILE_OUTPUT_TYPES = frozenset({"input", "output", "temp"})
+# The ComfyUI host directory vocabulary (`folder_paths` / `IO.FolderType`).
+# One definition serves file-text refs and the Advanced 3D annotation so the
+# two consumers cannot drift apart.
+HOST_DIRECTORY_TYPES = frozenset({"input", "output", "temp"})
+ADVANCED_3D_ANNOTATION_RE = re.compile(
+    r" \[(" + "|".join(sorted(HOST_DIRECTORY_TYPES)) + r")\]\Z"
+)
+ADVANCED_3D_RESULT_WIRE_MAX_LENGTH = ADVANCED_3D_RESULT_PATH_MAX_LENGTH + max(
+    len(f" [{directory_type}]") for directory_type in HOST_DIRECTORY_TYPES
+)
 
 
 def _pick_string(payload: Dict[str, Any], *keys: str) -> str:
@@ -112,6 +122,27 @@ def _has_unsafe_advanced_3d_characters(value: str) -> bool:
     return any(unicodedata.category(char) in {"Cc", "Cf", "Cs"} for char in value)
 
 
+def _split_advanced_3d_annotation(raw_path: str) -> tuple[str, str]:
+    """Separate the canonical ComfyUI trailing directory annotation.
+
+    HOTSPOT: `PreviewUI3DAdvanced` reports `<path> [input|output|temp]`, so the
+    annotation must be separated *before* the 3D extension is validated. Checking
+    the extension first sees a name ending in `]` and drops every current ComfyUI
+    3D preview. Everything after this split - length, character, traversal,
+    segment and extension checks - applies to the canonical path only, and the
+    returned type is always one of the `HOST_DIRECTORY_TYPES` literals, never
+    attacker-supplied text.
+
+    Requiring the single ASCII separator is deliberately stricter than the host's
+    `folder_paths.annotated_filepath()`, which also accepts `scene.glb[output]`
+    and then truncates a real path character. Do not relax the marker to match it.
+    """
+    match = ADVANCED_3D_ANNOTATION_RE.search(raw_path)
+    if not match:
+        return raw_path, "output"
+    return raw_path[: match.start()], match.group(1)
+
+
 def _normalize_advanced_3d_result(result: Any) -> dict[str, Any] | None:
     if (
         not isinstance(result, list)
@@ -123,11 +154,15 @@ def _normalize_advanced_3d_result(result: Any) -> dict[str, Any] | None:
     raw_path = result[0]
     if (
         not isinstance(raw_path, str)
-        or len(raw_path) > ADVANCED_3D_RESULT_PATH_MAX_LENGTH
+        or len(raw_path) > ADVANCED_3D_RESULT_WIRE_MAX_LENGTH
     ):
         return None
 
-    normalized_path = raw_path.replace("\\", "/")
+    # HOTSPOT: see _split_advanced_3d_annotation. The wire bound above admits
+    # the longest annotation; the canonical bound below still guards the path.
+    canonical_path, directory_type = _split_advanced_3d_annotation(raw_path)
+
+    normalized_path = canonical_path.replace("\\", "/")
     if (
         not normalized_path
         or len(normalized_path) > ADVANCED_3D_RESULT_PATH_MAX_LENGTH
@@ -154,7 +189,7 @@ def _normalize_advanced_3d_result(result: Any) -> dict[str, Any] | None:
         {
             "filename": filename,
             "subfolder": "/".join(segments[:-1]),
-            "type": "output",
+            "type": directory_type,
         },
         "3d",
     )
@@ -203,7 +238,7 @@ def _normalize_file_text_ref(output_ref: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(raw_type, str):
         return None
     output_type = raw_type.strip() or "output"
-    if output_type not in FILE_OUTPUT_TYPES:
+    if output_type not in HOST_DIRECTORY_TYPES:
         return None
 
     # SECURITY: file-backed text refs are attacker-influenced. Build only the

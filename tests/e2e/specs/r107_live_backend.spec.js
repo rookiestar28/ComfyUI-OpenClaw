@@ -396,6 +396,106 @@ test.describe('R107 Live Backend Parity', () => {
         expect(assetApiCalls).toBe(0);
     });
 
+    test('Job Monitor renders an annotated temp advanced 3d result on the temp view contract', async ({ page }) => {
+        const jobId = "job-advanced-3d-annotated";
+        const metadataCanary = "metadata-value-must-not-project";
+        let assetApiCalls = 0;
+
+        await page.evaluate(() => {
+            window.__openclawOpenedUrls = [];
+            window.open = (url, target) => {
+                window.__openclawOpenedUrls.push({ url, target });
+                return null;
+            };
+        });
+
+        await page.route(`**/history/${jobId}`, async route => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    [jobId]: {
+                        status: { status_str: "success", completed: true },
+                        outputs: {
+                            "1": {
+                                result: [
+                                    "preview3d_advanced_00001_.glb [temp]",
+                                    { camera: metadataCanary },
+                                    [{ model: metadataCanary }],
+                                ],
+                            },
+                            "2": {
+                                result: ["models/saved.glb"],
+                            },
+                        },
+                    },
+                }),
+            });
+        });
+
+        await page.route('**/openclaw/trace/**', async route => {
+            await route.fulfill({
+                status: 404,
+                contentType: 'application/json',
+                body: JSON.stringify({ error: 'not_found' }),
+            });
+        });
+
+        await page.route('**/api/assets**', async route => {
+            assetApiCalls += 1;
+            await route.fulfill({
+                status: 500,
+                contentType: 'application/json',
+                body: JSON.stringify({ error: 'asset_api_should_not_be_called' }),
+            });
+        });
+
+        await clickTab(page, 'Jobs');
+        await page.locator('input[placeholder="prompt_id"]').fill(jobId);
+        await page.getByText('Add').click();
+
+        const jobRow = page.locator('.openclaw-job-row').first();
+        await expect(page.locator('.openclaw-kv-val.ok')).toHaveText('completed', { timeout: 10000 });
+        const fallbacks = jobRow.locator('.openclaw-job-output-media-fallback');
+        await expect(fallbacks).toHaveCount(2);
+        await expect(jobRow).not.toContainText(metadataCanary);
+        await expect(jobRow).not.toContainText('[temp]');
+
+        await fallbacks.first().click();
+        await fallbacks.nth(1).click();
+        const opened = await page.evaluate(() => window.__openclawOpenedUrls.map(entry => {
+            const parsed = new URL(entry.url, window.location.origin);
+            return {
+                sameOrigin: parsed.origin === window.location.origin,
+                pathname: parsed.pathname,
+                filename: parsed.searchParams.get("filename"),
+                subfolder: parsed.searchParams.get("subfolder"),
+                type: parsed.searchParams.get("type"),
+                target: entry.target,
+            };
+        }));
+
+        expect(opened).toEqual([
+            {
+                sameOrigin: true,
+                pathname: expect.stringMatching(/\/view$/),
+                filename: "preview3d_advanced_00001_.glb",
+                subfolder: null,
+                type: "temp",
+                target: "_blank",
+            },
+            {
+                sameOrigin: true,
+                pathname: expect.stringMatching(/\/view$/),
+                filename: "saved.glb",
+                subfolder: "models",
+                type: "output",
+                target: "_blank",
+            },
+        ]);
+        expect(assetApiCalls).toBe(0);
+    });
+
     test('Job Monitor renders HDR image outputs as explicit fallbacks', async ({ page }) => {
         const jobId = "job-hdr-refs";
         let hdrViewRequests = 0;
