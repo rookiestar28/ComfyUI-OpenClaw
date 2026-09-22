@@ -16,14 +16,15 @@ This document summarizes the current OpenClaw sidebar UI structure and how to ve
 - API: `web/openclaw_api.js` owns normalized transport, session, timeout, retry, and singleton
   behavior. Config, generation, resource, model, and event endpoint families live in focused
   `web/openclaw_api_*.js` owner modules behind the same public API (legacy Moltbot endpoints still
-  work).
+  work). A host fetch timeout is reported as a timeout without retrying that attempt; caller
+  cancellation remains distinct, and OpenClaw's deadline remains active across host adapters.
 - Settings: `web/tabs/settings_tab.js` composes status, LLM, secrets, logs, and DOM owner modules.
   Its lifecycle owner invalidates stale async generations and clears scheduled work when the tab
   is disposed, preventing late responses from mutating a remounted pane.
 - Host surface: `web/openclaw_host_surface.js` resolves standalone frontend, legacy fixed-bundle
   Desktop, and current managed-install Comfy-Desktop separately, then stamps explicit metadata so
   generation-specific behavior stays testable.
-- Output refs: `web/openclaw_asset_refs.js` normalizes classic history refs, optional `asset_hash`/`hash` refs and top-level output-entry `id` metadata when the host provides them, and current previewable media groups (`images`, `video`, `audio`, `3d`, bounded inline or file-backed `text`) onto one media-aware contract. Allowlisted text files under the host `files` key stay on same-origin `/view` and use a 5-second, 64-KiB streaming, strict textual-MIME/UTF-8 reader with a 4,096-character display cap. HDR `.exr` / `.hdr` image refs show source-preview fallback links instead of normal thumbnails, text reaches the DOM only as literal text, and asset-service-only refs remain explicit fallback states instead of silently auto-fetching `/api/assets`.
+- Output refs: `web/openclaw_asset_refs.js` normalizes classic history refs, optional `asset_hash`/`hash` refs and top-level output-entry `id` metadata when the host provides them, and current previewable media groups (`images`, `video`, `audio`, `3d`, bounded inline or file-backed `text`) onto one media-aware contract. A saved 3D output represented by both `3d` and legacy `result` appears once, while distinct outputs stay separate. Allowlisted text files under the host `files` key stay on same-origin `/view` and use a 5-second, 64-KiB streaming, strict textual-MIME/UTF-8 reader with a 4,096-character display cap. HDR `.exr` / `.hdr` image refs show source-preview fallback links instead of normal thumbnails, text reaches the DOM only as literal text, and asset-service-only refs remain explicit fallback states instead of silently auto-fetching `/api/assets`.
 - Styles: `web/openclaw.css` provides shared design tokens and component classes.
 - Errors and compatibility helpers: `web/openclaw_utils.js` provides `showError()` / `clearError()` plus runtime legacy-class alias helpers used to keep canonical `openclaw-*` markup compatible with existing `moltbot-*` selectors.
 
@@ -106,7 +107,7 @@ If `assist_streaming` is unavailable or the stream transport degrades, Planner/R
 3. Confirm the sidebar host-surface metadata resolves correctly for the current environment instead of defaulting silently.
 4. Planner: click **Plan Generation** with minimal input and confirm either live preview/stage updates appear (when streaming is supported) or a readable fallback result/error appears.
 5. Refiner: click **Refine Prompts** (with or without image) and confirm either live preview/stage updates appear (when streaming is supported) or a readable fallback result/error appears.
-6. Jobs: verify output previews still resolve for classic history refs, optional hash-backed refs when host metadata is present, and supported media-aware refs (`images`, `video`, `audio`, `3d`, bounded inline/file-backed `text`); allowlisted text files should show literal bounded content or a deterministic source-link fallback, HDR `.exr` / `.hdr` image refs should render as explicit source-preview fallback links, asset-service-only refs should stay explicit as a bounded fallback state, and repeated polls should not duplicate rows after reconnect/resume.
+6. Jobs: verify output previews still resolve for classic history refs, optional hash-backed refs when host metadata is present, and supported media-aware refs (`images`, `video`, `audio`, `3d`, bounded inline/file-backed `text`); a saved 3D file exposed in both `3d` and `result` should appear once; allowlisted text files should show literal bounded content or a deterministic source-link fallback, HDR `.exr` / `.hdr` image refs should render as explicit source-preview fallback links, asset-service-only refs should stay explicit as a bounded fallback state, and repeated polls should not duplicate rows after reconnect/resume.
 7. Parameter Lab: verify bounded scalar sweep/compare values queue with an exact request receipt,
    and verify unsupported structured values or unknown host queue-event shapes fail visibly without
    assigning another prompt's lifecycle.

@@ -9,6 +9,25 @@ Current release notes: [v1.2.0](v1.2.0.md). Previous: [v1.1.0](v1.1.0.md).
 
 <details>
 
+<summary><strong>Refreshed host alignment and output handling verified</strong></summary>
+
+- A saved 3D output exposed through both `3d` and legacy `result` now appears once in
+  Python history parsing and the Jobs view; distinct outputs remain separate.
+- Promoted-widget checks now require a real host-created subgraph binding, an OpenClaw edit,
+  and readback of the projected value and effective inner prompt.
+- Browser requests preserve OpenClaw's deadlines across host fetch adapters. Host timeouts
+  report as timeouts without retrying the timed-out request, while caller cancellation stays
+  distinct and ordinary eligible GET network failures retain bounded retries.
+- The refreshed ComfyUI core passed the real-host browser checks with both its bundled
+  frontend `1.53.6` and the verified standalone release `1.55.11`. The later frontend
+  source checkout and both Desktop surfaces remain separate, unexecuted subjects.
+- The scheduled release download now follows the pinned version and digest policy;
+  acceptance receipts follow the applicable self-review or independent-review rule.
+
+</details>
+
+<details>
+
 <summary><strong>Operator alerts now retire when their condition ends</strong></summary>
 
 - A dismissed alert can appear again. Previously, dismissing a notification left a permanent
@@ -55,8 +74,9 @@ Current release notes: [v1.2.0](v1.2.0.md). Previous: [v1.1.0](v1.1.0.md).
   text, because the browser does not name the failing file in its console output. Requests the
   host makes for its own optional files, and errors raised by other installed packs, are
   reported separately instead of being charged to this pack.
-- Published compatibility evidence still records real-host validation as pending. Promoting it
-  requires an authorized scheduled lane run, so the recorded state stays conservative.
+- At the time of these historical runs, published compatibility evidence still recorded
+  real-host validation as pending. The refreshed, exact-subject qualification is recorded
+  above and in the current compatibility matrix.
 - Public names and comments are now held to a ratchet that blocks new internal-code-only
   naming, and type annotations were modernized in the best-covered packages.
 
@@ -70,9 +90,9 @@ Current release notes: [v1.2.0](v1.2.0.md). Previous: [v1.1.0](v1.1.0.md).
   frontend pin `1.51.9`, and recorded the reproducible standalone frontend release `1.54.3`
   (tag `v1.54.3`) separately from the later reviewed frontend source head `9ff3fd7f0e`.
 - Split compatibility evidence into independent source-review, repository-validation, and
-  real-host states. Real-host validation stays `pending` until an authorized pinned
-  real-host lane run succeeds, so a reviewed checkout can no longer read as a validated
-  running host.
+  real-host states. At that review, real-host validation stayed `pending` until an
+  authorized pinned lane run succeeded, so a reviewed checkout could not read as a
+  validated running host.
 - Extended the published host-surface metadata with separate core source/tag/bundled-frontend
   and frontend source/release attributes instead of redefining existing ones.
 - Legacy Desktop `0.9.4` and current managed-install Comfy-Desktop `1.0.32-rc.1` facts and the
@@ -177,7 +197,8 @@ Current release notes: [v1.2.0](v1.2.0.md). Previous: [v1.1.0](v1.1.0.md).
   authoritative summary. The connector validates the response contract, displays only
   aggregate counts and short job IDs, and uses a coarse queue-count fallback only for
   explicit host-contract/backend unavailability.
-- Published host compatibility notes pin ComfyUI source review `31dfbd4c` / `0.34.0` with its
+- At that update, published host compatibility notes pinned ComfyUI source review
+  `31dfbd4c` / `0.34.0` with its
   bundled frontend `1.51.9`, the reproducible standalone frontend release `1.54.3`, legacy
   Desktop, and current managed-install Comfy-Desktop as separate references. Source review,
   repository validation, and real-host validation are recorded as independent evidence states.

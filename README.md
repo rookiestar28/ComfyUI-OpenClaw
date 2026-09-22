@@ -91,6 +91,25 @@ Deployment profiles and hardening references:
 
 <details>
 
+<summary><strong>Refreshed host alignment and output handling verified</strong></summary>
+
+- A saved 3D output exposed through both `3d` and legacy `result` now appears once in
+  Python history parsing and the Jobs view; distinct outputs remain separate.
+- Promoted-widget checks now require a real host-created subgraph binding, an OpenClaw edit,
+  and readback of the projected value and effective inner prompt.
+- Browser requests preserve OpenClaw's deadlines across host fetch adapters. Host timeouts
+  report as timeouts without retrying the timed-out request, while caller cancellation stays
+  distinct and ordinary eligible GET network failures retain bounded retries.
+- The refreshed ComfyUI core passed the real-host browser checks with both its bundled
+  frontend `1.53.6` and the verified standalone release `1.55.11`. The later frontend
+  source checkout and both Desktop surfaces remain separate, unexecuted subjects.
+- The scheduled release download now follows the pinned version and digest policy;
+  acceptance receipts follow the applicable self-review or independent-review rule.
+
+</details>
+
+<details>
+
 <summary><strong>Operator alerts now retire when their condition ends</strong></summary>
 
 - A dismissed alert can appear again. Previously, dismissing a notification left a permanent
@@ -184,26 +203,6 @@ Deployment profiles and hardening references:
   without inspecting later metadata or rendering binary content.
 - Native ComfyUI video/webcam inputs, audio and text-to-speech flows, and the Graph/Workflows
   workspace remain host-owned instead of being duplicated by OpenClaw.
-
-</details>
-
-<details>
-
-<summary><strong>Maintainability, scale safeguards, and verification governance strengthened</strong></summary>
-
-- Added pinned incremental Ruff and Mypy enforcement that blocks new production-code debt in
-  local and CI validation without requiring an unsafe repository-wide rewrite.
-- Startup loader, route-bootstrap, registration, contract, and import-fallback owners now select
-  extended adversarial validation automatically when their exact high-risk paths change.
-- Added deterministic scale baselines for large jobs history, connector summaries, and frontend
-  output normalization, with exact payload and call-count budgets plus advisory timing evidence.
-- Hardened selected exception boundaries so cancellation, compatibility fallback, status mapping,
-  and redacted diagnostics remain explicit instead of being swallowed by broad catches.
-- Split the largest API route/config, connector command, Slack/Feishu adapter, and frontend
-  Settings/API hotspots into focused owner modules while preserving public routes, patch seams,
-  security checks, DOM behavior, and host compatibility.
-- Promoted the governed backend coverage floor to 55% using consecutive release-cycle evidence,
-  all-hotspot regression ownership, atomic config checks, and fail-closed evidence validation.
 
 </details>
 
@@ -545,7 +544,7 @@ The OpenClaw sidebar includes these built-in tabs. Some tabs are capability-gate
 | Tab | What it does | Related docs |
 | --- | --- | --- |
 | `Settings` | Health/config/log visibility, provider/model setup, model connectivity checks, and optional localhost key storage. | [Quick Start](#quick-start-minimal), [API Overview](#api-overview), [Troubleshooting](#troubleshooting) |
-| `Jobs` | Tracks prompt IDs, consumes deterministic event/task cursor metadata for polling, and shows recent outputs across classic history refs, optional `asset_hash`/`hash`-backed refs when host metadata is present, and current previewable media groups (`images`, `video`, `audio`, `3d`, bounded inline or file-backed `text`). Allowlisted text files use a bounded same-origin `/view` reader and literal text rendering with an explicit source-link fallback; asset-service-only refs stay explicit instead of silently upgrading to `/api/assets`. | [API Overview](#api-overview), [Remote Control (Connector)](#remote-control-connector) |
+| `Jobs` | Tracks prompt IDs, consumes deterministic event/task cursor metadata for polling, and shows recent outputs across classic history refs, optional `asset_hash`/`hash`-backed refs when host metadata is present, and current previewable media groups (`images`, `video`, `audio`, `3d`, bounded inline or file-backed `text`). Duplicate `3d`/legacy `result` aliases for one saved output appear once. Allowlisted text files use a bounded same-origin `/view` reader and literal text rendering with an explicit source-link fallback; asset-service-only refs stay explicit instead of silently upgrading to `/api/assets`. | [API Overview](#api-overview), [Remote Control (Connector)](#remote-control-connector) |
 | `Planner` | Uses assist endpoint to generate structured prompt plans (positive/negative/params). | [Configure an LLM key](#1-configure-an-llm-key-for-plannerrefinervision-helpers), [Nodes](#nodes) |
 | `Refiner` | Refines existing prompts with optional image context and issue/goal input. | [Configure an LLM key](#1-configure-an-llm-key-for-plannerrefinervision-helpers), [Nodes](#nodes) |
 | `Variants` | Local helper for generating batch variant parameter JSON (seed/range-style sweeps). | [Nodes](#nodes), [Operator UX Features](#operator-ux-features) |
