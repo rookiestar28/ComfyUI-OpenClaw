@@ -22,7 +22,7 @@ from run_adversarial_gate import (
     _run_git_diff,
 )
 
-SCHEMA = "openclaw-high-risk-receipt/1"
+SCHEMA = "openclaw-high-risk-receipt/2"
 EXACT_COMMIT_RE = re.compile(r"[0-9a-fA-F]{40}\Z")
 ITEM_RE = re.compile(r"[A-Z][A-Z0-9-]{0,31}\Z")
 
@@ -125,19 +125,48 @@ def _require_identity(value: str | None, label: str) -> str:
     return normalized
 
 
-def _validate_closeout_arguments(args: argparse.Namespace) -> tuple[str, str, str]:
+def _validate_closeout_arguments(
+    args: argparse.Namespace,
+) -> tuple[str, dict[str, str | None]]:
     if args.item is None or not ITEM_RE.fullmatch(args.item):
         raise AcceptanceError("item must be an uppercase roadmap identifier")
 
     implementer = _require_identity(args.implementer, "implementer")
-    reviewer = _require_identity(args.reviewer, "reviewer")
-    if implementer.casefold() == reviewer.casefold():
-        raise AcceptanceError("reviewer must be distinct from implementer")
     if args.review_verdict != "APPROVED":
         raise AcceptanceError("review verdict must be APPROVED")
     if args.full_gate_status != "PASS":
         raise AcceptanceError("full TEST_SOP gate must be PASS")
-    return args.item, implementer, reviewer
+
+    # IMPORTANT: mode and marker must be explicit; inferring either from reviewer
+    # flags could silently turn a marked item into a self-reviewed receipt.
+    if args.review_mode not in {"SELF", "INDEPENDENT"}:
+        raise AcceptanceError("review mode must be SELF or INDEPENDENT")
+    if args.item_marker not in {"NONE", "IMPORTANT", "DANGEROUS"}:
+        raise AcceptanceError("item marker must be NONE, IMPORTANT or DANGEROUS")
+
+    review: dict[str, str | None] = {
+        "implementer": implementer,
+        "mode": args.review_mode,
+        "item_marker": args.item_marker,
+        "marker_reason": None,
+        "verdict": args.review_verdict,
+    }
+    if args.item_marker == "NONE":
+        if args.review_mode != "SELF":
+            raise AcceptanceError("unmarked item requires SELF review mode")
+        if args.marker_reason is not None:
+            raise AcceptanceError("unmarked item must not declare a marker reason")
+        if args.reviewer is not None:
+            raise AcceptanceError("self-review must not declare a separate reviewer")
+    else:
+        if args.review_mode != "INDEPENDENT":
+            raise AcceptanceError("marked item requires INDEPENDENT review mode")
+        review["marker_reason"] = _require_identity(args.marker_reason, "marker reason")
+        reviewer = _require_identity(args.reviewer, "reviewer")
+        if implementer.casefold() == reviewer.casefold():
+            raise AcceptanceError("reviewer must be distinct from implementer")
+        review["reviewer"] = reviewer
+    return args.item, review
 
 
 def _resolve_output(repo_root: Path, output: str | None) -> tuple[Path, str]:
@@ -195,8 +224,24 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--candidate", default="HEAD", help="Candidate Git revision.")
     parser.add_argument("--item")
     parser.add_argument("--implementer")
-    parser.add_argument("--reviewer")
-    parser.add_argument("--review-verdict")
+    parser.add_argument(
+        "--review-mode", help="SELF or INDEPENDENT; required for high-risk closeout."
+    )
+    parser.add_argument(
+        "--item-marker",
+        help="NONE, IMPORTANT or DANGEROUS as filed in the active item.",
+    )
+    parser.add_argument(
+        "--marker-reason",
+        help="Concrete filed reason for an IMPORTANT or DANGEROUS marker.",
+    )
+    parser.add_argument(
+        "--reviewer", help="Distinct reviewer for marked independent review only."
+    )
+    parser.add_argument(
+        "--review-verdict",
+        help="Declared APPROVED disposition for the selected review mode.",
+    )
     parser.add_argument("--full-gate-status")
     parser.add_argument("--output")
     return parser
@@ -221,7 +266,7 @@ def run(argv: Sequence[str] | None = None) -> int:
             return 0
 
         branch = _require_closeout_state(repo_root, args.candidate, candidate_commit)
-        item, implementer, reviewer = _validate_closeout_arguments(args)
+        item, review = _validate_closeout_arguments(args)
         output_path, output_label = _resolve_output(repo_root, args.output)
         receipt: dict[str, object] = {
             "schema": SCHEMA,
@@ -232,11 +277,7 @@ def run(argv: Sequence[str] | None = None) -> int:
             "candidate_commit": candidate_commit,
             "changed_files": changed_files,
             "high_risk_changed_files": high_risk_changed,
-            "review": {
-                "implementer": implementer,
-                "reviewer": reviewer,
-                "verdict": args.review_verdict,
-            },
+            "review": review,
             "gates": {"full_test_sop": args.full_gate_status},
             "limitations": (
                 "Pilot receipt records declared review and gate results; it is not "

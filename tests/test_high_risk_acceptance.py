@@ -64,6 +64,9 @@ def _invoke(
     reviewer: str = "reviewer-b",
     verdict: str = "APPROVED",
     full_gate: str = "PASS",
+    review_mode: str | None = "INDEPENDENT",
+    item_marker: str | None = "IMPORTANT",
+    marker_reason: str | None = "Declared high-impact contract review",
 ) -> subprocess.CompletedProcess[str]:
     command = [
         sys.executable,
@@ -74,14 +77,17 @@ def _invoke(
         candidate,
     ]
     if include_closeout:
+        command.extend(["--item", item, "--implementer", implementer])
+        if review_mode is not None:
+            command.extend(["--review-mode", review_mode])
+        if item_marker is not None:
+            command.extend(["--item-marker", item_marker])
+        if marker_reason is not None:
+            command.extend(["--marker-reason", marker_reason])
+        if reviewer is not None:
+            command.extend(["--reviewer", reviewer])
         command.extend(
             [
-                "--item",
-                item,
-                "--implementer",
-                implementer,
-                "--reviewer",
-                reviewer,
                 "--review-verdict",
                 verdict,
                 "--full-gate-status",
@@ -125,7 +131,7 @@ class HighRiskAcceptancePilotTests(unittest.TestCase):
                     "limitations",
                 },
             )
-            self.assertEqual(receipt["schema"], "openclaw-high-risk-receipt/1")
+            self.assertEqual(receipt["schema"], "openclaw-high-risk-receipt/2")
             self.assertEqual(receipt["item"], "R999")
             self.assertEqual(receipt["branch"], "dev")
             self.assertEqual(receipt["base_commit"], base)
@@ -140,11 +146,70 @@ class HighRiskAcceptancePilotTests(unittest.TestCase):
                     "implementer": "implementer-a",
                     "reviewer": "reviewer-b",
                     "verdict": "APPROVED",
+                    "mode": "INDEPENDENT",
+                    "item_marker": "IMPORTANT",
+                    "marker_reason": "Declared high-impact contract review",
                 },
             )
             self.assertEqual(receipt["gates"], {"full_test_sop": "PASS"})
             self.assertIn("not identity authentication", receipt["limitations"])
             self.assertNotIn(str(repo), receipt_path.read_text(encoding="utf-8"))
+
+    def test_unmarked_self_review_writes_no_invented_reviewer(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo, base, candidate = _make_repo(Path(tmpdir), "services/safe_io.py")
+            result = _invoke(
+                repo,
+                base,
+                candidate,
+                review_mode="SELF",
+                item_marker="NONE",
+                marker_reason=None,
+                reviewer=None,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            receipt = json.loads(
+                (repo / ".planning/acceptance/R999.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                receipt["review"],
+                {
+                    "implementer": "implementer-a",
+                    "verdict": "APPROVED",
+                    "mode": "SELF",
+                    "item_marker": "NONE",
+                    "marker_reason": None,
+                },
+            )
+            self.assertNotIn("reviewer", receipt["review"])
+
+    def test_review_declaration_rejects_missing_or_contradictory_modes(self):
+        cases = (
+            {"review_mode": None},
+            {"item_marker": None},
+            {"review_mode": "SELF"},
+            {"review_mode": "SELF", "item_marker": "NONE", "marker_reason": None},
+            {"item_marker": "NONE"},
+            {"item_marker": "NONE", "marker_reason": None},
+            {"marker_reason": None},
+            {"marker_reason": ""},
+            {
+                "review_mode": "SELF",
+                "item_marker": "NONE",
+                "marker_reason": None,
+                "reviewer": None,
+                "verdict": "FAIL",
+            },
+        )
+        for overrides in cases:
+            with (
+                self.subTest(overrides=overrides),
+                tempfile.TemporaryDirectory() as tmpdir,
+            ):
+                repo, base, candidate = _make_repo(Path(tmpdir), "services/safe_io.py")
+                result = _invoke(repo, base, candidate, **overrides)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertFalse((repo / ".planning/acceptance/R999.json").exists())
 
     def test_standard_risk_and_empty_diffs_are_not_applicable_without_receipts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -164,6 +229,7 @@ class HighRiskAcceptancePilotTests(unittest.TestCase):
     def test_high_risk_closeout_rejects_dirty_or_mismatched_repository_state(self):
         scenarios = (
             "dirty",
+            "staged",
             "non_head",
             "symbolic_candidate",
             "wrong_branch",
@@ -179,6 +245,11 @@ class HighRiskAcceptancePilotTests(unittest.TestCase):
                     (repo / "services/safe_io.py").write_text(
                         "uncommitted\n", encoding="utf-8"
                     )
+                elif scenario == "staged":
+                    (repo / "services/safe_io.py").write_text(
+                        "staged\n", encoding="utf-8"
+                    )
+                    _git(repo, "add", "services/safe_io.py")
                 elif scenario == "non_head":
                     extra = repo / "docs/extra.md"
                     extra.parent.mkdir(parents=True, exist_ok=True)
