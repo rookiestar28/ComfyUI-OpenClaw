@@ -47,8 +47,8 @@ test.describe('Desktop host parity lane', () => {
     await expect(host).toHaveAttribute('data-openclaw-frontend-source-revision', '23559a8f86');
     await expect(host).toHaveAttribute('data-openclaw-frontend-release-version', '1.55.11');
     await expect(host).toHaveAttribute('data-openclaw-frontend-release-revision', '3a851363');
-    // No repository-side lane may present this as validated.
-    await expect(host).toHaveAttribute('data-openclaw-real-host-validation', 'pending');
+    // The pinned standalone host campaign qualifies these release subjects.
+    await expect(host).toHaveAttribute('data-openclaw-real-host-validation', 'validated');
 
     const stamped = await host.evaluate((node) => JSON.stringify({ ...node.dataset }));
     for (const forbidden of ['.planning', 'reference/docs', '/mnt/', '.tmp']) {
@@ -95,6 +95,7 @@ test.describe('Desktop host parity lane', () => {
     await expect(host).toHaveAttribute('data-openclaw-desktop-core-version', '0.22.3');
     await expect(host).toHaveAttribute('data-openclaw-desktop-embedded-frontend', '1.43.18');
     await expect(host).toHaveAttribute('data-openclaw-desktop-frontend-parity', 'lagging');
+    await expect(host).toHaveAttribute('data-openclaw-real-host-validation', 'pending');
 
     await clickTab(page, 'Approvals');
     await expect(page.locator('#apr-list')).toContainText('apr-r166-001');
@@ -125,6 +126,7 @@ test.describe('Desktop host parity lane', () => {
     await expect(host).toHaveAttribute('data-openclaw-desktop-version', '1.0.32-rc.1');
     await expect(host).toHaveAttribute('data-openclaw-desktop-core-version', '');
     await expect(host).toHaveAttribute('data-openclaw-desktop-embedded-frontend', '');
+    await expect(host).toHaveAttribute('data-openclaw-real-host-validation', 'pending');
 
     await clickTab(page, 'Approvals');
     await expect(page.locator('#apr-list')).toContainText('apr-r166-001');

@@ -521,14 +521,16 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
         validation = validate_metadata(metadata, today=date(2026, 9, 6))
         return validation, {entry["code"] for entry in validation["violations"]}
 
-    def test_repo_matrix_keeps_real_host_validation_pending(self):
+    def test_repo_matrix_names_the_completed_real_host_campaign(self):
         doc = read_matrix_document(
             REPO_ROOT / "docs" / "release" / "compatibility_matrix.md"
         )
         states = doc["metadata"]["evidence_states"]
-        self.assertEqual(states["real_host"]["state"], "pending")
-        self.assertIsNone(states["real_host"]["run_id"])
-        self.assertIsNone(states["real_host"]["evidence_id"])
+        self.assertEqual(states["real_host"]["state"], "validated")
+        self.assertEqual(states["real_host"]["run_id"], "host-pair-20260922-01")
+        self.assertEqual(
+            states["real_host"]["evidence_id"], "host-evidence-20260922-01"
+        )
         self.assertEqual(states["source_review"]["state"], "reviewed")
         self.assertEqual(states["repository_validation"]["state"], "validated")
         self.assertEqual(

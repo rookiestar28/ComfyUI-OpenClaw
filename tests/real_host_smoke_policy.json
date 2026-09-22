@@ -77,7 +77,9 @@
     "matrix_path": "docs/release/compatibility_matrix.md",
     "surface_module": "web/openclaw_host_surface.js",
     "evidence_key": "real_host",
-    "current_state": "pending",
+    "current_state": "validated",
+    "run_id": "host-pair-20260922-01",
+    "evidence_id": "host-evidence-20260922-01",
     "states_requiring_run_id": [
       "validated",
       "failed"

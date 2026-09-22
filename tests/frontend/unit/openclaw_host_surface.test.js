@@ -397,16 +397,16 @@ describe("R254 host reference baseline separation", () => {
         expect(standalone.sourceDescribe.startsWith(`${standalone.releaseTag}-`)).toBe(true);
     });
 
-    it("reports real-host validation as pending", () => {
+    it("reports the completed real-host validation independently from source review", () => {
         // CRITICAL: source review and the local gate are not runtime proof. Only
-        // an authorized pinned real-host lane run may change this.
-        expect(HOST_REAL_VALIDATION_STATE).toBe("pending");
+        // an authorized pinned real-host campaign may change this.
+        expect(HOST_REAL_VALIDATION_STATE).toBe("validated");
     });
 
     it("stamps the separated reference facts on every host surface", () => {
         for (const surface of Object.values(HOST_SURFACES)) {
             const container = document.createElement("div");
-            stampHostSurfaceMetadata(container, { hostSurface: surface, win: {} });
+            stampHostSurfaceMetadata(container, { app: { hostSurface: surface }, win: {} });
 
             expect(container.dataset.openclawCoreSourceRevision, surface).toBe("e638023d");
             expect(container.dataset.openclawCoreVersion, surface).toBe("0.37.0");
@@ -415,7 +415,9 @@ describe("R254 host reference baseline separation", () => {
             expect(container.dataset.openclawFrontendSourceRevision, surface).toBe("23559a8f86");
             expect(container.dataset.openclawFrontendReleaseVersion, surface).toBe("1.55.11");
             expect(container.dataset.openclawFrontendReleaseRevision, surface).toBe("3a851363");
-            expect(container.dataset.openclawRealHostValidation, surface).toBe("pending");
+            expect(container.dataset.openclawRealHostValidation, surface).toBe(
+                surface === HOST_SURFACES.standaloneFrontend ? "validated" : "pending",
+            );
         }
     });
 

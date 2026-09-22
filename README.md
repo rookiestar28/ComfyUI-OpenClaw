@@ -137,8 +137,11 @@ Deployment profiles and hardening references:
   text, because the browser does not name the failing file in its console output. Requests the
   host makes for its own optional files, and errors raised by other installed packs, are
   reported separately instead of being charged to this pack.
-- Published compatibility evidence still records real-host validation as pending. Promoting it
-  requires an authorized scheduled lane run, so the recorded state stays conservative.
+- A later authorized qualification exercised the refreshed pinned ComfyUI core with its bundled
+  frontend `1.53.6` and the SHA256-checked standalone frontend release `1.55.11`. Both passed
+  the real-host browser checks, including a host-created promoted widget and sidebar handover.
+  The compatibility matrix records this paired subject scope separately from the later frontend
+  source checkout and Desktop surfaces.
 - Public names and comments are now held to a ratchet that blocks new internal-code-only
   naming, and type annotations were modernized in the best-covered packages.
 

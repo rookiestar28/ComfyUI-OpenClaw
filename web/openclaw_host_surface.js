@@ -27,13 +27,13 @@ export const HOST_CORE_REFERENCE = Object.freeze({
 });
 
 /**
- * R254: real-host validation state.
+ * Real-host validation state for the pinned core and two frontend subjects.
  *
  * CRITICAL: source review and repository validation are not runtime proof. This
- * stays `pending` until an authorized pinned real-host lane run succeeds; never
- * flip it from source inspection or a local gate result.
+ * state is backed by the paired pinned-host campaign in the compatibility matrix;
+ * do not extend it to the later frontend source head or Desktop surfaces.
  */
-export const HOST_REAL_VALIDATION_STATE = "pending";
+export const HOST_REAL_VALIDATION_STATE = "validated";
 
 export const HOST_SURFACE_REFERENCES = Object.freeze({
     [HOST_SURFACES.standaloneFrontend]: Object.freeze({
@@ -283,7 +283,11 @@ export function stampHostSurfaceMetadata(container, options = {}) {
             standaloneReference.releaseVersion;
         container.dataset.openclawFrontendReleaseRevision =
             standaloneReference.releaseRevision;
-        container.dataset.openclawRealHostValidation = HOST_REAL_VALIDATION_STATE;
+        // IMPORTANT: the paired campaign exercised standalone ComfyUI only;
+        // stamping its verdict on Desktop would claim an untested host passed.
+        container.dataset.openclawRealHostValidation = capabilities.isDesktop
+            ? "pending"
+            : HOST_REAL_VALIDATION_STATE;
     }
     return capabilities;
 }

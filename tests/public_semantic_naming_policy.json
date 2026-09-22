@@ -321,7 +321,7 @@
     "web/openclaw_comfy_api.js": 1,
     "web/openclaw_compat.js": 1,
     "web/openclaw_fetch_wrappers.js": 1,
-    "web/openclaw_host_surface.js": 4,
+    "web/openclaw_host_surface.js": 3,
     "web/openclaw_queue_monitor.js": 2,
     "web/openclaw_security_advisory.js": 1,
     "web/openclaw_session.js": 1,

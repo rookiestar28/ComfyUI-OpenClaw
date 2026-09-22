@@ -9,15 +9,15 @@
     "desktop": "0.9.4 (core 0.22.3 / frontend 1.43.18)"
   },
   "evidence": {
-    "evidence_id": "compat-matrix-refresh-20260922",
-    "updated_at": "2026-09-22T16:21:00+08:00",
-    "updated_by": "host-compatibility-baseline-refresh"
+    "evidence_id": "compat-matrix-host-qualification-20260922",
+    "updated_at": "2026-09-22T17:44:47+08:00",
+    "updated_by": "pinned-two-subject-host-qualification"
   },
   "evidence_states": {
     "real_host": {
-      "evidence_id": null,
-      "run_id": null,
-      "state": "pending"
+      "evidence_id": "host-evidence-20260922-01",
+      "run_id": "host-pair-20260922-01",
+      "state": "validated"
     },
     "repository_validation": {
       "evidence_id": "repo-validation-20260922-host-refresh",
@@ -81,7 +81,7 @@ This document tracks current reference anchors and separately records source, re
 | Component | Reference Subject | Best Effort / Experimental | Notes |
 | :--- | :--- | :--- | :--- |
 | **ComfyUI** | `e638023d` source-review anchor (`v0.37.0-9-ge638023d`; `pyproject.toml` version `0.37.0`) | Older tagged snapshots | Tag baseline `v0.37.0` is commit `73c9bad4`, 9 commits behind this source head. That tag pins bundled frontend `1.52.7`, while the supplied source head pins `1.53.6`; the smoke subject uses the source head. Neither source review nor tag identity is runtime proof. |
-| **ComfyUI Frontend** | `1.55.11` release `v1.55.11` at commit `3a851363` (reproducible release subject) | Source-review head `23559a8f86` (`v1.55.11-104-g23559a8f86`, package `1.55.12`), 104 commits beyond the release tag | The release and later source head are distinct subjects. The release lane pins the publisher-reported `dist.zip` digest and must verify downloaded bytes before execution; this source head has not run. Sidebar extension contract remains compatible; prefer the current sidebar store API with deprecated facade fallback. |
+| **ComfyUI Frontend** | `1.55.11` release `v1.55.11` at commit `3a851363` (reproducible release subject) | Source-review head `23559a8f86` (`v1.55.11-104-g23559a8f86`, package `1.55.12`), 104 commits beyond the release tag | The release and later source head are distinct subjects. The release archive's downloaded bytes matched the pinned published size and SHA256 before host execution; the later source head has not run. Sidebar extension contract remains compatible; prefer the current sidebar store API with deprecated facade fallback. |
 | **Legacy Desktop** | `0.9.4 (core 0.22.3 / frontend 1.43.18)` reference anchor | Legacy fixed bundle may lag standalone frontend | Preserve the recorded fixed-bundle contract for existing parity coverage |
 | **Current Comfy-Desktop** | `1.0.32-rc.1` reference anchor (`85e28b7a`; `v1.0.32-rc.1-3-g85e28b7`) | Hosted component versions vary by installation | Treat the managed-install generation separately; do not infer fixed core/frontend versions from the application release |
 | **Python** | 3.13 | 3.10-3.12 compatibility targets; 3.14 best effort | Current executed baseline is the local Windows Full Gate on Python 3.13. 3.10-3.12 are exercised by the scheduled exact-version matrix, and 3.10 also by the routine per-push backend job, so they are compatibility targets by support commitment rather than for want of testing. Only the matrix emits the dated, commit-bound artifact the 14-day currency rule reads, so its artifacts remain the sole promotion evidence; a passing push corroborates but does not promote. 3.10 requires reassessment on 2026-10-31; below 3.10 is unsupported |
@@ -91,9 +91,9 @@ This document tracks current reference anchors and separately records source, re
 
 - **ComfyUI host runtime**: current bootstrap assumptions remain aligned with upstream `PromptServer` startup and route registration flow, including `/api`-prefixed canonical API routing.
 - **Frontend host surface**: current sidebar integration contract remains compatible with the standalone frontend reference anchor, while inactive subgraph diagnostics and promoted-widget behavior remain regression-sensitive seams.
-- **Promoted-widget evidence limit**: historical real-host runs exercised an ordinary widget with constructed source fields. The current real-host spec now requires a host-created subgraph binding, an OpenClaw Parameter Lab edit, a projected value readback and the serialized inner prompt value. That stronger spec has not yet been run on the refreshed host subjects; their promoted-widget behavior remains unqualified. The raw inner widget seed need not change when the promoted host value owns execution.
-- **Evidence states**: the metadata block records source review, repository validation, and real-host validation independently. The refreshed source identities have been reviewed; repository validation passed the local Windows Full Gate on 2026-09-22. Real-host validation stays `pending` until a lane run carrying a run identifier succeeds against the pinned anchor; a run executed by hand does not promote the state on its own, and no field may present the later frontend source head as an executed release.
-- **Real-host lane execution status**: the initial manual run used a ComfyUI `0.34.0` host matched on release version and passed both frontend subjects, bundled `1.51.9` and standalone release `1.54.3`. A later pinned workflow run also passed both subjects after runner fixes. These are separate historical evidence subjects. The current matrix's `real_host` state remains `pending` for the refreshed subjects. Neither historical result validates the newer core or frontend release.
+- **Promoted-widget evidence scope**: historical real-host runs exercised an ordinary widget with constructed source fields. The refreshed paired run exercised a host-created subgraph binding, an OpenClaw Parameter Lab edit, projected value readback and serialized inner prompt value on both pinned frontend subjects. The raw inner widget seed need not change when the promoted host value owns execution.
+- **Evidence states**: the metadata block records source review, repository validation, and real-host validation independently. The refreshed source identities have been reviewed; repository validation passed the local Windows Full Gate on 2026-09-22. The paired real-host campaign on the pinned core reports `validated` for bundled frontend `1.53.6` and standalone release `1.55.11`, with a campaign run identifier and separate subject receipts. This does not validate the later frontend source head or either Desktop surface.
+- **Real-host lane execution status**: the earlier manual and workflow runs exercised historical core/frontend subjects. The refreshed paired campaign used core `e638023d`, the existing bundled package `1.53.6`, and a SHA256-checked standalone release archive for `1.55.11`. Both subjects passed the ten-case real-host browser spec on a loopback host, with zero skipped cases; the two host processes were stopped afterward. The historical results remain separate evidence.
 - **Legacy Desktop host surface**: Desktop `0.9.4` embeds frontend `1.43.18`, which lags the standalone frontend `1.55.11` release reference. Validate this fixed bundle against its own anchor.
 - **Current Comfy-Desktop host surface**: application `1.0.32-rc.1` is a managed-install generation. Its hosted ComfyUI and frontend versions are `installation_specific`; the application anchor must not be cross-wired into fixed hosted-version claims.
 

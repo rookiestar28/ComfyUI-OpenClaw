@@ -470,11 +470,12 @@ describe("real host evidence gating", () => {
         expect(
             evidenceUpdateIsAllowed(POLICY, {
                 state: POLICY.evidence.current_state,
-                runId: null,
-                evidenceId: null,
+                runId: POLICY.evidence.run_id,
+                evidenceId: POLICY.evidence.evidence_id,
             }).allowed,
         ).toBe(true);
-        expect(POLICY.evidence.current_state).toBe("pending");
+        expect(POLICY.evidence.current_state).toBe("validated");
+        expect(POLICY.evidence.run_id).toBe("host-pair-20260922-01");
     });
 });
 
