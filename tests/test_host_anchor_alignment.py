@@ -42,16 +42,18 @@ STALE_MARKERS = (
 )
 
 CURRENT_MARKERS = (
-    # ComfyUI core source-review head, tag baseline and bundled frontend pin.
-    "31dfbd4c",
-    "v0.34.0-46-g31dfbd4c",
-    "12d52794",
-    "1.51.9",
-    # Standalone frontend source-review head versus the reproducible release.
-    "9ff3fd7f0e",
-    "v1.54.3-21-g9ff3fd7f0e",
-    "b2f55875",
-    "1.54.3",
+    # Core tag and reviewed HEAD pin different bundled frontend versions.
+    "e638023d",
+    "v0.37.0-9-ge638023d",
+    "73c9bad4",
+    "1.52.7",
+    "1.53.6",
+    # Standalone frontend source head/package versus reproducible release.
+    "23559a8f86",
+    "v1.55.11-104-g23559a8f86",
+    "3a851363",
+    "1.55.12",
+    "1.55.11",
     # Desktop generations are unchanged and must stay published.
     "85e28b7a",
     "installation_specific",

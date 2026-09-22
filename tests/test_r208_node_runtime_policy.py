@@ -23,7 +23,7 @@ class TestR208NodeRuntimePolicy(unittest.TestCase):
         self.assertIn("Node.js 18+", test_sop)
         self.assertIn("CI uses 20", test_sop)
         self.assertIn("Node.js 18+", e2e_sop)
-        self.assertNotEqual(package["engines"]["node"], ">=25 <26")
+        self.assertNotEqual(package["engines"]["node"], ">=26.8.2 <27")
 
     def test_compatibility_matrix_documents_host_frontend_engine_boundary(self):
         matrix = (REPO_ROOT / "docs" / "release" / "compatibility_matrix.md").read_text(
@@ -31,7 +31,7 @@ class TestR208NodeRuntimePolicy(unittest.TestCase):
         )
 
         self.assertIn("## Residual Host-Contract Decisions", matrix)
-        self.assertIn("`node >=25 <26`", matrix)
+        self.assertIn("`node >=26.8.2 <27`", matrix)
         self.assertIn("`>=18.0.0`", matrix)
         self.assertIn("tests/TEST_SOP.md", matrix)
         self.assertIn("tests/E2E_TESTING_SOP.md", matrix)
