@@ -70,4 +70,24 @@ describe("openclaw_fetch_wrappers", () => {
         await expect(wrapped("/health")).rejects.toThrow(/Cancelled/);
         expect(fetchFn).toHaveBeenCalledTimes(1);
     });
+
+    it("does not retry a host header TimeoutError", async () => {
+        const fetchFn = vi.fn().mockRejectedValue(new DOMException("Fetch timeout", "TimeoutError"));
+        const wrapped = composeFetchWrappersOnce(fetchFn, [withGetRetry({ retries: 2 })]);
+
+        await expect(wrapped("/health", { method: "GET" })).rejects.toMatchObject({ name: "TimeoutError" });
+        expect(fetchFn).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not retry after the product signal is already aborted", async () => {
+        const controller = new AbortController();
+        const fetchFn = vi.fn().mockImplementation(async () => {
+            controller.abort();
+            throw new TypeError("adapter rejected after cancellation");
+        });
+        const wrapped = composeFetchWrappersOnce(fetchFn, [withGetRetry({ retries: 2 })]);
+
+        await expect(wrapped("/health", { signal: controller.signal })).rejects.toThrow(/adapter rejected/);
+        expect(fetchFn).toHaveBeenCalledTimes(1);
+    });
 });

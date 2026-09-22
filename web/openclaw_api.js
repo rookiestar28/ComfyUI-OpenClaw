@@ -47,6 +47,12 @@ import {
  * @typedef {OpenClawFetchSuccess|OpenClawFetchFailure} OpenClawFetchResult
  */
 
+function classifyTransportError(err, cancelledByCaller, timedOut) {
+    if (cancelledByCaller) return "cancelled";
+    if (timedOut || err?.name === "TimeoutError") return "timeout";
+    return isAbortError(err) ? "cancelled" : "network_error";
+}
+
 export class OpenClawAPI {
     constructor() {
         this._capabilitiesCache = null;
@@ -84,19 +90,29 @@ export class OpenClawAPI {
     async _fetchWithCandidates(url, options = {}) {
         let response = null;
         const candidates = this._candidatePaths(url);
+        const nativeOptions = { ...options };
+        delete nativeOptions.timeoutMs;
+        // IMPORTANT: OpenClaw owns the deadline at both call sites. Disable only the
+        // newer host's header timer; leaking timeoutMs into native fetch breaks fallback parity.
+        const hostOptions = { ...nativeOptions, timeoutMs: null };
 
         for (const candidate of candidates) {
-            response = await this._decoratedFetchApi(candidate, options);
+            response = await this._decoratedFetchApi(candidate, hostOptions);
             if (response.status !== 404) break;
         }
 
         if (response && response.status === 404 && typeof url === "string") {
             for (const candidate of candidates) {
                 try {
-                    response = await this._decoratedNativeFetch(fileURL(candidate), options);
+                    response = await this._decoratedNativeFetch(fileURL(candidate), nativeOptions);
                     if (response.status !== 404) break;
-                } catch {
-                    // ignore and continue fallback probes
+                } catch (err) {
+                    // IMPORTANT: an expired product signal ends fallback probing.
+                    // Swallowing it reports the prior 404 instead of cancellation/timeout.
+                    if (nativeOptions.signal?.aborted || isAbortError(err) || err?.name === "TimeoutError") {
+                        throw err;
+                    }
+                    // Ignore ordinary network failure and continue fallback probes.
                 }
             }
         }
@@ -176,12 +192,10 @@ export class OpenClawAPI {
         } catch (err) {
             clearTimeout(timeoutId);
             // Network or Timeout/Abort errors
-            const isAbort = isAbortError(err);
-            const abortKind = cancelledByCaller ? "cancelled" : (timedOut ? "timeout" : "cancelled");
             return {
                 ok: false,
                 status: 0,
-                error: isAbort ? abortKind : "network_error",
+                error: classifyTransportError(err, cancelledByCaller, timedOut),
                 detail: err?.message,
             };
         } finally {
@@ -223,17 +237,9 @@ export class OpenClawAPI {
             controller.abort();
         }, timeout);
 
-        if (signal) {
-            if (signal.aborted) {
-                cancelledByCaller = true;
-                controller.abort();
-            } else {
-                signal.addEventListener("abort", () => {
-                    cancelledByCaller = true;
-                    controller.abort();
-                }, { once: true });
-            }
-        }
+        const detachExternalAbort = linkAbortSignal(signal, controller, () => {
+            cancelledByCaller = true;
+        });
 
         try {
             const response = await this._fetchWithCandidates(url, {
@@ -326,14 +332,15 @@ export class OpenClawAPI {
             return { ok: false, status: 0, error: "stream_incomplete" };
         } catch (err) {
             clearTimeout(timeoutId);
-            const isAbort = err?.name === "AbortError";
-            const abortKind = cancelledByCaller ? "cancelled" : (timedOut ? "timeout" : "cancelled");
             return {
                 ok: false,
                 status: 0,
-                error: isAbort ? abortKind : "network_error",
+                error: classifyTransportError(err, cancelledByCaller, timedOut),
                 detail: err?.message,
             };
+        } finally {
+            clearTimeout(timeoutId);
+            detachExternalAbort();
         }
     }
 

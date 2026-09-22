@@ -111,8 +111,10 @@ export function withGetRetry({ retries = 1 } = {}) {
             try {
                 return await next(input, init);
             } catch (err) {
-                const isAbort = err?.name === "AbortError";
-                if (isAbort || i >= attempts - 1) throw err;
+                // IMPORTANT: host header timeouts and an expired product signal are terminal.
+                // Retrying either can duplicate work after the request deadline.
+                const isDeadline = err?.name === "AbortError" || err?.name === "TimeoutError" || init?.signal?.aborted;
+                if (isDeadline || i >= attempts - 1) throw err;
                 lastErr = err;
             }
         }
