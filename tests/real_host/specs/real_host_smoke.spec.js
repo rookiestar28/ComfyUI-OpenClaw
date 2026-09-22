@@ -4,9 +4,9 @@
  * Every assertion here is about a surface a real ComfyUI host owns and the
  * mocked harness can only imitate: which frontend the host actually served, that
  * OpenClaw registered into the host's sidebar, that its floor survives the host's
- * own layout, that a promoted widget carries identifiers the host assigned rather
- * than ones the test invented, that an annotated temporary result is fetched from
- * the temporary directory, and that OpenClaw releases the shared mount when the
+ * own layout, that a promoted widget connects a host input to an inner node and
+ * survives an OpenClaw edit and prompt serialization, that an annotated temporary
+ * result is fetched from the temporary directory, and that OpenClaw releases the shared mount when the
  * host hands it to another custom tab without calling a destroy callback.
  *
  * HOTSPOT: selectors here must be owned by the host or by OpenClaw, never by the
@@ -313,32 +313,88 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
     expect(failures, failures.join('\n')).toEqual([]);
   });
 
-  test('a promoted widget round-trips with identifiers the host assigned', async ({ page }) => {
+  test('a host-promoted widget reaches the inner prompt through OpenClaw', async ({ page }) => {
     await openOpenClawSidebar(page);
+    const extensionBase = await resolveOpenClawExtensionBase(page);
+    // Keep the fixture synthetic and local to the disposable browser workflow.
+    const workflow = {
+      last_node_id: 1,
+      last_link_id: 0,
+      nodes: [{
+        id: 1, type: 'EmptyLatentImage', pos: [100, 100], size: [300, 120],
+        flags: {}, order: 0, mode: 0, inputs: [],
+        outputs: [{ name: 'LATENT', type: 'LATENT', links: null, slot_index: 0 }],
+        properties: {}, widgets_values: [512, 512, 1],
+      }],
+      links: [], groups: [], config: {}, extra: {}, version: 0.4,
+    };
 
-    const widget = await page.evaluate(async () => {
-      const graph = window.app?.graph;
-      const node = graph?.nodes?.find(
-        (candidate) => Array.isArray(candidate.widgets) && candidate.widgets.length > 0,
-      );
-      if (!node) {
-        return null;
+    const widget = await page.evaluate(async ({ base, fixture }) => {
+      const app = window.app;
+      if (!app?.graph || typeof app.loadGraphData !== 'function' ||
+          typeof app.graphToPrompt !== 'function') {
+        throw new Error('host workflow APIs are unavailable');
       }
-      const target = node.widgets[0];
-      const original = target.value;
-      const next = typeof original === 'number' ? original + 1 : `${original ?? ''}x`;
-      target.value = next;
-      return {
-        sourceNodeId: String(node.id),
-        sourceWidgetName: String(target.name),
-        value: target.value,
-        wroteBack: target.value === next,
-      };
-    });
+      const previous = app.graph.serialize();
+      let evidence;
+      let restored = false;
+      try {
+        const loaded = await app.loadGraphData(fixture, true, true, null, { skipAssetScans: true });
+        if (loaded === false) throw new Error('host refused the synthetic workflow');
+        const graph = app.graph;
+        const source = graph._nodes?.find((node) => node.type === 'EmptyLatentImage');
+        const innerWidget = source?.widgets?.find((entry) => entry.name === 'width');
+        if (!source || !innerWidget) throw new Error('synthetic host node or width widget is missing');
+        // The host owns the input-slot and projection lifecycle. No source fields are assigned.
+        let innerSlot = source.getSlotFromWidget(innerWidget);
+        if (!innerSlot) {
+          innerSlot = source.addInput('width', 'INT');
+          innerSlot.widget = { name: innerWidget.name };
+        }
+        const { subgraph, node: host } = graph.convertToSubgraph(new Set([source]));
+        const inner = subgraph._nodes?.find((node) => String(node.id) === String(source.id));
+        const boundSlot = inner?.getSlotFromWidget(innerWidget);
+        if (!inner || !boundSlot) throw new Error('inner widget slot was not preserved');
+        const input = subgraph.addInput('width', 'INT');
+        const link = input.connect(boundSlot, inner);
+        const hostInput = host.inputs.find((entry) => entry.name === 'width' && entry.widgetId);
+        const projection = host.widgets?.find((entry) => entry.widgetId === hostInput?.widgetId);
+        if (!link || !hostInput || !projection) {
+          throw new Error('host did not create a connected promoted widget projection');
+        }
+        const { ParameterLabTab } = await import(`${base}/tabs/parameter_lab_tab.js`);
+        const editedValue = 513;
+        const productWidget = ParameterLabTab.applyOverrides({ [`${host.id}.width`]: editedValue });
+        const prompt = await app.graphToPrompt();
+        const observedLink = subgraph.getLink(link.id);
+        evidence = {
+          hostNodeId: String(host.id),
+          innerNodeId: String(inner.id),
+          connectedNodeId: observedLink ? String(observedLink.target_id) : null,
+          widgetName: innerWidget.name,
+          connectedInputName: inner.inputs[observedLink?.target_slot]?.widget?.name ?? null,
+          hostInputWidgetId: String(hostInput.widgetId),
+          projectedWidgetId: String(projection.widgetId),
+          productEditWidgetId: productWidget?.widgetId ? String(productWidget.widgetId) : null,
+          bindingConnected: observedLink === link && boundSlot.link === link.id,
+          editedValue,
+          promotedValue: projection.value,
+          promptValue: prompt.output?.[`${host.id}:${inner.id}`]?.inputs?.width,
+        };
+      } finally {
+        // A test failure may occur after graph conversion; always restore the prior workflow.
+        const reloaded = await app.loadGraphData(previous, true, true, null, { skipAssetScans: true });
+        const current = app.graph.serialize();
+        const comparable = (graph) => ({ nodes: graph.nodes, links: graph.links, groups: graph.groups });
+        restored = reloaded !== false &&
+          JSON.stringify(comparable(current)) === JSON.stringify(comparable(previous));
+      }
+      return { ...evidence, restored };
+    }, { base: extensionBase, fixture: workflow });
 
     const failures = evaluatePromotedWidget(widget);
     expect(failures, failures.join('\n')).toEqual([]);
-    expect(widget.wroteBack).toBe(true);
+    expect(widget.restored).toBe(true);
   });
 
   test('an annotated temporary result stays visible and is fetched from the temp directory', async ({

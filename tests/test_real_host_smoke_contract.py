@@ -527,6 +527,28 @@ class TestSpecUsesSurfacesThatExistOutsideTheMock(unittest.TestCase):
         # would leave the real call path untested.
         self.assertNotIn("setSidebarTab", self.spec)
 
+    def test_the_promoted_probe_reaches_a_real_binding_and_product_edit_path(self):
+        # A prior smoke accepted an ordinary widget after manufacturing source fields.
+        # Keep its replacement isolated in this real-host spec, and require the
+        # host graph/edit/prompt operations that the mocked harness cannot prove.
+        for operation in (
+            "app.loadGraphData(fixture",
+            "graph.convertToSubgraph(",
+            "input.connect(boundSlot, inner)",
+            "ParameterLabTab.applyOverrides(",
+            "app.graphToPrompt()",
+            "app.loadGraphData(previous",
+            "finally {",
+        ):
+            with self.subTest(operation=operation):
+                self.assertIn(operation, self.spec)
+        self.assertNotIn("sourceNodeId: String(node.id)", self.spec)
+        parameter_lab = (REPO_ROOT / "web" / "tabs" / "parameter_lab_tab.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("export const ParameterLabTab", parameter_lab)
+        self.assertIn("applyOverrides(run)", parameter_lab)
+
     def test_the_peer_fixture_registers_the_way_the_product_does(self):
         peer = (PEER_FIXTURE_SOURCE / "web" / "peer_sidebar_tab.js").read_text(
             encoding="utf-8"

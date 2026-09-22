@@ -236,28 +236,37 @@ export function evaluateSidebarGeometry(geometry, minWidthPx) {
     return failures;
 }
 
-/**
- * A promoted widget read back from a real host must carry the host's own
- * identifiers. Empty or placeholder source fields mean the smoke fabricated the
- * link rather than observing one, which is the failure this check exists for.
- */
+/** Require a connected host input, projection and inner prompt readback. */
 export function evaluatePromotedWidget(widget) {
     const failures = [];
     if (!widget || typeof widget !== "object") {
         return ["no promoted widget was read back from the host"];
     }
-    for (const field of ["sourceNodeId", "sourceWidgetName"]) {
-        const value = widget[field];
-        if (typeof value !== "string" || value.trim() === "") {
-            failures.push(`promoted widget ${field} was not populated by the host`);
-            continue;
-        }
-        if (/^(?:unknown|placeholder|test|fake|mock)/i.test(value.trim())) {
-            failures.push(`promoted widget ${field} looks fabricated: ${value}`);
+    const requiredText = [
+        "hostNodeId", "innerNodeId", "connectedNodeId", "widgetName",
+        "connectedInputName", "hostInputWidgetId", "projectedWidgetId", "productEditWidgetId",
+    ];
+    for (const field of requiredText) {
+        if (typeof widget[field] !== "string" || widget[field].trim() === "") {
+            failures.push(`promoted widget ${field} was not read from the host`);
         }
     }
-    if (failures.length === 0 && widget.value === undefined) {
-        failures.push("promoted widget carried no value to write back");
+    // IMPORTANT: current host projections do not expose the old source fields.
+    // A plain widget can fake those fields; require a real inner link and prompt value.
+    if (widget.bindingConnected !== true ||
+        widget.connectedNodeId !== widget.innerNodeId ||
+        widget.connectedInputName !== widget.widgetName) {
+        failures.push("promoted widget has no connected inner widget binding");
+    }
+    if (widget.hostInputWidgetId !== widget.projectedWidgetId ||
+        widget.hostInputWidgetId !== widget.productEditWidgetId) {
+        failures.push("promoted widget identifiers disagree across host input, projection and product edit");
+    }
+    if (widget.editedValue === undefined || widget.promotedValue !== widget.editedValue) {
+        failures.push("OpenClaw edit did not reach the promoted widget value");
+    }
+    if (widget.editedValue === undefined || widget.promptValue !== widget.editedValue) {
+        failures.push("OpenClaw edit did not reach the serialized inner prompt input");
     }
     return failures;
 }

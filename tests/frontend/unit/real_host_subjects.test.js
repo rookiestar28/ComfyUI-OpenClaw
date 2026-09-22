@@ -354,35 +354,56 @@ describe("real host sidebar geometry", () => {
 });
 
 describe("real host promoted widget", () => {
-    it("accepts identifiers the host actually assigned", () => {
-        expect(
-            evaluatePromotedWidget({ sourceNodeId: "14", sourceWidgetName: "seed", value: 7 }),
-        ).toEqual([]);
+    const bound = () => ({
+        hostNodeId: "14",
+        innerNodeId: "7",
+        connectedNodeId: "7",
+        widgetName: "width",
+        connectedInputName: "width",
+        hostInputWidgetId: "root/14/width",
+        projectedWidgetId: "root/14/width",
+        productEditWidgetId: "root/14/width",
+        bindingConnected: true,
+        editedValue: 513,
+        promotedValue: 513,
+        promptValue: 513,
     });
 
-    it("rejects missing, blank, and fabricated identifiers", () => {
+    it("accepts only a host-linked projection with product edit and effective prompt readback", () => {
+        expect(evaluatePromotedWidget(bound())).toEqual([]);
+    });
+
+    it("rejects an ordinary widget and fabricated source fields", () => {
         expect(evaluatePromotedWidget(null)).toEqual([
             "no promoted widget was read back from the host",
         ]);
-        expect(evaluatePromotedWidget({ sourceNodeId: "14", value: 1 })).toEqual([
-            "promoted widget sourceWidgetName was not populated by the host",
-        ]);
-        expect(
-            evaluatePromotedWidget({ sourceNodeId: "  ", sourceWidgetName: "seed", value: 1 }),
-        ).toEqual(["promoted widget sourceNodeId was not populated by the host"]);
-        expect(
-            evaluatePromotedWidget({
-                sourceNodeId: "mock-node-1",
-                sourceWidgetName: "placeholder",
-                value: 1,
-            }),
-        ).toHaveLength(2);
+        expect(evaluatePromotedWidget({ name: "width", value: 513 })).not.toEqual([]);
+        expect(evaluatePromotedWidget({ sourceNodeId: "14", sourceWidgetName: "width", value: 513 })).not.toEqual([]);
     });
 
-    it("rejects a widget with no value to write back", () => {
-        expect(evaluatePromotedWidget({ sourceNodeId: "14", sourceWidgetName: "seed" })).toEqual([
-            "promoted widget carried no value to write back",
-        ]);
+    it("rejects missing or disconnected inner binding and mismatched host IDs", () => {
+        for (const evidence of [
+            { ...bound(), bindingConnected: false },
+            { ...bound(), innerNodeId: "" },
+            { ...bound(), connectedNodeId: "8" },
+            { ...bound(), connectedInputName: "height" },
+            { ...bound(), hostInputWidgetId: null },
+            { ...bound(), projectedWidgetId: "another-widget" },
+            { ...bound(), productEditWidgetId: "another-widget" },
+        ]) {
+            expect(evaluatePromotedWidget(evidence)).not.toEqual([]);
+        }
+    });
+
+    it("rejects an edit that does not reach the projected value and inner prompt input", () => {
+        for (const evidence of [
+            { ...bound(), promotedValue: 512 },
+            { ...bound(), promptValue: 512 },
+            { ...bound(), promptValue: undefined },
+            { ...bound(), editedValue: undefined },
+        ]) {
+            expect(evaluatePromotedWidget(evidence)).not.toEqual([]);
+        }
     });
 });
 

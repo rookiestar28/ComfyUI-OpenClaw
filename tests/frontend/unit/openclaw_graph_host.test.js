@@ -213,6 +213,37 @@ describe("openclaw_graph_host", () => {
         ]);
     });
 
+    it("edits a store-backed host projection without inventing source fields", () => {
+        const store = { value: 512 };
+        const projection = {
+            name: "width",
+            type: "number",
+            options: { min: 1, max: 8192 },
+            get value() { return store.value; },
+            set value(next) { store.value = next; },
+        };
+        Object.defineProperty(projection, "widgetId", {
+            value: "root/14/width", enumerable: false,
+        });
+        const source = { id: 7, widgets: [{ name: "width", value: 512 }] };
+        const host = {
+            id: 14,
+            type: "SubgraphNode",
+            widgets: [projection],
+            inputs: [{ name: "width", widgetId: projection.widgetId }],
+            subgraph: { _nodes: [source] },
+        };
+        const graph = { _nodes: [host] };
+
+        expect(Object.keys(projection)).not.toContain("widgetId");
+        expect(getGraphWidgetCatalog(graph, "14")[0].value).toBe(512);
+        const resolved = resolveGraphWidget(graph, "14", "width");
+        expect(resolved?.widget).toBe(projection);
+        resolved.widget.value = 513;
+        expect(projection.value).toBe(513);
+        expect(source.widgets[0].value).toBe(512);
+    });
+
     it("keeps non-numeric node ids stable and catalogs new structured widget types", () => {
         const graph = createHostShapedGraphFixture();
         const catalog = getGraphNodeCatalog(graph);
