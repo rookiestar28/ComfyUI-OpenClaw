@@ -164,7 +164,9 @@ class TestComfyUIHistoryParsing(unittest.TestCase):
     def test_extract_images_keeps_enriched_id_only_ref_explicit(self):
         from services.comfyui_history import extract_images
 
-        images = extract_images({"outputs": {"2": {"images": [{"id": "asset-only-42"}]}}})
+        images = extract_images(
+            {"outputs": {"2": {"images": [{"id": "asset-only-42"}]}}}
+        )
         self.assertEqual(len(images), 1)
         self.assertEqual(images[0]["asset_api_id"], "asset-only-42")
         self.assertTrue(images[0]["asset_api_required"])
