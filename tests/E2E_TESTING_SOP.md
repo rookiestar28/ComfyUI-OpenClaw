@@ -34,7 +34,7 @@ Boundary:
 
 - Node.js 18+
 - npm 9+
-- Python 3.8+ (used by the Playwright web server: `python -m http.server 3000`)
+- Python 3.10+ from the project-local environment (the repository floor also applies to the Playwright web server: `python -m http.server 3000`)
 - Playwright browsers installed (`npx playwright install chromium`)
 
 Notes:
