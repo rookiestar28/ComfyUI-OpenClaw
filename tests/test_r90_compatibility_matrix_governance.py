@@ -530,8 +530,15 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
         self.assertIsNone(states["real_host"]["run_id"])
         self.assertIsNone(states["real_host"]["evidence_id"])
         self.assertEqual(states["source_review"]["state"], "reviewed")
-        self.assertEqual(states["repository_validation"]["state"], "pending")
-        self.assertIsNone(states["repository_validation"]["run_id"])
+        self.assertEqual(states["repository_validation"]["state"], "validated")
+        self.assertEqual(
+            states["repository_validation"]["run_id"],
+            "windows-full-gate-20260922-host-refresh",
+        )
+        self.assertEqual(
+            states["repository_validation"]["evidence_id"],
+            "repo-validation-20260922-host-refresh",
+        )
 
     def test_repo_matrix_separates_frontend_source_head_from_release(self):
         doc = read_matrix_document(
