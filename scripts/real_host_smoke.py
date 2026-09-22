@@ -30,6 +30,7 @@ import hashlib
 import json
 import ntpath
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -53,6 +54,7 @@ PEER_FIXTURE_DIR_NAME = "openclaw-smoke-peer"
 AUTHORIZATION_ENV = "OPENCLAW_REAL_HOST_SMOKE_AUTHORIZED"
 DANGEROUS_BIND_OVERRIDE_ENV = "OPENCLAW_SECURITY_DANGEROUS_BIND_OVERRIDE"
 SHA256_HEX_LENGTH = 64
+RELEASE_TAG_RE = re.compile(r"v\d+\.\d+\.\d+\Z")
 READINESS_POLL_SECONDS = 2.0
 COPY_EXCLUSIONS = (
     ".git",
@@ -550,10 +552,17 @@ def release_digest_is_pinned(policy: dict[str, Any], subject_id: str) -> bool:
 
 def emit_pins(policy: dict[str, Any], output_path: Path | None) -> str:
     """Publish the pinned facts a workflow needs to decide what it may run."""
+    release = resolve_subject(policy, "standalone_release")
+    release_tag = release.get("release_tag")
+    # IMPORTANT: this tag crosses into a CI shell environment; a malformed value
+    # would download the wrong artifact or corrupt the GitHub output file.
+    if not isinstance(release_tag, str) or not RELEASE_TAG_RE.fullmatch(release_tag):
+        raise SmokeError("standalone release tag must be a vMAJOR.MINOR.PATCH tag")
     lines = [
         f"core_head={policy['core']['source_head']}",
         f"bundled_frontend={policy['subjects']['bundled']['frontend_version']}",
         f"release_frontend={policy['subjects']['standalone_release']['frontend_version']}",
+        f"release_tag={release_tag}",
         "release_digest_pinned="
         + (
             "true"

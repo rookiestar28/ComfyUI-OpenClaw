@@ -26,6 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       core_head: ${{ steps.pins.outputs.core_head }}
+      release_tag: ${{ steps.pins.outputs.release_tag }}
       release_digest_pinned: ${{ steps.pins.outputs.release_digest_pinned }}
     steps:
       - uses: actions/checkout@v5
@@ -105,9 +106,10 @@ jobs:
       - name: Download the pinned release asset
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         run: |
           mkdir -p "${{ runner.temp }}/release-asset"
-          gh release download v1.54.3 \
+          gh release download "$RELEASE_TAG" \
             --repo Comfy-Org/ComfyUI_frontend \
             --pattern dist.zip \
             --dir "${{ runner.temp }}/release-asset"

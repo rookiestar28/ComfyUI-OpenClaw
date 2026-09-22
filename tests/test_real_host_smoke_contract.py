@@ -9,6 +9,7 @@ deadlines, that the lane never blocks a pull request, and that compatibility
 evidence cannot advance without a run identifier.
 """
 
+import copy
 import io
 import json
 import re
@@ -380,6 +381,16 @@ class TestTheLaneNeverBlocksOrEscalates(unittest.TestCase):
         )
         self.assertIn("--emit-pins", self.workflow)
 
+    def test_the_download_uses_the_prepared_release_tag_without_a_stale_literal(self):
+        self.assertIn(
+            "release_tag: ${{ steps.pins.outputs.release_tag }}", self.workflow
+        )
+        self.assertIn(
+            "RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}", self.workflow
+        )
+        self.assertIn('gh release download "$RELEASE_TAG"', self.workflow)
+        self.assertNotRegex(self.workflow, r"gh release download v\d+\.\d+\.\d+")
+
     def test_the_workflow_authorizes_execution_explicitly_rather_than_by_default(self):
         self.assertEqual(self.workflow.count(f"{AUTHORIZATION_ENV}: '1'"), 2)
 
@@ -447,8 +458,20 @@ class TestRuntimeEvidenceNeverNamesAnUnexecutedCommit(unittest.TestCase):
         rendered = emit_pins(POLICY, None)
 
         self.assertIn(f"core_head={POLICY['core']['source_head']}", rendered)
+        self.assertIn(
+            f"release_tag={POLICY['subjects']['standalone_release']['release_tag']}",
+            rendered,
+        )
         self.assertIn("release_digest_pinned=true", rendered)
         self.assertNotIn(POLICY["not_executed"]["frontend_source_head"], rendered)
+
+    def test_release_tag_output_rejects_missing_or_unsafe_policy_value(self):
+        for tag in (None, "", "v1.55.11; echo unsafe", "v1.55.11\nother"):
+            with self.subTest(tag=tag):
+                changed = copy.deepcopy(POLICY)
+                changed["subjects"]["standalone_release"]["release_tag"] = tag
+                with self.assertRaises(SmokeError):
+                    emit_pins(changed, None)
 
 
 class TestSpecUsesSurfacesThatExistOutsideTheMock(unittest.TestCase):
