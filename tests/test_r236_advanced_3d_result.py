@@ -84,6 +84,101 @@ class TestR236Advanced3DResult(unittest.TestCase):
         )
         self.assertNotIn(metadata_canary, json.dumps(output, sort_keys=True))
 
+    def test_saved_3d_standard_item_and_legacy_result_share_one_file(self):
+        for suffix in ("glb", "spz", "ply"):
+            with self.subTest(suffix=suffix):
+                name = f"model_00001.{suffix}"
+                standard = {
+                    "filename": name,
+                    "subfolder": "3d",
+                    "type": "output",
+                    "asset_hash": "blake3:example",
+                }
+                history = {
+                    "outputs": {
+                        "save": {
+                            "result": [f"3d/{name}", None, []],
+                            "3d": [standard],
+                        }
+                    }
+                }
+                outputs = extract_output_refs(history)
+                self.assertEqual(len(outputs), 1)
+                self.assertEqual(outputs[0]["filename"], name)
+                self.assertEqual(outputs[0]["asset_hash"], "blake3:example")
+
+    def test_legacy_alias_is_only_suppressed_for_matching_file_in_same_node(self):
+        history = {
+            "outputs": {
+                "save": {
+                    "result": ["3d/model.glb [temp]", None, []],
+                    "3d": [
+                        {"filename": "model.glb", "subfolder": "3d", "type": "output"},
+                        {"filename": "other.glb", "subfolder": "3d", "type": "temp"},
+                    ],
+                },
+                "second": {
+                    "result": ["3d/model.glb [temp]", None, []],
+                    "3d": [
+                        {"filename": "model.glb", "subfolder": "3d", "type": "temp"}
+                    ],
+                },
+            }
+        }
+        outputs = extract_output_refs(history)
+        self.assertEqual(len(outputs), 4)
+        self.assertEqual(
+            [(output["filename"], output["type"]) for output in outputs],
+            [
+                ("model.glb", "output"),
+                ("other.glb", "temp"),
+                ("model.glb", "temp"),
+                ("model.glb", "temp"),
+            ],
+        )
+
+    def test_asset_only_standard_item_does_not_hide_legacy_file(self):
+        history = {
+            "outputs": {
+                "save": {
+                    "result": ["3d/model.glb", None, []],
+                    "3d": [{"asset": {"id": "model.glb"}}],
+                }
+            }
+        }
+        outputs = extract_output_refs(history)
+        self.assertEqual(len(outputs), 2)
+        self.assertTrue(outputs[0]["asset_api_required"])
+        self.assertEqual(outputs[1]["filename"], "model.glb")
+
+    def test_same_filename_in_another_folder_or_node_remains_distinct(self):
+        history = {
+            "outputs": {
+                "first": {
+                    "3d": [
+                        {
+                            "filename": "model.glb",
+                            "subfolder": "different",
+                            "type": "output",
+                        }
+                    ],
+                    "result": ["3d/model.glb", None, []],
+                },
+                "second": {
+                    "3d": [
+                        {"filename": "model.glb", "subfolder": "3d", "type": "output"}
+                    ],
+                    "result": ["3d/model.glb", None, []],
+                },
+            }
+        }
+        outputs = extract_output_refs(history)
+        self.assertEqual(len(outputs), 3)
+        self.assertEqual(
+            [output["subfolder"] for output in outputs],
+            ["different", "3d", "3d"],
+        )
+
     def test_accepts_reviewed_suffixes_and_normalizes_backslashes(self):
         history = {
             "outputs": {

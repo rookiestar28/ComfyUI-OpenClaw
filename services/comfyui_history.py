@@ -364,6 +364,7 @@ def extract_output_refs(history_item: Dict[str, Any]) -> List[Dict[str, Any]]:
     for node_output in outputs.values():
         if not isinstance(node_output, dict):
             continue
+        standard_3d_files: set[tuple[str, str, str]] = set()
         for media_type in PREVIEWABLE_MEDIA_TYPES:
             refs = node_output.get(media_type, [])
             if not isinstance(refs, list):
@@ -372,10 +373,32 @@ def extract_output_refs(history_item: Dict[str, Any]) -> List[Dict[str, Any]]:
                 normalized = normalize_history_output_ref(ref, media_type)
                 if normalized:
                     results.append(normalized)
+                    if normalized["media_type"] == "3d" and (
+                        isinstance(ref, str)
+                        or (
+                            isinstance(ref, dict)
+                            and _pick_string(ref, "filename", "name")
+                        )
+                    ):
+                        standard_3d_files.add(
+                            (
+                                normalized["type"],
+                                normalized["subfolder"],
+                                normalized["filename"],
+                            )
+                        )
 
         advanced_3d_ref = _normalize_advanced_3d_result(node_output.get("result"))
         if advanced_3d_ref:
-            results.append(advanced_3d_ref)
+            legacy_file = (
+                advanced_3d_ref["type"],
+                advanced_3d_ref["subfolder"],
+                advanced_3d_ref["filename"],
+            )
+            # IMPORTANT: saved 3D nodes emit one file in both `3d` and legacy `result`.
+            # Suppress only the matching same-node alias; global/hash-only dedup loses outputs.
+            if legacy_file not in standard_3d_files:
+                results.append(advanced_3d_ref)
 
         file_refs = node_output.get("files")
         if isinstance(file_refs, list) and len(file_refs) <= FILE_OUTPUT_MAX_REFS:

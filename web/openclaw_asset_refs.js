@@ -417,6 +417,7 @@ export function extractHistoryOutputRefs(historyItem = {}) {
         if (!nodeOutput || typeof nodeOutput !== "object") {
             continue;
         }
+        const standard3dFiles = new Set();
         for (const [mediaType, refs] of Object.entries(nodeOutput)) {
             if (!PREVIEWABLE_MEDIA_TYPES.has(mediaType) || !Array.isArray(refs)) {
                 continue;
@@ -425,13 +426,27 @@ export function extractHistoryOutputRefs(historyItem = {}) {
                 const normalized = normalizeComfyOutputRef(imageRef, mediaType);
                 if (normalized) {
                     results.push(normalized);
+                    if (normalized.media_type === "3d" && (
+                        typeof imageRef === "string" || pickFilename(imageRef)
+                    )) {
+                        standard3dFiles.add(JSON.stringify([
+                            normalized.type, normalized.subfolder, normalized.filename,
+                        ]));
+                    }
                 }
             }
         }
 
         const advanced3dRef = normalizeAdvanced3dResult(nodeOutput.result);
         if (advanced3dRef) {
-            results.push(advanced3dRef);
+            const legacyFile = JSON.stringify([
+                advanced3dRef.type, advanced3dRef.subfolder, advanced3dRef.filename,
+            ]);
+            // IMPORTANT: saved 3D nodes emit one file in both `3d` and legacy `result`.
+            // Suppress only the matching same-node alias; global/hash-only dedup loses outputs.
+            if (!standard3dFiles.has(legacyFile)) {
+                results.push(advanced3dRef);
+            }
         }
 
         const fileRefs = nodeOutput.files;

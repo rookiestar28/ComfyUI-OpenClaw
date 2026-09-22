@@ -507,6 +507,80 @@ describe("openclaw asset refs", () => {
         expect(JSON.stringify(outputs[0])).not.toContain(metadataCanary);
     });
 
+    it("keeps one saved 3d file when the host emits standard and legacy forms", () => {
+        for (const suffix of ["glb", "spz", "ply"]) {
+            const filename = `model_00001.${suffix}`;
+            const outputs = extractHistoryOutputRefs({
+                outputs: {
+                    save: {
+                        result: [`3d/${filename}`, null, []],
+                        "3d": [{ filename, subfolder: "3d", type: "output", asset_hash: "blake3:example" }],
+                    },
+                },
+            });
+            expect(outputs).toHaveLength(1);
+            expect(outputs[0]).toEqual(expect.objectContaining({
+                filename,
+                asset_hash: "blake3:example",
+                viewParams: { filename: "blake3:example" },
+            }));
+        }
+    });
+
+    it("suppresses only a matching same-node legacy alias", () => {
+        const outputs = extractHistoryOutputRefs({
+            outputs: {
+                save: {
+                    result: ["3d/model.glb [temp]", null, []],
+                    "3d": [
+                        { filename: "model.glb", subfolder: "3d", type: "output" },
+                        { filename: "other.glb", subfolder: "3d", type: "temp" },
+                    ],
+                },
+                second: {
+                    result: ["3d/model.glb [temp]", null, []],
+                    "3d": [{ filename: "model.glb", subfolder: "3d", type: "temp" }],
+                },
+            },
+        });
+        expect(outputs.map(({ filename, type }) => [filename, type])).toEqual([
+            ["model.glb", "output"],
+            ["other.glb", "temp"],
+            ["model.glb", "temp"],
+            ["model.glb", "temp"],
+        ]);
+    });
+
+    it("does not let an asset-only entry hide a legacy file path", () => {
+        const outputs = extractHistoryOutputRefs({
+            outputs: {
+                save: {
+                    result: ["3d/model.glb", null, []],
+                    "3d": [{ asset: { id: "model.glb" } }],
+                },
+            },
+        });
+        expect(outputs).toHaveLength(2);
+        expect(outputs[0].asset_api_required).toBe(true);
+        expect(outputs[1].filename).toBe("model.glb");
+    });
+
+    it("keeps the same filename in another folder or output node", () => {
+        const outputs = extractHistoryOutputRefs({
+            outputs: {
+                first: {
+                    "3d": [{ filename: "model.glb", subfolder: "different", type: "output" }],
+                    result: ["3d/model.glb", null, []],
+                },
+                second: {
+                    "3d": [{ filename: "model.glb", subfolder: "3d", type: "output" }],
+                    result: ["3d/model.glb", null, []],
+                },
+            },
+        });
+        expect(outputs.map(({ subfolder }) => subfolder)).toEqual(["different", "3d", "3d"]);
+    });
+
     it("keeps advanced 3d suffix and path parity with the backend", () => {
         const suffixes = [
             "glb",
