@@ -15,35 +15,35 @@
   },
   "core": {
     "repository": "https://github.com/comfyanonymous/ComfyUI.git",
-    "source_head": "31dfbd4ca0cb36ab6a573fc13daec8cc3a2e1e98",
-    "project_version": "0.34.0",
-    "bundled_frontend_version": "1.51.9"
+    "source_head": "e638023d54497dbe0579565e5de4bb7076899592",
+    "project_version": "0.37.0",
+    "bundled_frontend_version": "1.53.6"
   },
   "subjects": {
     "bundled": {
       "id": "bundled",
-      "frontend_version": "1.51.9",
+      "frontend_version": "1.53.6",
       "front_end_version_arg": null,
       "summary": "The frontend package the core manifest pins. The host serves it when no frontend version is requested."
     },
     "standalone_release": {
       "id": "standalone_release",
-      "frontend_version": "1.54.3",
-      "front_end_version_arg": "Comfy-Org/ComfyUI_frontend@v1.54.3",
-      "release_tag": "v1.54.3",
-      "release_tag_commit": "b2f5587509d744d7779accce193db53f36a91d4a",
+      "frontend_version": "1.55.11",
+      "front_end_version_arg": "Comfy-Org/ComfyUI_frontend@v1.55.11",
+      "release_tag": "v1.55.11",
+      "release_tag_commit": "3a851363c48b233b3b576131dff6e1e92b0e1573",
       "release_asset_name": "dist.zip",
-      "release_asset_sha256": "5fda9339cd3bc6be95c78197072fb699c7eda398b58cccd9c69216fada38b04d",
-      "release_asset_size_bytes": 24710618,
-      "release_asset_digest_source": "GitHub release API, tag v1.54.3, asset dist.zip; publisher-reported and read twice. The lane still hashes the downloaded bytes and refuses a mismatch.",
-      "web_root_relative": "web_custom_versions/Comfy-Org_ComfyUI_frontend/1.54.3",
+      "release_asset_sha256": "37fac946be14a9cd96ec3fc0dd92fca826c24093c11e1e7184262f8a187f1071",
+      "release_asset_size_bytes": 25031746,
+      "release_asset_digest_source": "GitHub release API, tag v1.55.11, asset dist.zip; publisher-reported on 2026-09-22 and not independently downloaded here. The lane hashes downloaded bytes and refuses a mismatch.",
+      "web_root_relative": "web_custom_versions/Comfy-Org_ComfyUI_frontend/1.55.11",
       "summary": "The reproducible standalone release. Its asset digest is pinned from published release metadata, so the lane verifies the artifact before the host sees it; the subject still refuses to run without explicit authorization."
     }
   },
   "not_executed": {
-    "frontend_source_head": "9ff3fd7f0e36b810a621288ceaf6e74e3846bedd",
-    "frontend_source_describe": "v1.54.3-21-g9ff3fd7f0e",
-    "reason": "A reviewed checkout 21 commits ahead of the release. The host can reproduce the release, not this commit, so no runtime evidence may name it."
+    "frontend_source_head": "23559a8f86227837aef21d1da8b7aa8149f3b2cc",
+    "frontend_source_describe": "v1.55.11-104-g23559a8f86",
+    "reason": "A reviewed checkout 104 commits ahead of the release, with package version 1.55.12. The host can reproduce release 1.55.11, not this commit, so no runtime evidence may name it."
   },
   "deadlines_seconds": {
     "fetch": 900,

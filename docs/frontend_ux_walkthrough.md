@@ -23,7 +23,7 @@ This document summarizes the current OpenClaw sidebar UI structure and how to ve
 - Host surface: `web/openclaw_host_surface.js` resolves standalone frontend, legacy fixed-bundle
   Desktop, and current managed-install Comfy-Desktop separately, then stamps explicit metadata so
   generation-specific behavior stays testable.
-- Output refs: `web/openclaw_asset_refs.js` normalizes classic history refs, optional `asset_hash`/`hash` refs when host metadata is present, and current previewable media groups (`images`, `video`, `audio`, `3d`, bounded inline or file-backed `text`) onto one media-aware contract. Allowlisted text files under the host `files` key stay on same-origin `/view` and use a 5-second, 64-KiB streaming, strict textual-MIME/UTF-8 reader with a 4,096-character display cap. HDR `.exr` / `.hdr` image refs show source-preview fallback links instead of normal thumbnails, text reaches the DOM only as literal text, and asset-service-only refs remain explicit fallback states instead of silently auto-fetching `/api/assets`.
+- Output refs: `web/openclaw_asset_refs.js` normalizes classic history refs, optional `asset_hash`/`hash` refs and top-level output-entry `id` metadata when the host provides them, and current previewable media groups (`images`, `video`, `audio`, `3d`, bounded inline or file-backed `text`) onto one media-aware contract. Allowlisted text files under the host `files` key stay on same-origin `/view` and use a 5-second, 64-KiB streaming, strict textual-MIME/UTF-8 reader with a 4,096-character display cap. HDR `.exr` / `.hdr` image refs show source-preview fallback links instead of normal thumbnails, text reaches the DOM only as literal text, and asset-service-only refs remain explicit fallback states instead of silently auto-fetching `/api/assets`.
 - Styles: `web/openclaw.css` provides shared design tokens and component classes.
 - Errors and compatibility helpers: `web/openclaw_utils.js` provides `showError()` / `clearError()` plus runtime legacy-class alias helpers used to keep canonical `openclaw-*` markup compatible with existing `moltbot-*` selectors.
 
@@ -66,7 +66,7 @@ If `assist_streaming` is unavailable or the stream transport degrades, Planner/R
 - The sidebar stamps its resolved host surface and refreshed host-reference metadata at mount time so desktop bundle drift is explicit in diagnostics and regression tests.
 - The standalone Remote Admin Console stamps the same host-surface metadata on its document root,
   including legacy Desktop `0.9.4`, fixed core `0.22.3`, embedded frontend `1.43.18`, and lagging
-  parity relative to standalone frontend `1.54.3`. It also exposes current Comfy-Desktop
+  parity relative to standalone frontend `1.55.11`. It also exposes current Comfy-Desktop
   `1.0.32-rc.1` with `installation_specific` hosted versions. Presence of
   `window.__comfyDesktop2` identifies that host generation only; it does not authorize privileged
   capability calls or inspect bridge members.

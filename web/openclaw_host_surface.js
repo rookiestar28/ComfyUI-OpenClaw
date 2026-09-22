@@ -18,12 +18,12 @@ export const HOST_SURFACES = Object.freeze({
  * core manifest pins. These are three different subjects; do not collapse them.
  */
 export const HOST_CORE_REFERENCE = Object.freeze({
-    sourceRevision: "31dfbd4c",
-    sourceDescribe: "v0.34.0-46-g31dfbd4c",
-    version: "0.34.0",
-    tag: "v0.34.0",
-    tagRevision: "12d52794",
-    bundledFrontendVersion: "1.51.9",
+    sourceRevision: "e638023d",
+    sourceDescribe: "v0.37.0-9-ge638023d",
+    version: "0.37.0",
+    tag: "v0.37.0",
+    tagRevision: "73c9bad4",
+    bundledFrontendVersion: "1.53.6",
 });
 
 /**
@@ -37,19 +37,19 @@ export const HOST_REAL_VALIDATION_STATE = "pending";
 
 export const HOST_SURFACE_REFERENCES = Object.freeze({
     [HOST_SURFACES.standaloneFrontend]: Object.freeze({
-        frontendVersion: "1.54.3",
-        sourceRevision: "9ff3fd7f0e",
-        sourceDescribe: "v1.54.3-21-g9ff3fd7f0e",
-        // The reproducible release, 21 commits behind the reviewed source head.
-        releaseVersion: "1.54.3",
-        releaseTag: "v1.54.3",
-        releaseRevision: "b2f55875",
+        frontendVersion: "1.55.11",
+        sourceRevision: "23559a8f86",
+        sourceDescribe: "v1.55.11-104-g23559a8f86",
+        // The reproducible release, 104 commits behind the reviewed source head.
+        releaseVersion: "1.55.11",
+        releaseTag: "v1.55.11",
+        releaseRevision: "3a851363",
     }),
     [HOST_SURFACES.desktop]: Object.freeze({
         desktopVersion: "0.9.4",
         coreVersion: "0.22.3",
         embeddedFrontendVersion: "1.43.18",
-        standaloneFrontendVersion: "1.54.3",
+        standaloneFrontendVersion: "1.55.11",
         frontendParity: "lagging",
         generation: "legacy_fixed_bundle",
         hostedVersionMode: "fixed",

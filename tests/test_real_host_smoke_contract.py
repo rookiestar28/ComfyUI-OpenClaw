@@ -228,7 +228,7 @@ class TestHostStartupIsBoundedAndLoopbackOnly(unittest.TestCase):
         self.assertNotIn("--listen", release)
         self.assertNotIn("--front-end-version", bundled)
         self.assertEqual(
-            release[-2:], ["--front-end-version", "Comfy-Org/ComfyUI_frontend@v1.54.3"]
+            release[-2:], ["--front-end-version", "Comfy-Org/ComfyUI_frontend@v1.55.11"]
         )
         for args in (bundled, release):
             for forbidden in POLICY["runtime"]["forbidden_args"]:

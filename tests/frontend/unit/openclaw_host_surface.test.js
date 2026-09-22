@@ -14,18 +14,18 @@ import {
 describe("openclaw_host_surface", () => {
     it("publishes exact standalone and two-generation desktop references", () => {
         expect(HOST_SURFACE_REFERENCES[HOST_SURFACES.standaloneFrontend]).toEqual({
-            frontendVersion: "1.54.3",
-            sourceRevision: "9ff3fd7f0e",
-            sourceDescribe: "v1.54.3-21-g9ff3fd7f0e",
-            releaseVersion: "1.54.3",
-            releaseTag: "v1.54.3",
-            releaseRevision: "b2f55875",
+            frontendVersion: "1.55.11",
+            sourceRevision: "23559a8f86",
+            sourceDescribe: "v1.55.11-104-g23559a8f86",
+            releaseVersion: "1.55.11",
+            releaseTag: "v1.55.11",
+            releaseRevision: "3a851363",
         });
         expect(HOST_SURFACE_REFERENCES[HOST_SURFACES.desktop]).toEqual({
             desktopVersion: "0.9.4",
             coreVersion: "0.22.3",
             embeddedFrontendVersion: "1.43.18",
-            standaloneFrontendVersion: "1.54.3",
+            standaloneFrontendVersion: "1.55.11",
             frontendParity: "lagging",
             generation: "legacy_fixed_bundle",
             hostedVersionMode: "fixed",
@@ -271,7 +271,7 @@ describe("openclaw_host_surface", () => {
         });
         expect(container.dataset.openclawHostSurface).toBe("desktop");
         expect(container.dataset.openclawDesktopHost).toBe("true");
-        expect(container.dataset.openclawReferenceFrontend).toBe("1.54.3");
+        expect(container.dataset.openclawReferenceFrontend).toBe("1.55.11");
         expect(container.dataset.openclawCurrentDesktopVersion).toBe("1.0.32-rc.1");
         expect(container.dataset.openclawCurrentDesktopGeneration).toBe("managed_install");
         expect(container.dataset.openclawCurrentDesktopHostedVersionMode).toBe(
@@ -381,12 +381,12 @@ describe("openclaw_host_surface", () => {
 describe("R254 host reference baseline separation", () => {
     it("publishes core source, tag and bundled-frontend facts as distinct values", () => {
         expect(HOST_CORE_REFERENCE).toEqual({
-            sourceRevision: "31dfbd4c",
-            sourceDescribe: "v0.34.0-46-g31dfbd4c",
-            version: "0.34.0",
-            tag: "v0.34.0",
-            tagRevision: "12d52794",
-            bundledFrontendVersion: "1.51.9",
+            sourceRevision: "e638023d",
+            sourceDescribe: "v0.37.0-9-ge638023d",
+            version: "0.37.0",
+            tag: "v0.37.0",
+            tagRevision: "73c9bad4",
+            bundledFrontendVersion: "1.53.6",
         });
         expect(HOST_CORE_REFERENCE.sourceRevision).not.toBe(HOST_CORE_REFERENCE.tagRevision);
     });
@@ -408,13 +408,13 @@ describe("R254 host reference baseline separation", () => {
             const container = document.createElement("div");
             stampHostSurfaceMetadata(container, { hostSurface: surface, win: {} });
 
-            expect(container.dataset.openclawCoreSourceRevision, surface).toBe("31dfbd4c");
-            expect(container.dataset.openclawCoreVersion, surface).toBe("0.34.0");
-            expect(container.dataset.openclawCoreTagRevision, surface).toBe("12d52794");
-            expect(container.dataset.openclawCoreBundledFrontend, surface).toBe("1.51.9");
-            expect(container.dataset.openclawFrontendSourceRevision, surface).toBe("9ff3fd7f0e");
-            expect(container.dataset.openclawFrontendReleaseVersion, surface).toBe("1.54.3");
-            expect(container.dataset.openclawFrontendReleaseRevision, surface).toBe("b2f55875");
+            expect(container.dataset.openclawCoreSourceRevision, surface).toBe("e638023d");
+            expect(container.dataset.openclawCoreVersion, surface).toBe("0.37.0");
+            expect(container.dataset.openclawCoreTagRevision, surface).toBe("73c9bad4");
+            expect(container.dataset.openclawCoreBundledFrontend, surface).toBe("1.53.6");
+            expect(container.dataset.openclawFrontendSourceRevision, surface).toBe("23559a8f86");
+            expect(container.dataset.openclawFrontendReleaseVersion, surface).toBe("1.55.11");
+            expect(container.dataset.openclawFrontendReleaseRevision, surface).toBe("3a851363");
             expect(container.dataset.openclawRealHostValidation, surface).toBe("pending");
         }
     });

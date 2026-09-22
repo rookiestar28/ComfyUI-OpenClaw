@@ -4,14 +4,14 @@
 {
   "anchors": {
     "comfy_desktop": "1.0.32-rc.1 (85e28b7a / v1.0.32-rc.1-3-g85e28b7)",
-    "comfyui": "31dfbd4c (v0.34.0-46-g31dfbd4c / pyproject 0.34.0)",
-    "comfyui_frontend": "1.54.3 (9ff3fd7f0e / v1.54.3-21-g9ff3fd7f0e)",
+    "comfyui": "e638023d (v0.37.0-9-ge638023d / pyproject 0.37.0)",
+    "comfyui_frontend": "1.55.11 (23559a8f86 / v1.55.11-104-g23559a8f86)",
     "desktop": "0.9.4 (core 0.22.3 / frontend 1.43.18)"
   },
   "evidence": {
-    "evidence_id": "compat-matrix-refresh-20260906",
-    "updated_at": "2026-09-06T14:10:00+08:00",
-    "updated_by": "host-compatibility-baseline-refresh"
+    "evidence_id": "compat-matrix-source-refresh-20260922",
+    "updated_at": "2026-09-22T15:42:00+08:00",
+    "updated_by": "host-reference-source-review"
   },
   "evidence_states": {
     "real_host": {
@@ -20,12 +20,12 @@
       "state": "pending"
     },
     "repository_validation": {
-      "evidence_id": "repo-validation-20260906",
-      "run_id": "windows-full-gate-20260906",
-      "state": "validated"
+      "evidence_id": null,
+      "run_id": null,
+      "state": "pending"
     },
     "source_review": {
-      "evidence_id": "source-review-20260905",
+      "evidence_id": "source-review-20260922",
       "run_id": null,
       "state": "reviewed"
     }
@@ -54,34 +54,34 @@
   },
   "reference_baselines": {
     "comfyui": {
-      "bundled_frontend_version": "1.51.9",
-      "project_version": "0.34.0",
-      "source_describe": "v0.34.0-46-g31dfbd4c",
-      "source_head": "31dfbd4ca0cb36ab6a573fc13daec8cc3a2e1e98",
-      "tag": "v0.34.0",
-      "tag_commit": "12d5279438bfefc058a269eae805ceab6047777f"
+      "bundled_frontend_version": "1.53.6",
+      "project_version": "0.37.0",
+      "source_describe": "v0.37.0-9-ge638023d",
+      "source_head": "e638023d54497dbe0579565e5de4bb7076899592",
+      "tag": "v0.37.0",
+      "tag_commit": "73c9bad4d21e7addbe1d13bc92eee0f1431b017d"
     },
     "comfyui_frontend": {
-      "package_version": "1.54.3",
-      "release_tag": "v1.54.3",
-      "release_tag_commit": "b2f5587509d744d7779accce193db53f36a91d4a",
-      "release_version": "1.54.3",
-      "source_describe": "v1.54.3-21-g9ff3fd7f0e",
-      "source_head": "9ff3fd7f0e36b810a621288ceaf6e74e3846bedd"
+      "package_version": "1.55.12",
+      "release_tag": "v1.55.11",
+      "release_tag_commit": "3a851363c48b233b3b576131dff6e1e92b0e1573",
+      "release_version": "1.55.11",
+      "source_describe": "v1.55.11-104-g23559a8f86",
+      "source_head": "23559a8f86227837aef21d1da8b7aa8149f3b2cc"
     }
   },
   "schema_version": 3
 }
 ```
 
-This document tracks the current reference anchors and validated environments for the active ComfyUI-OpenClaw branch.
+This document tracks current reference anchors and separately records source, repository, and real-host evidence for the active ComfyUI-OpenClaw branch.
 
 ## Core Dependencies
 
-| Component | Validated Range | Best Effort / Experimental | Notes |
+| Component | Reference Subject | Best Effort / Experimental | Notes |
 | :--- | :--- | :--- | :--- |
-| **ComfyUI** | `31dfbd4c` source-review anchor (`v0.34.0-46-g31dfbd4c`; `pyproject.toml` version `0.34.0`) | Older tagged snapshots | Tag baseline `v0.34.0` is commit `12d52794`, 46 commits behind this source head. The core manifest pins bundled frontend package `1.51.9`, which is separate from the independently reviewed standalone frontend reference |
-| **ComfyUI Frontend** | `1.54.3` release `v1.54.3` at commit `b2f55875` (reproducible) | Source-review head `9ff3fd7f0e` (`v1.54.3-21-g9ff3fd7f0e`), 21 commits beyond the release tag | The reproducible release and the later source head are distinct subjects. A release-version lane reproduces `1.54.3`; it does not execute the source head. Sidebar extension contract remains compatible; prefer the current sidebar store API with deprecated facade fallback |
+| **ComfyUI** | `e638023d` source-review anchor (`v0.37.0-9-ge638023d`; `pyproject.toml` version `0.37.0`) | Older tagged snapshots | Tag baseline `v0.37.0` is commit `73c9bad4`, 9 commits behind this source head. That tag pins bundled frontend `1.52.7`, while the supplied source head pins `1.53.6`; the smoke subject uses the source head. Neither source review nor tag identity is runtime proof. |
+| **ComfyUI Frontend** | `1.55.11` release `v1.55.11` at commit `3a851363` (reproducible release subject) | Source-review head `23559a8f86` (`v1.55.11-104-g23559a8f86`, package `1.55.12`), 104 commits beyond the release tag | The release and later source head are distinct subjects. The release lane pins the publisher-reported `dist.zip` digest and must verify downloaded bytes before execution; this source head has not run. Sidebar extension contract remains compatible; prefer the current sidebar store API with deprecated facade fallback. |
 | **Legacy Desktop** | `0.9.4 (core 0.22.3 / frontend 1.43.18)` reference anchor | Legacy fixed bundle may lag standalone frontend | Preserve the recorded fixed-bundle contract for existing parity coverage |
 | **Current Comfy-Desktop** | `1.0.32-rc.1` reference anchor (`85e28b7a`; `v1.0.32-rc.1-3-g85e28b7`) | Hosted component versions vary by installation | Treat the managed-install generation separately; do not infer fixed core/frontend versions from the application release |
 | **Python** | 3.13 | 3.10-3.12 compatibility targets; 3.14 best effort | Current executed baseline is the local Windows Full Gate on Python 3.13. 3.10-3.12 are exercised by the scheduled exact-version matrix, and 3.10 also by the routine per-push backend job, so they are compatibility targets by support commitment rather than for want of testing. Only the matrix emits the dated, commit-bound artifact the 14-day currency rule reads, so its artifacts remain the sole promotion evidence; a passing push corroborates but does not promote. 3.10 requires reassessment on 2026-10-31; below 3.10 is unsupported |
@@ -92,9 +92,9 @@ This document tracks the current reference anchors and validated environments fo
 - **ComfyUI host runtime**: current bootstrap assumptions remain aligned with upstream `PromptServer` startup and route registration flow, including `/api`-prefixed canonical API routing.
 - **Frontend host surface**: current sidebar integration contract remains compatible with the standalone frontend reference anchor, while inactive subgraph diagnostics and promoted-widget behavior remain regression-sensitive seams.
 - **Promoted-widget evidence limit**: historical real-host runs exercised an ordinary widget with constructed source fields. The current real-host spec now requires a host-created subgraph binding, an OpenClaw Parameter Lab edit, a projected value readback and the serialized inner prompt value. That stronger spec has not yet been run on the refreshed host subjects; their promoted-widget behavior remains unqualified. The raw inner widget seed need not change when the promoted host value owns execution.
-- **Evidence states**: the metadata block records source review, repository validation, and real-host validation independently. Source review of a checkout is not runtime proof, and repository validation is the local Windows Full Gate result. Real-host validation stays `pending` until a lane run carrying a run identifier succeeds against the pinned anchor; a run executed by hand does not promote the state on its own, and no field may present the later frontend source head as an executed release.
-- **Real-host lane execution status**: the initial manual run used a ComfyUI `0.34.0` host matched on release version and passed both frontend subjects, bundled `1.51.9` and standalone release `1.54.3`. A later pinned workflow run also passed both subjects after runner fixes. These are separate historical evidence subjects. The metadata above remains `pending` because an explicit matrix-evidence promotion has not been recorded; this state does not mean that the lane has never run. Neither result validates a newer core or frontend source revision.
-- **Legacy Desktop host surface**: Desktop `0.9.4` embeds frontend `1.43.18`, which lags the standalone frontend `1.54.3` reference. Validate this fixed bundle against its own anchor.
+- **Evidence states**: the metadata block records source review, repository validation, and real-host validation independently. The refreshed source identities have been reviewed; repository validation is pending the local Windows Full Gate for this candidate. Real-host validation stays `pending` until a lane run carrying a run identifier succeeds against the pinned anchor; a run executed by hand does not promote the state on its own, and no field may present the later frontend source head as an executed release.
+- **Real-host lane execution status**: the initial manual run used a ComfyUI `0.34.0` host matched on release version and passed both frontend subjects, bundled `1.51.9` and standalone release `1.54.3`. A later pinned workflow run also passed both subjects after runner fixes. These are separate historical evidence subjects. The current matrix's `real_host` state remains `pending` for the refreshed subjects. Neither historical result validates the newer core or frontend release.
+- **Legacy Desktop host surface**: Desktop `0.9.4` embeds frontend `1.43.18`, which lags the standalone frontend `1.55.11` release reference. Validate this fixed bundle against its own anchor.
 - **Current Comfy-Desktop host surface**: application `1.0.32-rc.1` is a managed-install generation. Its hosted ComfyUI and frontend versions are `installation_specific`; the application anchor must not be cross-wired into fixed hosted-version claims.
 
 ## Residual Host-Contract Decisions
@@ -107,7 +107,7 @@ This document tracks the current reference anchors and validated environments fo
 - **Asset dimensions and grouped assets**: typed width/height metadata and grouped multi-download behavior are host-frontend display/download concerns. They do not change OpenClaw fetch routing, and asset-service-only identifiers remain explicit `asset_api_required` states rather than implicit `/api/assets` fetches.
 - **Asset loader paths and model tags**: current host asset metadata may expose `loader_path`; model uploads require `model_type:<folder_name>` tags, advertised by `/features.supports_model_type_tags`. OpenClaw does not upload through or directly consume `/api/assets`, so these schema facts do not change the existing `/history` + `/view` contract.
 - **Sidebar registration**: prefer the current `sidebarTab.registerSidebarTab` host API and retain the deprecated `extensionManager.registerSidebarTab` fallback for older or desktop-embedded frontend hosts.
-- **Node runtime policy**: the standalone ComfyUI frontend development workspace currently declares `node >=25 <26` and `pnpm >=11.3`, but OpenClaw keeps its package engine at `>=18.0.0` because this custom-node package runs its own Playwright/Vitest harness and does not build the host frontend workspace. OpenClaw acceptance remains governed by `tests/TEST_SOP.md` and `tests/E2E_TESTING_SOP.md`, which require Node.js 18+ and CI-parity validation on the project test harness.
+- **Node runtime policy**: the standalone ComfyUI frontend development workspace currently declares `node >=26.8.2 <27`, but OpenClaw keeps its package engine at `>=18.0.0` because this custom-node package runs its own Playwright/Vitest harness and does not build the host frontend workspace. OpenClaw acceptance remains governed by `tests/TEST_SOP.md` and `tests/E2E_TESTING_SOP.md`, which require Node.js 18+ and CI-parity validation on the project test harness.
 
 ## Operating Systems
 

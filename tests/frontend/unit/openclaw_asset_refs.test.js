@@ -94,6 +94,31 @@ describe("openclaw asset refs", () => {
         });
     });
 
+    it("preserves an enriched top-level id while keeping filename-backed /view", () => {
+        const ref = normalizeComfyOutputRef({
+            filename: "cached.png",
+            subfolder: "session-a",
+            type: "output",
+            id: "asset-cached-42",
+        });
+        expect(ref.asset_api_id).toBe("asset-cached-42");
+        expect(ref.asset_api_required).toBe(false);
+        expect(ref.resolution).toBe("view");
+        expect(ref.viewParams).toEqual({
+            filename: "cached.png",
+            subfolder: "session-a",
+            type: "output",
+        });
+    });
+
+    it("keeps an enriched id-only output explicitly unsupported", () => {
+        const ref = normalizeComfyOutputRef({ id: "asset-only-42" });
+        expect(ref.asset_api_id).toBe("asset-only-42");
+        expect(ref.asset_api_required).toBe(true);
+        expect(ref.resolution).toBe("asset_api_required");
+        expect(ref.viewParams).toBeNull();
+    });
+
     it("accepts upload-style nested asset metadata", () => {
         expect(
             normalizeComfyOutputRef({

@@ -129,10 +129,10 @@ Deployment profiles and hardening references:
 - A guard test now fails if any test file or test directory reappears under the served web
   directory, so the layout cannot regress quietly. The served directory name is unchanged, so
   existing installations keep working.
-- The pinned real-host frontend compatibility smoke lane has now been executed against a
-  running ComfyUI rather than only reviewed. Both pinned frontend subjects were confirmed in
-  the browser from the frontend's own reported version: the bundled `1.51.9` and the
-  reproducible standalone release `1.54.3`.
+- The earlier pinned real-host frontend compatibility smoke lane was executed against a
+  running ComfyUI rather than only reviewed. Both historical frontend subjects were confirmed
+  in the browser from the frontend's own reported version: the bundled `1.51.9` and the
+  reproducible standalone release `1.54.3`. This run does not qualify the refreshed subjects.
 - That lane now attributes browser errors by the failing request URL instead of by console
   text, because the browser does not name the failing file in its console output. Requests the
   host makes for its own optional files, and errors raised by other installed packs, are
@@ -526,7 +526,7 @@ Canonical DOM/class ownership is now centered on `openclaw-*`; legacy `moltbot-*
 
 The sidebar now also resolves and stamps its active host surface (`standalone_frontend`, legacy
 `desktop`, or current managed-install `comfy_desktop`) and reference metadata at mount time, so
-Desktop `0.9.4` embedded-frontend lag against standalone frontend `1.54.3` is explicit and
+Desktop `0.9.4` embedded-frontend lag against standalone frontend release `1.55.11` is explicit and
 testable. The current Comfy-Desktop `1.0.32-rc.1` reference keeps hosted component versions
 installation-specific and recognizes `window.__comfyDesktop2` as presence metadata only; bridge
 detection does not authorize privileged capability calls.

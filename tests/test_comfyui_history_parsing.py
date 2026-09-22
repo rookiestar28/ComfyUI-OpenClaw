@@ -135,6 +135,41 @@ class TestComfyUIHistoryParsing(unittest.TestCase):
         self.assertIn("type=output", images[0]["view_url"])
         self.assertIn("subfolder=session-a", images[0]["view_url"])
 
+    def test_extract_images_preserves_enriched_top_level_id_without_changing_view(self):
+        from services.comfyui_history import extract_images
+
+        history_item = {
+            "outputs": {
+                "2": {
+                    "images": [
+                        {
+                            "filename": "cached.png",
+                            "subfolder": "session-a",
+                            "type": "output",
+                            "id": "asset-cached-42",
+                        }
+                    ]
+                }
+            }
+        }
+
+        images = extract_images(history_item)
+        self.assertEqual(len(images), 1)
+        self.assertEqual(images[0]["asset_api_id"], "asset-cached-42")
+        self.assertFalse(images[0]["asset_api_required"])
+        self.assertEqual(images[0]["resolution"], "view")
+        self.assertIn("filename=cached.png", images[0]["view_url"])
+        self.assertNotIn("asset-cached-42", images[0]["view_url"])
+
+    def test_extract_images_keeps_enriched_id_only_ref_explicit(self):
+        from services.comfyui_history import extract_images
+
+        images = extract_images({"outputs": {"2": {"images": [{"id": "asset-only-42"}]}}})
+        self.assertEqual(len(images), 1)
+        self.assertEqual(images[0]["asset_api_id"], "asset-only-42")
+        self.assertTrue(images[0]["asset_api_required"])
+        self.assertEqual(images[0]["view_url"], "")
+
     def test_extract_images_accepts_top_level_hash_alias(self):
         from services.comfyui_history import extract_images
 

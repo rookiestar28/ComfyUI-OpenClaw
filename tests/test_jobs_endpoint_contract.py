@@ -77,7 +77,10 @@ def _history_record(
     }
     if tenant_id is not None:
         extra_data["openclaw"] = {"tenant_id": tenant_id}
-    messages = [["execution_start", {"timestamp": start_time}]]
+    messages = [
+        ["execution_start", {"timestamp": start_time}],
+        ["execution_cached", {"nodes": ["secret-cached-node"]}],
+    ]
     if outcome == "completed":
         status_str = "success"
         messages.append(["execution_success", {"timestamp": end_time}])
@@ -89,7 +92,11 @@ def _history_record(
         messages.append(
             [
                 "execution_error",
-                {"timestamp": end_time, "traceback": "secret-traceback"},
+                {
+                    "timestamp": end_time,
+                    "traceback": "secret-traceback",
+                    "loop_error": {"node": "secret-loop-node"},
+                },
             ]
         )
     return {
@@ -107,6 +114,7 @@ def _history_record(
                     {
                         "filename": "secret-output.png",
                         "type": "output",
+                        "id": "secret-enriched-asset-id",
                     }
                 ]
             }
@@ -386,6 +394,9 @@ class TestJobsReadModel(unittest.TestCase):
             "SecretHistoryNode",
             "extra_data",
             "execution_error",
+            "secret-cached-node",
+            "secret-loop-node",
+            "secret-enriched-asset-id",
         ):
             self.assertNotIn(forbidden, encoded)
 

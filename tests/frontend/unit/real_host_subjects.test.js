@@ -30,8 +30,8 @@ const POLICY = JSON.parse(
 
 describe("real host frontend subjects", () => {
     it("resolves the two pinned subjects and rejects anything else", () => {
-        expect(resolveSubject(POLICY, BUNDLED_SUBJECT).frontend_version).toBe("1.51.9");
-        expect(resolveSubject(POLICY, STANDALONE_RELEASE_SUBJECT).frontend_version).toBe("1.54.3");
+        expect(resolveSubject(POLICY, BUNDLED_SUBJECT).frontend_version).toBe("1.53.6");
+        expect(resolveSubject(POLICY, STANDALONE_RELEASE_SUBJECT).frontend_version).toBe("1.55.11");
         expect(() => resolveSubject(POLICY, "nightly")).toThrow(SubjectError);
     });
 
@@ -93,7 +93,7 @@ describe("real host startup arguments", () => {
         expect(bundled).not.toContain("--front-end-version");
         expect(release.slice(-2)).toEqual([
             "--front-end-version",
-            "Comfy-Org/ComfyUI_frontend@v1.54.3",
+            "Comfy-Org/ComfyUI_frontend@v1.55.11",
         ]);
     });
 
@@ -132,9 +132,9 @@ describe("real host subject identity", () => {
         expect(
             detectSubjectMismatch({
                 subject: release(),
-                reportedFrontendVersion: "1.54.3",
+                reportedFrontendVersion: "1.55.11",
                 hostLogText: "Using existing copy of specific frontend version tag",
-                resolvedWebRoot: "/tmp/comfy/web_custom_versions/Comfy-Org_ComfyUI_frontend/1.54.3",
+                resolvedWebRoot: "/tmp/comfy/web_custom_versions/Comfy-Org_ComfyUI_frontend/1.55.11",
             }),
         ).toEqual([]);
     });
@@ -142,33 +142,33 @@ describe("real host subject identity", () => {
     it("fails the release subject when the host silently served the bundled frontend", () => {
         const failures = detectSubjectMismatch({
             subject: release(),
-            reportedFrontendVersion: "1.51.9",
+            reportedFrontendVersion: "1.53.6",
             hostLogText: `Failed to initialize frontend: timeout\n${FRONTEND_FALLBACK_LOG_MARKER}`,
             resolvedWebRoot: "/tmp/comfy/comfyui_frontend_package/static",
         });
 
         expect(failures).toHaveLength(3);
-        expect(failures.join("\n")).toMatch(/browser reported frontend 1\.51\.9/);
+        expect(failures.join("\n")).toMatch(/browser reported frontend 1\.53\.6/);
         expect(failures.join("\n")).toMatch(/fell back to its bundled frontend/);
         expect(failures.join("\n")).toMatch(/expected one ending in/);
     });
 
     it("still fails when only one signal trips, which is the case that matters", () => {
-        const goodRoot = "/tmp/comfy/web_custom_versions/Comfy-Org_ComfyUI_frontend/1.54.3";
+        const goodRoot = "/tmp/comfy/web_custom_versions/Comfy-Org_ComfyUI_frontend/1.55.11";
 
         expect(
             detectSubjectMismatch({
                 subject: release(),
-                reportedFrontendVersion: "1.54.3",
+                reportedFrontendVersion: "1.55.11",
                 hostLogText: FRONTEND_FALLBACK_LOG_MARKER,
                 resolvedWebRoot: goodRoot,
             }),
-        ).toEqual([`host fell back to its bundled frontend instead of serving 1.54.3`]);
+        ).toEqual([`host fell back to its bundled frontend instead of serving 1.55.11`]);
 
         expect(
             detectSubjectMismatch({
                 subject: release(),
-                reportedFrontendVersion: "1.54.3",
+                reportedFrontendVersion: "1.55.11",
                 hostLogText: "",
                 resolvedWebRoot: "/tmp/comfy/web_custom_versions/Comfy-Org_ComfyUI_frontend/1.54.2",
             }),
@@ -179,9 +179,9 @@ describe("real host subject identity", () => {
         expect(
             detectSubjectMismatch({
                 subject: release(),
-                reportedFrontendVersion: "1.54.3",
+                reportedFrontendVersion: "1.55.11",
                 hostLogText: "",
-                resolvedWebRoot: "C:\\r\\web_custom_versions\\Comfy-Org_ComfyUI_frontend\\1.54.3",
+                resolvedWebRoot: "C:\\r\\web_custom_versions\\Comfy-Org_ComfyUI_frontend\\1.55.11",
             }),
         ).toEqual([]);
 
@@ -190,16 +190,16 @@ describe("real host subject identity", () => {
                 subject: release(),
                 reportedFrontendVersion: null,
                 hostLogText: "",
-                resolvedWebRoot: "/tmp/comfy/web_custom_versions/Comfy-Org_ComfyUI_frontend/1.54.3",
+                resolvedWebRoot: "/tmp/comfy/web_custom_versions/Comfy-Org_ComfyUI_frontend/1.55.11",
             }),
-        ).toEqual(["browser reported frontend (none), expected 1.54.3"]);
+        ).toEqual(["browser reported frontend (none), expected 1.55.11"]);
     });
 
     it("does not apply release-only checks to the bundled subject", () => {
         expect(
             detectSubjectMismatch({
                 subject: POLICY.subjects.bundled,
-                reportedFrontendVersion: "1.51.9",
+                reportedFrontendVersion: "1.53.6",
                 hostLogText: FRONTEND_FALLBACK_LOG_MARKER,
                 resolvedWebRoot: null,
             }),
@@ -254,12 +254,12 @@ describe("real host web root observation", () => {
     it("reads the web root the host actually reported", () => {
         const log = [
             "[Prompt Server] some earlier line",
-            "[Prompt Server] web root: /tmp/c/web_custom_versions/Comfy-Org_ComfyUI_frontend/1.54.3",
+            "[Prompt Server] web root: /tmp/c/web_custom_versions/Comfy-Org_ComfyUI_frontend/1.55.11",
             "later noise",
         ].join("\n");
 
         expect(parseHostWebRoot(log)).toBe(
-            "/tmp/c/web_custom_versions/Comfy-Org_ComfyUI_frontend/1.54.3",
+            "/tmp/c/web_custom_versions/Comfy-Org_ComfyUI_frontend/1.55.11",
         );
     });
 
@@ -279,7 +279,7 @@ describe("real host web root observation", () => {
         const release = JSON.parse(JSON.stringify(POLICY.subjects.standalone_release));
         const failures = detectSubjectMismatch({
             subject: release,
-            reportedFrontendVersion: "1.54.3",
+            reportedFrontendVersion: "1.55.11",
             hostLogText: "",
             resolvedWebRoot: parseHostWebRoot(""),
         });

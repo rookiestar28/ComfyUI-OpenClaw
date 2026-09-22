@@ -75,7 +75,9 @@ def _pick_asset_hash(image_ref: Dict[str, Any]) -> str:
 
 
 def _pick_asset_api_id(image_ref: Dict[str, Any]) -> str:
-    asset_api_id = _pick_string(image_ref, "asset_id")
+    # IMPORTANT: host output enrichment writes `id` on the output entry itself.
+    # Keep it as metadata only; id-only refs must never become implicit asset fetches.
+    asset_api_id = _pick_string(image_ref, "asset_id", "id")
     if asset_api_id:
         return asset_api_id
 

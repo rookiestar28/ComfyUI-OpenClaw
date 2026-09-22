@@ -24,8 +24,8 @@ from services.operator_doctor import DoctorReport, check_compatibility_matrix_go
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_CURRENT_ANCHORS = {
-    "comfyui": "31dfbd4c (v0.34.0-46-g31dfbd4c / pyproject 0.34.0)",
-    "comfyui_frontend": "1.54.3 (9ff3fd7f0e / v1.54.3-21-g9ff3fd7f0e)",
+    "comfyui": "e638023d (v0.37.0-9-ge638023d / pyproject 0.37.0)",
+    "comfyui_frontend": "1.55.11 (23559a8f86 / v1.55.11-104-g23559a8f86)",
     "desktop": "0.9.4 (core 0.22.3 / frontend 1.43.18)",
     "comfy_desktop": "1.0.32-rc.1 (85e28b7a / v1.0.32-rc.1-3-g85e28b7)",
 }
@@ -65,20 +65,20 @@ STALE_ACTIVE_REFERENCE_TOKENS = (
 )
 EXPECTED_REFERENCE_BASELINES = {
     "comfyui": {
-        "bundled_frontend_version": "1.51.9",
-        "project_version": "0.34.0",
-        "source_describe": "v0.34.0-46-g31dfbd4c",
-        "source_head": "31dfbd4ca0cb36ab6a573fc13daec8cc3a2e1e98",
-        "tag": "v0.34.0",
-        "tag_commit": "12d5279438bfefc058a269eae805ceab6047777f",
+        "bundled_frontend_version": "1.53.6",
+        "project_version": "0.37.0",
+        "source_describe": "v0.37.0-9-ge638023d",
+        "source_head": "e638023d54497dbe0579565e5de4bb7076899592",
+        "tag": "v0.37.0",
+        "tag_commit": "73c9bad4d21e7addbe1d13bc92eee0f1431b017d",
     },
     "comfyui_frontend": {
-        "package_version": "1.54.3",
-        "release_tag": "v1.54.3",
-        "release_tag_commit": "b2f5587509d744d7779accce193db53f36a91d4a",
-        "release_version": "1.54.3",
-        "source_describe": "v1.54.3-21-g9ff3fd7f0e",
-        "source_head": "9ff3fd7f0e36b810a621288ceaf6e74e3846bedd",
+        "package_version": "1.55.12",
+        "release_tag": "v1.55.11",
+        "release_tag_commit": "3a851363c48b233b3b576131dff6e1e92b0e1573",
+        "release_version": "1.55.11",
+        "source_describe": "v1.55.11-104-g23559a8f86",
+        "source_head": "23559a8f86227837aef21d1da8b7aa8149f3b2cc",
     },
 }
 
@@ -103,6 +103,10 @@ class TestR90CompatMatrixGovernance(unittest.TestCase):
         self.assertEqual(
             doc["metadata"]["reference_baselines"], EXPECTED_REFERENCE_BASELINES
         )
+
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("standalone frontend release `1.55.11`", readme)
+        self.assertIn("Both historical frontend subjects", readme)
 
     def test_active_current_reference_files_reject_stale_anchors(self):
         stale_hits = {}
@@ -526,7 +530,8 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
         self.assertIsNone(states["real_host"]["run_id"])
         self.assertIsNone(states["real_host"]["evidence_id"])
         self.assertEqual(states["source_review"]["state"], "reviewed")
-        self.assertEqual(states["repository_validation"]["state"], "validated")
+        self.assertEqual(states["repository_validation"]["state"], "pending")
+        self.assertIsNone(states["repository_validation"]["run_id"])
 
     def test_repo_matrix_separates_frontend_source_head_from_release(self):
         doc = read_matrix_document(
@@ -534,10 +539,11 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
         )
         frontend = doc["metadata"]["reference_baselines"]["comfyui_frontend"]
         self.assertNotEqual(frontend["source_head"], frontend["release_tag_commit"])
-        self.assertEqual(frontend["release_version"], "1.54.3")
+        self.assertEqual(frontend["release_version"], "1.55.11")
+        self.assertEqual(frontend["package_version"], "1.55.12")
         core = doc["metadata"]["reference_baselines"]["comfyui"]
         self.assertNotEqual(core["source_head"], core["tag_commit"])
-        self.assertEqual(core["bundled_frontend_version"], "1.51.9")
+        self.assertEqual(core["bundled_frontend_version"], "1.53.6")
 
     def test_schema_v3_metadata_validates(self):
         validation, codes = self._codes(self._schema3())

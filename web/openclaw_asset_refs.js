@@ -55,9 +55,13 @@ function pickAssetApiId(imageRef = {}) {
     if (!imageRef || typeof imageRef !== "object") {
         return "";
     }
+    // IMPORTANT: host output enrichment puts `id` on the entry. Preserve it as
+    // metadata; an id-only ref remains an explicit unsupported asset API case.
     const direct = typeof imageRef.asset_api_id === "string"
         ? imageRef.asset_api_id.trim()
-        : (typeof imageRef.asset_id === "string" ? imageRef.asset_id.trim() : "");
+        : (typeof imageRef.asset_id === "string"
+            ? imageRef.asset_id.trim()
+            : (typeof imageRef.id === "string" ? imageRef.id.trim() : ""));
     if (direct) {
         return direct;
     }
