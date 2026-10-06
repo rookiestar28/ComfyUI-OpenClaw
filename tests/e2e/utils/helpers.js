@@ -653,9 +653,13 @@ export async function mockRemoteAdminBaseline(
   await mockCompatApprovalsList(page, approvals, { status: approvalsStatus, error: listError });
 }
 
+/**
+ * @returns {Promise<Readonly<{loadAttemptsByBoot: readonly number[], harnessReloads: number}>>}
+ */
 export async function waitForOpenClawReady(page) {
   const timeoutMs = resolveUiTimeoutMs();
   const maxHarnessReloads = resolveHarnessReloadBudget();
+  const loadAttemptsByBoot = [];
 
   for (let reloadAttempt = 0; reloadAttempt <= maxHarnessReloads; reloadAttempt += 1) {
     await page.waitForFunction(
@@ -669,11 +673,18 @@ export async function waitForOpenClawReady(page) {
       page.evaluate(() => window.__openclawTestLoadAttempts || 0),
     ]);
 
+    // IMPORTANT: capture counts before reload destroys this document. A recovered
+    // page starts at 1; its counter cannot prove the previous boot's four attempts.
+    loadAttemptsByBoot.push(loadAttempts);
+
     if (!error) {
       // Basic sanity: header + tab bar exists
       await expect(page.locator('.openclaw-header')).toBeVisible();
       await expect(page.locator('.openclaw-tabs')).toBeVisible();
-      return;
+      return Object.freeze({
+        loadAttemptsByBoot: Object.freeze([...loadAttemptsByBoot]),
+        harnessReloads: reloadAttempt,
+      });
     }
 
     // IMPORTANT: only recover via full-page reload after the in-page harness

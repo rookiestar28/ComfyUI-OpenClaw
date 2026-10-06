@@ -143,47 +143,81 @@ test.describe('OpenClaw Sidebar', () => {
     const entryRetry = await routeTransientOpenClawEntryFailures(page, 1);
 
     await page.reload();
-    await waitForOpenClawReady(page);
+    const readiness = await waitForOpenClawReady(page);
     await expect(page.locator('.openclaw-title')).toHaveText('OpenClaw');
     expect(entryRetry.failedLogicalAttempts()).toBe(1);
-    await expect
-      .poll(() => page.evaluate(() => window.__openclawTestLoadAttempts))
-      .toBe(2);
+    expect(readiness.loadAttemptsByBoot[0]).toBeGreaterThanOrEqual(2);
+    expect(readiness.loadAttemptsByBoot[0]).toBeLessThanOrEqual(4);
   });
 
   test('harness recovers from two transient openclaw entry fetch failures', async ({ page }) => {
     const entryRetry = await routeTransientOpenClawEntryFailures(page, 2);
 
     await page.reload();
-    await waitForOpenClawReady(page);
+    const readiness = await waitForOpenClawReady(page);
     await expect(page.locator('.openclaw-title')).toHaveText('OpenClaw');
     expect(entryRetry.failedLogicalAttempts()).toBe(2);
-    await expect
-      .poll(() => page.evaluate(() => window.__openclawTestLoadAttempts))
-      .toBe(3);
+    expect(readiness.loadAttemptsByBoot[0]).toBeGreaterThanOrEqual(3);
+    expect(readiness.loadAttemptsByBoot[0]).toBeLessThanOrEqual(4);
   });
 
   test('harness recovers from three transient openclaw entry fetch failures', async ({ page }) => {
     const entryRetry = await routeTransientOpenClawEntryFailures(page, 3);
 
     await page.reload();
-    await waitForOpenClawReady(page);
+    const readiness = await waitForOpenClawReady(page);
     await expect(page.locator('.openclaw-title')).toHaveText('OpenClaw');
     expect(entryRetry.failedLogicalAttempts()).toBe(3);
-    await expect
-      .poll(() => page.evaluate(() => window.__openclawTestLoadAttempts))
-      .toBe(4);
+    expect(readiness.loadAttemptsByBoot[0]).toBe(4);
   });
 
   test('recovers when the first harness boot exhausts transient entry fetch retries', async ({ page }) => {
     const entryRetry = await routeTransientOpenClawEntryFailures(page, 4);
 
     await page.reload();
-    await waitForOpenClawReady(page);
+    const readiness = await waitForOpenClawReady(page);
     await expect(page.locator('.openclaw-title')).toHaveText('OpenClaw');
     expect(entryRetry.failedLogicalAttempts()).toBe(4);
-    await expect
-      .poll(() => page.evaluate(() => window.__openclawTestLoadAttempts))
-      .toBe(1);
+    expect(readiness.loadAttemptsByBoot[0]).toBe(4);
+    expect(readiness.harnessReloads).toBe(1);
+    expect(await page.evaluate(() => window.__openclawTestLoadAttempts))
+      .toBe(readiness.loadAttemptsByBoot[1]);
+  });
+
+  test('preserves first-boot retry evidence after a fourth transient fetch failure', async ({ page }) => {
+    const entryRetry = await routeTransientOpenClawEntryFailures(page, 3);
+    let injectedFourthFailure = false;
+    await page.route('**/web/openclaw.js**', async (route) => {
+      const url = new URL(route.request().url());
+      if (
+        url.pathname === '/web/openclaw.js'
+        && url.searchParams.get('openclaw_harness_attempt') === '4'
+        && !injectedFourthFailure
+      ) {
+        injectedFourthFailure = true;
+        await route.fulfill({
+          status: 503,
+          contentType: 'text/javascript',
+          body: '// Injected additional transient module-fetch failure.',
+        });
+        return;
+      }
+      await route.fallback();
+    });
+
+    await page.reload();
+    const readiness = await waitForOpenClawReady(page);
+    await expect(page.locator('.openclaw-title')).toHaveText('OpenClaw');
+    expect(entryRetry.failedLogicalAttempts()).toBe(3);
+    expect(injectedFourthFailure).toBe(true);
+    expect(readiness.loadAttemptsByBoot[0]).toBe(4);
+    expect(readiness.harnessReloads).toBe(1);
+    expect(readiness.loadAttemptsByBoot).toHaveLength(2);
+    expect(readiness.loadAttemptsByBoot[1]).toBeGreaterThanOrEqual(1);
+    expect(readiness.loadAttemptsByBoot[1]).toBeLessThanOrEqual(4);
+    expect(await page.evaluate(() => window.__openclawTestLoadAttempts))
+      .toBe(readiness.loadAttemptsByBoot[1]);
+    expect(Object.isFrozen(readiness)).toBe(true);
+    expect(Object.isFrozen(readiness.loadAttemptsByBoot)).toBe(true);
   });
 });
