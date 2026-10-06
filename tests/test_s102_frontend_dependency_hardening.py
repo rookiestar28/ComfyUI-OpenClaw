@@ -57,8 +57,23 @@ class TestFrontendDependencyHardening(unittest.TestCase):
             for section in ("dependencies", "devDependencies", "optionalDependencies")
             for name in self.package.get(section, {})
         }
-        self.assertTrue({"ws", "postcss", "nanoid"}.isdisjoint(root_dependencies))
+        self.assertTrue(
+            {"ws", "postcss", "nanoid", "source-map-js"}.isdisjoint(root_dependencies)
+        )
         self.assertEqual(self.lock["lockfileVersion"], 3)
+
+    def test_lock_resolves_patched_source_map_dependencies(self):
+        versions = [
+            package["version"]
+            for path, package in self.lock["packages"].items()
+            if path.endswith("node_modules/source-map-js")
+        ]
+        self.assertTrue(versions, "expected the PostCSS source-map dependency")
+        # IMPORTANT: pre-1.2.2 indexed source maps can block the event loop;
+        # check every locked copy so a nested vulnerable resolution cannot hide.
+        for version in versions:
+            with self.subTest(version=version):
+                self.assertGreaterEqual(_version_tuple(version), (1, 2, 2))
 
     def test_windows_full_gate_reconciles_then_audits_frontend_tree(self):
         content = WINDOWS_GATE.read_text(encoding="utf-8")
