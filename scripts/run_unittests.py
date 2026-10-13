@@ -17,12 +17,14 @@ import time
 import traceback
 import types
 import unittest
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _PRUNED_DIRS = frozenset({"__pycache__", "node_modules"})
+# sys.platform values a platform-exclusive skip declaration may name.
+SKIP_POLICY_PLATFORMS = frozenset({"darwin", "linux", "win32"})
 
 
 def _build_suite(args: argparse.Namespace) -> unittest.TestSuite:
@@ -141,18 +143,98 @@ def _load_skip_policy(path: str) -> dict[str, Any]:
     return {
         "max_skipped": max_skipped,
         "no_skip_modules": [item.strip() for item in no_skip_modules],
+        "platform_exclusive_tests": _load_platform_exclusive_tests(
+            data.get("platform_exclusive_tests")
+        ),
     }
 
 
+def _load_platform_exclusive_tests(raw: Any) -> dict[str, frozenset[str]]:
+    """Return ``{canonical test id: platforms it can run on}`` from the skip policy."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("platform_exclusive_tests must be an object keyed by test id")
+    declarations: dict[str, frozenset[str]] = {}
+    for test_id, entry in raw.items():
+        label = f"platform_exclusive_tests[{test_id}]"
+        parts = test_id.split(".")
+        if parts[0] != "tests" or len(parts) < 4 or not all(parts):
+            raise ValueError(f"{label}: id must be tests.<module>.<Class>.<method>")
+        if not isinstance(entry, dict):
+            raise ValueError(f"{label}: entry must be an object")
+        platforms = entry.get("platforms")
+        if (
+            not isinstance(platforms, list)
+            or not platforms
+            or any(
+                not isinstance(item, str) or item not in SKIP_POLICY_PLATFORMS
+                for item in platforms
+            )
+        ):
+            raise ValueError(
+                f"{label}: platforms must be a non-empty list drawn from "
+                f"{sorted(SKIP_POLICY_PLATFORMS)}"
+            )
+        reason = entry.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError(f"{label}: reason must be a non-empty string")
+        declarations[test_id] = frozenset(platforms)
+    return declarations
+
+
+def _canonical_test_id(test_case: Any) -> str:
+    """Name a test after its repository-relative module path (``tests.<module>...``)."""
+    test_id = test_case.id() if hasattr(test_case, "id") else str(test_case)
+    # A skipped subTest is reported as its own object; its module is the parent test's.
+    owner = getattr(test_case, "test_case", None)
+    if not isinstance(owner, unittest.TestCase):
+        owner = test_case
+    module_name = type(owner).__module__
+    module_file = getattr(sys.modules.get(module_name), "__file__", None)
+    if not module_file or not test_id.startswith(module_name + "."):
+        return test_id
+    try:
+        relative = Path(module_file).resolve().relative_to(REPO_ROOT)
+    except ValueError:
+        return test_id
+    parts = relative.with_suffix("").parts
+    if parts and parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts) + test_id[len(module_name) :]
+
+
 def _collect_skips(result: unittest.TestResult) -> list[tuple[str, str]]:
-    skips: list[tuple[str, str]] = []
-    for test_case, reason in result.skipped:
-        if hasattr(test_case, "id"):
-            test_id = test_case.id()
+    # CRITICAL: discovery from the non-package "tests" directory names top-level modules
+    # "test_x", while subdirectory and --module runs name them "tests.test_x". Policy
+    # entries use the "tests." form, so raw ids would never match top-level modules.
+    return [
+        (_canonical_test_id(test_case), str(reason))
+        for test_case, reason in result.skipped
+    ]
+
+
+def _partition_skips(
+    skips: Iterable[tuple[str, str]],
+    *,
+    platform_exclusive_tests: Mapping[str, frozenset[str]] | None,
+    platform: str,
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Split skips into (counted, excused).
+
+    Only a declared platform-exclusive test that skips on a platform it cannot run on is
+    excused; the same test skipping on one of its own platforms still counts.
+    """
+    declared = platform_exclusive_tests or {}
+    counted: list[tuple[str, str]] = []
+    excused: list[tuple[str, str]] = []
+    for skip in skips:
+        platforms = declared.get(skip[0])
+        if platforms is not None and platform not in platforms:
+            excused.append(skip)
         else:
-            test_id = str(test_case)
-        skips.append((test_id, str(reason)))
-    return skips
+            counted.append(skip)
+    return counted, excused
 
 
 def _evaluate_skip_policy(
@@ -160,14 +242,22 @@ def _evaluate_skip_policy(
     skips: Iterable[tuple[str, str]],
     max_skipped: int | None,
     no_skip_modules: Iterable[str],
+    platform_exclusive_tests: Mapping[str, frozenset[str]] | None = None,
+    platform: str | None = None,
 ) -> list[str]:
     violations: list[str] = []
     skip_list = list(skips)
-    if max_skipped is not None and len(skip_list) > max_skipped:
+    counted, _ = _partition_skips(
+        skip_list,
+        platform_exclusive_tests=platform_exclusive_tests,
+        platform=sys.platform if platform is None else platform,
+    )
+    if max_skipped is not None and len(counted) > max_skipped:
         violations.append(
-            f"skip budget exceeded: skipped={len(skip_list)} > max_skipped={max_skipped}"
+            f"skip budget exceeded: skipped={len(counted)} > max_skipped={max_skipped}"
         )
 
+    # IMPORTANT: no-skip modules apply to every skip, including platform-excused ones.
     prefixes = [p.strip() for p in no_skip_modules if p and p.strip()]
     for test_id, reason in skip_list:
         for prefix in prefixes:
@@ -188,19 +278,33 @@ def _write_skip_report(
     max_skipped: int | None,
     no_skip_modules: list[str],
     violations: list[str],
+    platform_exclusive_tests: Mapping[str, frozenset[str]] | None = None,
+    platform: str | None = None,
 ) -> None:
     report_path = Path(path)
     report_path.parent.mkdir(parents=True, exist_ok=True)
+    current_platform = sys.platform if platform is None else platform
+    counted, excused = _partition_skips(
+        skips,
+        platform_exclusive_tests=platform_exclusive_tests,
+        platform=current_platform,
+    )
     payload = {
         "tests_run": tests_run,
         "duration_sec": round(duration_sec, 3),
+        "platform": current_platform,
         "skipped_count": len(skips),
+        "counted_skipped_count": len(counted),
         "skipped": [
             {"test_id": test_id, "reason": reason} for test_id, reason in skips
+        ],
+        "platform_excused": [
+            {"test_id": test_id, "reason": reason} for test_id, reason in excused
         ],
         "policy": {
             "max_skipped": max_skipped,
             "no_skip_modules": no_skip_modules,
+            "platform_exclusive_tests": sorted(platform_exclusive_tests or {}),
         },
         "violations": violations,
     }
@@ -276,6 +380,7 @@ def main() -> int:
 
     policy_max_skipped: int | None = None
     policy_no_skip_modules: list[str] = []
+    policy_platform_exclusive: dict[str, frozenset[str]] = {}
     skip_policy_active = bool(
         args.enforce_skip_policy or args.max_skipped is not None or args.no_skip_module
     )
@@ -287,6 +392,7 @@ def main() -> int:
             return 2
         policy_max_skipped = policy["max_skipped"]
         policy_no_skip_modules = policy["no_skip_modules"]
+        policy_platform_exclusive = policy["platform_exclusive_tests"]
 
     if args.max_skipped is not None:
         if args.max_skipped < 0:
@@ -305,6 +411,7 @@ def main() -> int:
             skips=skips,
             max_skipped=policy_max_skipped,
             no_skip_modules=policy_no_skip_modules,
+            platform_exclusive_tests=policy_platform_exclusive,
         )
 
     skip_report_path = args.skip_report
@@ -319,8 +426,19 @@ def main() -> int:
             max_skipped=policy_max_skipped,
             no_skip_modules=policy_no_skip_modules,
             violations=policy_violations,
+            platform_exclusive_tests=policy_platform_exclusive,
         )
         print(f"Skip report: {skip_report_path}", file=sys.stdout)
+
+    _, excused_skips = _partition_skips(
+        skips, platform_exclusive_tests=policy_platform_exclusive, platform=sys.platform
+    )
+    if excused_skips:
+        print(
+            f"Platform-excused skips: {len(excused_skips)} of {len(skips)} "
+            f"(declared platform-exclusive tests; not counted on {sys.platform})",
+            file=sys.stdout,
+        )
 
     summary = f"Ran {result.testsRun} tests in {duration:.3f}s"
     if result.wasSuccessful() and not policy_violations:

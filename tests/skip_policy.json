@@ -133,5 +133,27 @@
       "reason": "Import-resolution regressions protect canonical error identity and prevent same-name top-level modules from replacing repository-owned package imports.",
       "review_after": "2026-12-31"
     }
+  },
+  "platform_exclusive_tests": {
+    "tests.test_runtime_process_spawn_hardening.ToolRunnerExecutableResolutionTests.test_windows_batch_target_is_refused": {
+      "platforms": ["win32"],
+      "reason": "Only Windows dispatches .bat/.cmd programs through cmd.exe; the refusal is Windows-only behavior.",
+      "review_after": "2027-04-30"
+    },
+    "tests.test_runtime_process_spawn_hardening.ToolRunnerPathBoundaryTests.test_case_variant_of_allowed_directory_is_inside_on_windows": {
+      "platforms": ["win32"],
+      "reason": "Case-insensitive path comparison through os.path.normcase exists only on Windows.",
+      "review_after": "2027-04-30"
+    },
+    "tests.test_runtime_process_spawn_hardening.ToolRunnerPathBoundaryTests.test_junction_inside_allowed_directory_pointing_outside_is_rejected": {
+      "platforms": ["win32"],
+      "reason": "Directory junctions are an NTFS feature created through _winapi.",
+      "review_after": "2027-04-30"
+    },
+    "tests.test_runtime_process_spawn_hardening.ToolRunnerPathBoundaryTests.test_other_drive_is_outside_on_windows": {
+      "platforms": ["win32"],
+      "reason": "Drive letters and cross-drive commonpath errors exist only on Windows.",
+      "review_after": "2027-04-30"
+    }
   }
 }

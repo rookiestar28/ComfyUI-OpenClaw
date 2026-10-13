@@ -3845,13 +3845,6 @@
     },
     {
       "tool": "ruff",
-      "path": "scripts/run_unittests.py",
-      "code": "SIM108",
-      "message": "Use ternary operator `test_id = test_case.id() if hasattr(test_case, \"id\") else str(test_case)` instead of `if`-`else`-block",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
       "path": "scripts/start_sidecar.py",
       "code": "SIM105",
       "message": "Use `contextlib.suppress(KeyboardInterrupt)` instead of `try`-`except`-`pass`",

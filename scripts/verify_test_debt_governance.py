@@ -9,10 +9,14 @@ gates before optional dependencies are installed.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 from datetime import date
 from pathlib import Path, PurePosixPath
 from typing import Any
+
+# Keep equal to SKIP_POLICY_PLATFORMS in scripts/run_unittests.py (pinned by a test).
+SKIP_POLICY_PLATFORMS = frozenset({"darwin", "linux", "win32"})
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
@@ -48,6 +52,70 @@ def _resolve_test_module_path(repo_root: Path, module_name: str) -> Path:
     return repo_root / Path(module_name.replace(".", "/")).with_suffix(".py")
 
 
+def _test_definition_problem(
+    module_path: Path, class_name: str, method_name: str
+) -> str | None:
+    """Return why ``class_name.method_name`` is not defined in the module, or None."""
+    tree = ast.parse(module_path.read_text(encoding="utf-8-sig"), str(module_path))
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            for item in node.body:
+                if (
+                    isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and item.name == method_name
+                ):
+                    return None
+            return f"class {class_name} does not define {method_name}"
+    return f"module does not define class {class_name}"
+
+
+def _validate_platform_exclusive_tests(repo_root: Path, raw: Any) -> list[str]:
+    """Each declared platform-exclusive test must exist and carry current metadata."""
+    if raw is None:
+        return []
+    if not isinstance(raw, dict):
+        return [
+            "skip policy: platform_exclusive_tests must be an object keyed by test id"
+        ]
+    failures: list[str] = []
+    for test_id, entry in sorted(raw.items()):
+        label = f"skip policy platform_exclusive_tests[{test_id}]"
+        parts = test_id.split(".")
+        if parts[0] != "tests" or len(parts) < 4 or not all(parts):
+            failures.append(f"{label}: id must be tests.<module>.<Class>.<method>")
+            continue
+        if not isinstance(entry, dict):
+            failures.append(f"{label}: entry must be an object")
+            continue
+        module_path = _resolve_test_module_path(repo_root, ".".join(parts[:-2]))
+        if not module_path.is_file():
+            failures.append(
+                f"{label}: module path does not exist -> "
+                f"{module_path.relative_to(repo_root).as_posix()}"
+            )
+        else:
+            problem = _test_definition_problem(module_path, parts[-2], parts[-1])
+            if problem:
+                failures.append(f"{label}: {problem}")
+        platforms = entry.get("platforms")
+        if (
+            not isinstance(platforms, list)
+            or not platforms
+            or any(
+                not isinstance(item, str) or item not in SKIP_POLICY_PLATFORMS
+                for item in platforms
+            )
+            or len(set(platforms)) != len(platforms)
+        ):
+            failures.append(
+                f"{label}: platforms must be a non-empty list of distinct values from "
+                f"{sorted(SKIP_POLICY_PLATFORMS)}"
+            )
+        _validate_reason(entry.get("reason"), label=label, failures=failures)
+        _parse_review_after(entry.get("review_after"), label=label, failures=failures)
+    return failures
+
+
 def _validate_skip_policy(repo_root: Path, path: Path) -> list[str]:
     failures: list[str] = []
     payload = _read_json_object(path)
@@ -55,6 +123,12 @@ def _validate_skip_policy(repo_root: Path, path: Path) -> list[str]:
     max_skipped = payload.get("max_skipped")
     if not isinstance(max_skipped, int) or max_skipped < 0:
         failures.append("skip policy: max_skipped must be a non-negative integer")
+
+    failures.extend(
+        _validate_platform_exclusive_tests(
+            repo_root, payload.get("platform_exclusive_tests")
+        )
+    )
 
     modules = payload.get("no_skip_modules", [])
     if not isinstance(modules, list) or any(

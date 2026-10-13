@@ -176,6 +176,8 @@ landed on kept displaying the pre-fix failure until someone re-triaged a closed 
     - `--enforce-skip-policy tests/skip_policy.json`
   - Skip report artifact is expected at `.tmp/unit_skip_report.json` (or custom `--skip-report` path).
   - A pass result with skip-policy violations is invalid; treat as failure.
+  - Skip ids are matched in their `tests.`-qualified form (`tests.<module>.<Class>.<method>`) in every run shape.
+  - A test that can only run on some platforms may be declared under `platform_exclusive_tests` with its `platforms` (`sys.platform` values: `win32`, `linux`, `darwin`), `reason` and `review_after`. Its skip is reported as platform-excused and not counted toward `max_skipped` only on other platforms; on a declared platform it counts like any skip, and no-skip modules still fail on it.
   - Public MAE hard-guarantee suites must be no-skip in both local SOP runs and CI:
     - `tests.test_s60_mae_route_segmentation`
     - `tests.test_s60_routes_startup_gate`
@@ -409,6 +411,7 @@ python scripts/verify_test_debt_governance.py
 - No-skip modules in `tests/skip_policy.json` must keep explicit metadata:
   - `reason`
   - `review_after`
+- Platform-exclusive test declarations in `tests/skip_policy.json` must name an existing module, class and method, list only known platforms, and keep `reason` and `review_after`.
 - Mutation survivor allowlist entries in `tests/mutation_survivor_allowlist.json` must keep:
   - `reason`
   - `review_after`
