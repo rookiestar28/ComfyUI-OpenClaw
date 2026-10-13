@@ -302,6 +302,8 @@ class ApprovalHandlers:
                         result["executed"] = True
                         result["prompt_id"] = exec_result.get("prompt_id")
                         result["trace_id"] = exec_result.get("trace_id")
+                        if "callback" in exec_result:
+                            result["callback"] = exec_result["callback"]
 
                         if result.get("prompt_id"):
                             # NOTE: Persist executed_prompt_id so connector can deliver results

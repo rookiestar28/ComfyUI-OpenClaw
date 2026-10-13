@@ -5,7 +5,9 @@ Watches job completion and delivers results to callback URLs.
 
 import asyncio
 import logging
+import re
 from typing import Any, Dict, Optional, Set
+from urllib.parse import urlsplit
 
 from .async_utils import run_io_in_thread
 from .comfyui_history import extract_images, fetch_history, get_job_status
@@ -29,6 +31,126 @@ CALLBACK_MAX_RETRIES = int(
 )
 POLL_INTERVAL_SEC = 2
 POLL_MAX_ATTEMPTS = 150  # 5 minutes at 2s interval
+
+CALLBACK_CONFIG_MALFORMED = "callback_malformed"
+CALLBACK_MAX_URL_LENGTH = 2048
+CALLBACK_MAX_HEADERS = 20
+CALLBACK_MAX_HEADER_NAME_LENGTH = 128
+CALLBACK_MAX_HEADER_VALUE_LENGTH = 1024
+CALLBACK_MAX_MODE_LENGTH = 32
+_CALLBACK_FIELDS = frozenset({"url", "method", "headers", "mode"})
+_CALLBACK_METHODS = frozenset({"POST", "PUT"})
+# Routing and hop-by-hop headers are owned by the HTTP client, never the caller.
+_CALLBACK_RESERVED_HEADERS = frozenset(
+    {
+        "connection",
+        "content-length",
+        "expect",
+        "host",
+        "keep-alive",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+    }
+)
+_HEADER_NAME_RE = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
+_URL_FORBIDDEN_CHARS_RE = re.compile(r"[\s\x00-\x1f\x7f]")
+_HEADER_VALUE_FORBIDDEN_CHARS_RE = re.compile(r"[\r\n\x00]")
+
+
+class CallbackConfigError(ValueError):
+    """A caller-supplied callback configuration cannot be used safely."""
+
+    code = CALLBACK_CONFIG_MALFORMED
+
+
+def _validate_callback_url(url: Any) -> str:
+    if not isinstance(url, str) or not url.strip():
+        raise CallbackConfigError("callback.url is required")
+    if len(url) > CALLBACK_MAX_URL_LENGTH:
+        raise CallbackConfigError("callback.url is too long")
+    if _URL_FORBIDDEN_CHARS_RE.search(url):
+        raise CallbackConfigError(
+            "callback.url must not contain whitespace or control characters"
+        )
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        raise CallbackConfigError("callback.url is not a valid URL") from None
+    if parts.scheme.lower() not in ("http", "https"):
+        raise CallbackConfigError("callback.url must use http or https")
+    if not parts.hostname or port == 0:
+        raise CallbackConfigError("callback.url must include a valid host and port")
+    if "@" in parts.netloc:
+        raise CallbackConfigError("callback.url must not contain credentials")
+    return url
+
+
+def _validate_callback_headers(headers: Any) -> dict[str, str]:
+    if not isinstance(headers, dict):
+        raise CallbackConfigError("callback.headers must be an object")
+    if len(headers) > CALLBACK_MAX_HEADERS:
+        raise CallbackConfigError("callback.headers has too many entries")
+    normalized: dict[str, str] = {}
+    for name, value in headers.items():
+        if (
+            not isinstance(name, str)
+            or len(name) > CALLBACK_MAX_HEADER_NAME_LENGTH
+            or not _HEADER_NAME_RE.fullmatch(name)
+        ):
+            raise CallbackConfigError("callback.headers contains an invalid name")
+        if name.lower() in _CALLBACK_RESERVED_HEADERS:
+            raise CallbackConfigError("callback.headers contains a reserved header")
+        if (
+            not isinstance(value, str)
+            or len(value) > CALLBACK_MAX_HEADER_VALUE_LENGTH
+            or _HEADER_VALUE_FORBIDDEN_CHARS_RE.search(value)
+        ):
+            raise CallbackConfigError("callback.headers contains an invalid value")
+        normalized[name] = value
+    return normalized
+
+
+def validate_callback_config(value: Any) -> dict[str, Any]:
+    """
+    Return a normalized callback config or raise ``CallbackConfigError``.
+
+    Error messages name the failed rule and never echo caller-supplied values,
+    because callback URLs and headers may carry credentials.
+    """
+    if not isinstance(value, dict):
+        raise CallbackConfigError("callback must be an object")
+    if not set(value).issubset(_CALLBACK_FIELDS):
+        raise CallbackConfigError("callback contains unsupported fields")
+
+    normalized: dict[str, Any] = {"url": _validate_callback_url(value.get("url"))}
+
+    method = value.get("method")
+    if method is not None:
+        if not isinstance(method, str) or method.strip().upper() not in (
+            _CALLBACK_METHODS
+        ):
+            raise CallbackConfigError("callback.method must be POST or PUT")
+        normalized["method"] = method.strip().upper()
+
+    headers = value.get("headers")
+    if headers is not None:
+        normalized["headers"] = _validate_callback_headers(headers)
+
+    mode = value.get("mode")
+    if mode is not None:
+        if (
+            not isinstance(mode, str)
+            or not mode.strip()
+            or len(mode) > CALLBACK_MAX_MODE_LENGTH
+        ):
+            raise CallbackConfigError("callback.mode must be a short non-empty string")
+        normalized["mode"] = mode
+
+    return normalized
 
 
 def get_callback_allow_hosts() -> Set[str]:

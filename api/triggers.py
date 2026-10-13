@@ -22,6 +22,7 @@ from typing import Optional
 # can silently import the WRONG module (another custom node or ComfyUI-adjacent package), causing
 # template allowlists to appear "missing" even when `data/templates/manifest.json` is correct.
 if __package__ and "." in __package__:
+    from ..services import callback_delivery
     from ..services.aiohttp_compat import import_aiohttp_web
     from ..services.endpoint_manifest import (
         AuthTier,
@@ -31,10 +32,12 @@ if __package__ and "." in __package__:
     )
     from ..services.env_aliases import get_env_value
     from ..services.execution_budgets import BudgetExceededError
+    from ..services.surface_guard import check_surface
     from ..services.templates import is_template_allowed
     from ..services.trace import generate_trace_id
     from ..services.webhook_auth import AuthError
 else:  # pragma: no cover (test-only import mode)
+    from services import callback_delivery
     from services.aiohttp_compat import import_aiohttp_web  # type: ignore
     from services.endpoint_manifest import (  # type: ignore
         AuthTier,
@@ -44,6 +47,7 @@ else:  # pragma: no cover (test-only import mode)
     )
     from services.env_aliases import get_env_value
     from services.execution_budgets import BudgetExceededError  # type: ignore
+    from services.surface_guard import check_surface
     from services.templates import is_template_allowed  # type: ignore
     from services.trace import generate_trace_id  # type: ignore
     from services.webhook_auth import AuthError  # type: ignore
@@ -55,6 +59,31 @@ web = import_aiohttp_web()
 REQUIRE_APPROVAL_DEFAULT = (
     get_env_value("OPENCLAW_REQUIRE_APPROVAL_FOR_TRIGGERS", default="0") == "1"
 )
+
+CALLBACK_EGRESS_SURFACE = "callback_egress"
+CALLBACK_STATUS_SCHEDULED = "scheduled"
+CALLBACK_STATUS_DEDUPED = "deduped"
+CALLBACK_STATUS_NOT_SUBMITTED = "not_submitted"
+CALLBACK_STATUS_BLOCKED = "blocked"
+CALLBACK_STATUS_INVALID = "invalid"
+
+
+async def _dispatch_trigger_callback(
+    callback: dict, result: object, trace_id: str
+) -> str:
+    """Start callback delivery for one trigger submission and report its status."""
+    prompt_id = result.get("prompt_id") if isinstance(result, dict) else None
+    if isinstance(result, dict) and result.get("deduped"):
+        # The original submission already owns the watcher for this prompt.
+        return CALLBACK_STATUS_DEDUPED
+    if not prompt_id:
+        return CALLBACK_STATUS_NOT_SUBMITTED
+    # CRITICAL: URL callbacks are dispatched here, on the route's long-lived event
+    # loop, never inside the shared automation submit function. The scheduler runs
+    # that function on a short-lived loop that closes after submission, which
+    # would silently cancel the watcher task that start_callback_watch creates.
+    await callback_delivery.start_callback_watch(prompt_id, callback, trace_id=trace_id)
+    return CALLBACK_STATUS_SCHEDULED
 
 
 class TriggerHandlers:
@@ -109,15 +138,20 @@ class TriggerHandlers:
             "template_id": "required - must be in allowlist",
             "inputs": { ... optional input variables },
             "trace_id": "optional - caller-supplied trace ID",
-            "callback": { "url": "..." } optional callback config,
+            "callback": { "url": "...", "method?": "POST|PUT", "headers?": {}, "mode?": "..." },
             "require_approval": false  // optional, defaults to env or false
         }
+
+        An invalid callback returns 400 `callback_malformed`; a callback while
+        callback egress is blocked returns the surface-guard 403. Neither submits
+        anything or creates an approval.
 
         Response (immediate execution):
         {
             "triggered": true,
             "prompt_id": "...",
-            "trace_id": "..."
+            "trace_id": "...",
+            "callback": "scheduled|deduped|not_submitted"  // only with a callback
         }
 
         Response (pending approval):
@@ -164,6 +198,17 @@ class TriggerHandlers:
             return web.json_response(
                 {"error": "inputs too large (max 32KB)"}, status=400
             )
+
+        if callback is not None:
+            try:
+                callback = callback_delivery.validate_callback_config(callback)
+            except callback_delivery.CallbackConfigError as e:
+                return web.json_response({"error": str(e), "code": e.code}, status=400)
+            # Fail closed before any submission or approval record: accepting a
+            # callback that can never be delivered is the silent-drop failure.
+            blocked = check_surface(CALLBACK_EGRESS_SURFACE, request)
+            if blocked is not None:
+                return blocked
 
         # Generate trace_id if not provided
         trace_id = caller_trace_id or generate_trace_id()
@@ -251,12 +296,13 @@ class TriggerHandlers:
 
         try:
             if self._submit_fn:
+                # The callback is not forwarded as `delivery`: trigger callbacks are
+                # owned by this route layer (see _dispatch_trigger_callback).
                 result = await self._submit_fn(
                     template_id=template_id,
                     inputs=inputs,
                     trace_id=trace_id,
                     idempotency_key=idempotency_key,
-                    delivery=callback,
                     source="trigger",
                 )
 
@@ -267,14 +313,17 @@ class TriggerHandlers:
                     result.get("deduped", False) if isinstance(result, dict) else False
                 )
 
-                return web.json_response(
-                    {
-                        "triggered": True,
-                        "prompt_id": prompt_id,
-                        "trace_id": trace_id,
-                        "deduped": deduped,
-                    }
-                )
+                body = {
+                    "triggered": True,
+                    "prompt_id": prompt_id,
+                    "trace_id": trace_id,
+                    "deduped": deduped,
+                }
+                if callback is not None:
+                    body["callback"] = await _dispatch_trigger_callback(
+                        callback, result, trace_id
+                    )
+                return web.json_response(body)
             else:
                 return web.json_response(
                     {"error": "Submit service not configured"}, status=503
@@ -337,15 +386,42 @@ async def execute_approved_trigger(
         inputs=approval.inputs,
         trace_id=trace_id,
         idempotency_key=idempotency_key,
-        delivery=approval.delivery,
         source="trigger",
     )
 
-    return {
+    executed = {
         "prompt_id": result.get("prompt_id") if isinstance(result, dict) else None,
         "trace_id": trace_id,
         "approval_id": approval_id,
     }
+    if approval.delivery is not None:
+        executed["callback"] = await _dispatch_approved_callback(
+            approval_id, approval.delivery, result, trace_id
+        )
+    return executed
+
+
+async def _dispatch_approved_callback(
+    approval_id: str, stored_callback: object, result: object, trace_id: str
+) -> str:
+    """Dispatch an approval's stored callback after the approved job is submitted."""
+    # Records created before callback validation existed may hold unusable data.
+    try:
+        callback = callback_delivery.validate_callback_config(stored_callback)
+    except callback_delivery.CallbackConfigError:
+        logger.warning(
+            "Approved trigger callback skipped: stored callback is invalid "
+            f"(approval={approval_id})"
+        )
+        return CALLBACK_STATUS_INVALID
+    # The approval itself was explicit, so the job still runs; only egress is held.
+    if check_surface(CALLBACK_EGRESS_SURFACE) is not None:
+        logger.warning(
+            "Approved trigger callback skipped: callback egress is blocked "
+            f"(approval={approval_id})"
+        )
+        return CALLBACK_STATUS_BLOCKED
+    return await _dispatch_trigger_callback(callback, result, trace_id)
 
 
 def register_trigger_routes(
