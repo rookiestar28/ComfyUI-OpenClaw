@@ -92,7 +92,7 @@
     "max_entries": 16,
     "ttl_sec": 600
   },
-  "openapi_sha256": "7997883a91ca7b3e3058d3c299512947ca634d92ddd1aa4c06f0d33539325f33",
+  "openapi_sha256": "e15bfc34f32e4f0b1da4a86eebf3875d62d8c001b85cb068b3edb30dbd28a638",
   "owned_response_matrices": {
     "config": [
       "tests.test_s66_api_config_guardrails",
@@ -199,7 +199,7 @@
       "requires_key": true
     }
   ],
-  "r220_route_contract_sha256": "947979f978f3541dce6b005c38255177322234a24b47ee0dd22a49e234eeed27",
+  "r220_route_contract_sha256": "633f5a1086bf6b935beacf37a6b64a1cc89d652a88545191bd83fee89dadfb0f",
   "schema_version": 1,
   "settings_schema_sha256": "e129472bd8b4fb81181c2a3169ed6177757cb54050276646eea70052007bd10b"
 }
