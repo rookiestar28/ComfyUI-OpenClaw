@@ -29,12 +29,13 @@ export const HOST_CORE_REFERENCE = Object.freeze({
 /**
  * Real-host validation state for the pinned core and two frontend subjects.
  *
- * CRITICAL: source review and repository validation are not runtime proof. The
- * refreshed core and frontend subjects stay `pending` until an authorized
- * real-host run on those exact subjects passes; earlier campaigns on previous
- * subjects never carry over, and neither does a local gate result.
+ * CRITICAL: source review and repository validation are not runtime proof. This
+ * state is backed by the paired real-host campaign on the refreshed core and both
+ * frontend subjects in the compatibility matrix; do not extend it to the later
+ * frontend source head or Desktop surfaces, and reset it to `pending` whenever the
+ * pinned subjects change.
  */
-export const HOST_REAL_VALIDATION_STATE = "pending";
+export const HOST_REAL_VALIDATION_STATE = "validated";
 
 export const HOST_SURFACE_REFERENCES = Object.freeze({
     [HOST_SURFACES.standaloneFrontend]: Object.freeze({

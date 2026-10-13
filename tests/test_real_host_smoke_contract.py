@@ -285,15 +285,14 @@ class TestHostStartupIsBoundedAndLoopbackOnly(unittest.TestCase):
 
 
 class TestEvidenceCannotAdvanceWithoutARun(unittest.TestCase):
-    def test_the_matrix_reports_refreshed_subjects_as_pending(self):
+    def test_the_matrix_reports_the_refreshed_two_subject_host_campaign(self):
         states = _matrix_metadata()["evidence_states"]["real_host"]
 
         self.assertEqual(states["state"], POLICY["evidence"]["current_state"])
-        self.assertEqual(states["state"], "pending")
-        self.assertIsNone(states["run_id"])
-        self.assertIsNone(states["evidence_id"])
-        self.assertNotIn("run_id", POLICY["evidence"])
-        self.assertNotIn("evidence_id", POLICY["evidence"])
+        self.assertEqual(states["state"], "validated")
+        self.assertEqual(states["run_id"], POLICY["evidence"]["run_id"])
+        self.assertEqual(states["evidence_id"], POLICY["evidence"]["evidence_id"])
+        self.assertEqual(states["run_id"], "host-pair-20261013-01")
         self.assertEqual(
             evidence_update_is_allowed(
                 POLICY, states["state"], states["run_id"], states["evidence_id"]
@@ -301,10 +300,10 @@ class TestEvidenceCannotAdvanceWithoutARun(unittest.TestCase):
             [],
         )
 
-    def test_the_frontend_module_reports_real_host_validation_as_pending(self):
+    def test_the_frontend_module_reports_real_host_validation(self):
         surface = HOST_SURFACE_PATH.read_text(encoding="utf-8")
 
-        self.assertIn('HOST_REAL_VALIDATION_STATE = "pending"', surface)
+        self.assertIn('HOST_REAL_VALIDATION_STATE = "validated"', surface)
 
     def test_a_validated_state_requires_both_identifiers(self):
         self.assertEqual(
@@ -551,6 +550,26 @@ class TestSpecUsesSurfacesThatExistOutsideTheMock(unittest.TestCase):
         # silently measure a middle tab and miss an overflow at the right edge.
         self.assertNotIn("nth-child(4)", self.spec)
         self.assertIn("getBoundingClientRect().right", self.spec)
+
+    def test_the_sizing_case_lets_the_host_write_the_width(self):
+        # A width assigned by the spec proves only that OpenClaw keeps a value the
+        # spec wrote; the real hazard is the host splitter's own write, so the case
+        # drags the host gutter and never assigns a sizing style itself.
+        for marker in (
+            "survives a tab switch",
+            "p-splitter-gutter",
+            "page.mouse.down()",
+            "page.mouse.up()",
+            "evaluateHostWidthOwnership(",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, self.spec)
+        code = re.sub(r"/\*.*?\*/", "", self.spec, flags=re.S)
+        code = re.sub(r"^\s*//.*$", "", code, flags=re.M)
+        assigned = re.findall(
+            r"style\.(?:flexBasis|width|minWidth)\s*=|style\.setProperty\(", code
+        )
+        self.assertEqual(assigned, [], "the spec must not write sidebar sizing itself")
 
     def test_the_spec_switches_tabs_through_an_api_the_host_provides(self):
         self.assertIn("toggleSidebarTab", self.spec)

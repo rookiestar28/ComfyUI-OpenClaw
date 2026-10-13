@@ -524,20 +524,32 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
         validation = validate_metadata(metadata, today=date(2026, 9, 6))
         return validation, {entry["code"] for entry in validation["violations"]}
 
-    def test_repo_matrix_keeps_refreshed_subject_evidence_pending(self):
-        # CRITICAL: a campaign on earlier subjects never validates refreshed anchors.
+    def test_repo_matrix_names_the_refreshed_real_host_campaign(self):
+        # CRITICAL: only a campaign on the refreshed subjects may validate them.
         doc = read_matrix_document(
             REPO_ROOT / "docs" / "release" / "compatibility_matrix.md"
         )
-        states = doc["metadata"]["evidence_states"]
+        metadata = doc["metadata"]
+        states = metadata["evidence_states"]
         self.assertEqual(states["source_review"]["state"], "reviewed")
         self.assertEqual(
             states["source_review"]["evidence_id"], "source-review-20261013"
         )
-        for key in ("real_host", "repository_validation"):
-            self.assertEqual(states[key]["state"], "pending", msg=key)
-            self.assertIsNone(states[key]["run_id"], msg=key)
-            self.assertIsNone(states[key]["evidence_id"], msg=key)
+        self.assertEqual(states["real_host"]["state"], "validated")
+        self.assertEqual(states["real_host"]["run_id"], "host-pair-20261013-01")
+        self.assertEqual(
+            states["real_host"]["evidence_id"], "host-evidence-20261013-01"
+        )
+        self.assertEqual(states["repository_validation"]["state"], "validated")
+        self.assertEqual(
+            states["repository_validation"]["run_id"],
+            "windows-full-gate-20261013-host-requalification",
+        )
+        self.assertEqual(
+            states["repository_validation"]["evidence_id"],
+            "repo-validation-20261013-host-requalification",
+        )
+        self.assertEqual(metadata["last_validated_date"], "2026-10-13")
 
     def test_repo_matrix_separates_frontend_source_head_from_release(self):
         doc = read_matrix_document(

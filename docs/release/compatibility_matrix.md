@@ -9,20 +9,20 @@
     "desktop": "0.9.4 (core 0.22.3 / frontend 1.43.18)"
   },
   "evidence": {
-    "evidence_id": "compat-matrix-refresh-20261013",
-    "updated_at": "2026-10-13T18:45:00+08:00",
-    "updated_by": "host-compatibility-baseline-refresh"
+    "evidence_id": "compat-matrix-host-qualification-20261013",
+    "updated_at": "2026-10-13T22:20:00+08:00",
+    "updated_by": "pinned-two-subject-host-qualification"
   },
   "evidence_states": {
     "real_host": {
-      "evidence_id": null,
-      "run_id": null,
-      "state": "pending"
+      "evidence_id": "host-evidence-20261013-01",
+      "run_id": "host-pair-20261013-01",
+      "state": "validated"
     },
     "repository_validation": {
-      "evidence_id": null,
-      "run_id": null,
-      "state": "pending"
+      "evidence_id": "repo-validation-20261013-host-requalification",
+      "run_id": "windows-full-gate-20261013-host-requalification",
+      "state": "validated"
     },
     "source_review": {
       "evidence_id": "source-review-20261013",
@@ -46,7 +46,7 @@
       "hosted_version_mode": "fixed"
     }
   },
-  "last_validated_date": "2026-09-22",
+  "last_validated_date": "2026-10-13",
   "matrix_version": "v0.3.0",
   "policy": {
     "max_age_days": 45,
@@ -91,9 +91,9 @@ This document tracks current reference anchors and separately records source, re
 
 - **ComfyUI host runtime**: current bootstrap assumptions remain aligned with upstream `PromptServer` startup and route registration flow, including `/api`-prefixed canonical API routing.
 - **Frontend host surface**: current sidebar integration contract remains compatible with the standalone frontend reference anchor, while inactive subgraph diagnostics and promoted-widget behavior remain regression-sensitive seams.
-- **Promoted-widget evidence scope**: early real-host runs exercised an ordinary widget with constructed source fields. The paired run on the previous core `0.37.0` subjects exercised a host-created subgraph binding, an OpenClaw Parameter Lab edit, projected value readback and serialized inner prompt value on both of its frontend subjects. The raw inner widget seed need not change when the promoted host value owns execution. That check has not yet run on the refreshed subjects.
-- **Evidence states**: the metadata block records source review, repository validation, and real-host validation independently. The refreshed core `0.39.0` and frontend `1.57.0` source identities have been reviewed. Repository validation and real-host validation stay `pending` for them until a run carrying a run identifier succeeds on these exact subjects; the earlier campaign on the previous subjects does not carry over.
-- **Real-host lane execution status**: earlier manual and workflow runs exercised historical core/frontend subjects. The most recent paired campaign used core `0.37.0` with its bundled frontend `1.53.6` and a SHA256-checked standalone release archive for `1.55.11`; both passed the ten-case real-host browser spec on a loopback host with zero skipped cases. These remain historical evidence. The refreshed subjects are core `0.39.0` with bundled frontend `1.55.14`, and the same core with standalone release `1.57.0`; neither has run yet.
+- **Promoted-widget evidence scope**: early real-host runs exercised an ordinary widget with constructed source fields. The paired runs on the previous core `0.37.0` subjects and on the refreshed core `0.39.0` subjects exercised a host-created subgraph binding, an OpenClaw Parameter Lab edit, projected value readback and serialized inner prompt value on both frontend subjects of each pair. The raw inner widget seed need not change when the promoted host value owns execution.
+- **Evidence states**: the metadata block records source review, repository validation, and real-host validation independently. The refreshed core `0.39.0` and frontend `1.57.0` source identities have been reviewed; repository validation passed the local Windows Full Gate on 2026-10-13. The paired real-host campaign on core `0.39.0` reports `validated` for bundled frontend `1.55.14` and standalone release `1.57.0`, with a campaign run identifier. This does not validate the later frontend source head or either Desktop surface.
+- **Real-host lane execution status**: earlier manual and workflow runs exercised historical core/frontend subjects, and the paired campaign on core `0.37.0` (bundled frontend `1.53.6`, standalone release `1.55.11`) remains historical evidence. The refreshed paired campaign used core `0.39.0` with its bundled frontend `1.55.14`, and the same core with standalone release `1.57.0`, whose served files matched a release archive with the pinned size and SHA256. Both subjects passed the eleven-case real-host browser spec on a loopback host with other custom node packs disabled and zero skipped cases, including a check that a sidebar width the host splitter writes while OpenClaw is mounted survives a tab switch.
 - **Legacy Desktop host surface**: Desktop `0.9.4` embeds frontend `1.43.18`, which lags the standalone frontend `1.57.0` release reference. Validate this fixed bundle against its own anchor.
 - **Current Comfy-Desktop host surface**: application `1.0.32-rc.1` is a managed-install generation. Its hosted ComfyUI and frontend versions are `installation_specific`; the application anchor must not be cross-wired into fixed hosted-version claims.
 

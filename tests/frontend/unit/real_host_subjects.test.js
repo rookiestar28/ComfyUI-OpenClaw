@@ -11,6 +11,7 @@ import {
     buildHostArgs,
     detectSubjectMismatch,
     evaluateAnnotatedTempResult,
+    evaluateHostWidthOwnership,
     evaluatePromotedWidget,
     evaluateSidebarGeometry,
     evidenceUpdateIsAllowed,
@@ -353,6 +354,93 @@ describe("real host sidebar geometry", () => {
     });
 });
 
+describe("real host sidebar width ownership", () => {
+    const floor = POLICY.geometry.sidebar_min_width_px;
+    // Shapes measured on a 1280px viewport: the host opens narrow, OpenClaw floors
+    // it, the user drags the gutter 120px wider, then switches tabs.
+    const kept = () => ({
+        dragDeltaPx: 120,
+        hostOnly: { width: 312, inlineMinWidth: "", inlineFlexBasis: "calc(20% - 4px)" },
+        mounted: { width: floor },
+        dragged: { width: floor + 120, inlineFlexBasis: "calc(53.1% - 4px)" },
+        released: {
+            width: floor + 120,
+            inlineMinWidth: "",
+            inlineFlexBasis: "calc(53.1% - 4px)",
+            peerMounted: true,
+            openclawRootRemoved: true,
+        },
+    });
+
+    it("accepts a host width kept through the tab switch with the floor released", () => {
+        expect(evaluateHostWidthOwnership(kept(), floor)).toEqual([]);
+    });
+
+    it("tolerates sub-pixel rounding between the dragged and released widths", () => {
+        const evidence = kept();
+        evidence.released.width = evidence.dragged.width - 1.5;
+        expect(evaluateHostWidthOwnership(evidence, floor)).toEqual([]);
+    });
+
+    it("fails the snap-back a captured-value release produces", () => {
+        const evidence = kept();
+        evidence.released.width = 312;
+        evidence.released.inlineFlexBasis = "calc(20% - 4px)";
+
+        expect(evaluateHostWidthOwnership(evidence, floor)).toEqual([
+            `the width the host wrote while OpenClaw was mounted was not kept after the tab switch: dragged to ${floor + 120}px, released at 312px`,
+            'the host flex-basis changed when OpenClaw released the panel: "calc(53.1% - 4px)" -> "calc(20% - 4px)"',
+        ]);
+    });
+
+    it("fails a floor that outlives OpenClaw", () => {
+        const evidence = kept();
+        evidence.released.inlineMinWidth = `${floor}px`;
+
+        expect(evaluateHostWidthOwnership(evidence, floor)).toEqual([
+            `OpenClaw left min-width "${floor}px" on the panel after release; the host had ""`,
+        ]);
+    });
+
+    it("fails a mounted width below the floor", () => {
+        const evidence = kept();
+        evidence.mounted.width = floor - 1;
+
+        expect(evaluateHostWidthOwnership(evidence, floor)).toEqual([
+            `sidebar measured ${floor - 1}px while OpenClaw was mounted, below the ${floor}px floor`,
+        ]);
+    });
+
+    it("refuses to pass when the drag never widened the panel", () => {
+        const evidence = kept();
+        evidence.dragged.width = floor + 2;
+        evidence.released.width = floor + 2;
+
+        expect(evaluateHostWidthOwnership(evidence, floor)).toEqual([
+            `the host gutter drag did not widen the sidebar (${floor}px -> ${floor + 2}px), so host width ownership was not exercised`,
+        ]);
+    });
+
+    it("fails a switch that did not hand the panel over", () => {
+        const evidence = kept();
+        evidence.released.openclawRootRemoved = false;
+
+        expect(evaluateHostWidthOwnership(evidence, floor)).toEqual([
+            "the tab switch did not hand the sidebar panel to the other tab",
+        ]);
+    });
+
+    it("treats missing measurements as failure rather than success", () => {
+        expect(evaluateHostWidthOwnership({}, floor)).toEqual([
+            "sidebar width was not measurable at the hostOnly stage",
+            "sidebar width was not measurable at the mounted stage",
+            "sidebar width was not measurable at the dragged stage",
+            "sidebar width was not measurable at the released stage",
+        ]);
+        expect(evaluateHostWidthOwnership(null, floor)).toHaveLength(4);
+    });
+});
+
 describe("real host promoted widget", () => {
     const bound = () => ({
         hostNodeId: "14",
@@ -474,9 +562,9 @@ describe("real host evidence gating", () => {
                 evidenceId: POLICY.evidence.evidence_id,
             }).allowed,
         ).toBe(true);
-        expect(POLICY.evidence.current_state).toBe("pending");
-        expect(POLICY.evidence.run_id).toBeUndefined();
-        expect(POLICY.evidence.evidence_id).toBeUndefined();
+        expect(POLICY.evidence.current_state).toBe("validated");
+        expect(POLICY.evidence.run_id).toBe("host-pair-20261013-01");
+        expect(POLICY.evidence.evidence_id).toBe("host-evidence-20261013-01");
     });
 });
 

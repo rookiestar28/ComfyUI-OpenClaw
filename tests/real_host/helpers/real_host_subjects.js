@@ -236,6 +236,69 @@ export function evaluateSidebarGeometry(geometry, minWidthPx) {
     return failures;
 }
 
+/** Largest width difference, in CSS pixels, still read as "the same width". */
+export const HOST_WIDTH_TOLERANCE_PX = 2;
+
+/**
+ * A width the host writes while OpenClaw is mounted must survive OpenClaw
+ * handing the panel to another tab, and OpenClaw's floor must leave with it.
+ *
+ * The host pins a dragged sidebar width as inline `flex-basis`. Releasing the
+ * layout by restoring what OpenClaw captured at mount time snaps the panel back
+ * to its pre-OpenClaw width, so the release has to be compared against the
+ * host's own write, not against the captured value.
+ */
+export function evaluateHostWidthOwnership(evidence, minWidthPx) {
+    const failures = [];
+    const widthOf = (stage) => evidence?.[stage]?.width;
+    for (const stage of ["hostOnly", "mounted", "dragged", "released"]) {
+        if (typeof widthOf(stage) !== "number" || !Number.isFinite(widthOf(stage))) {
+            failures.push(`sidebar width was not measurable at the ${stage} stage`);
+        }
+    }
+    if (failures.length > 0) {
+        return failures;
+    }
+
+    if (widthOf("mounted") < minWidthPx) {
+        failures.push(
+            `sidebar measured ${widthOf("mounted")}px while OpenClaw was mounted, below the ` +
+                `${minWidthPx}px floor`,
+        );
+    }
+    // Without a real widening there is no host write to keep, and a pass would prove nothing.
+    const requiredGrowth = Math.max(HOST_WIDTH_TOLERANCE_PX + 1, (evidence.dragDeltaPx ?? 0) / 2);
+    if (widthOf("dragged") - widthOf("mounted") < requiredGrowth) {
+        failures.push(
+            `the host gutter drag did not widen the sidebar (${widthOf("mounted")}px -> ` +
+                `${widthOf("dragged")}px), so host width ownership was not exercised`,
+        );
+        return failures;
+    }
+    if (evidence.released.peerMounted !== true || evidence.released.openclawRootRemoved !== true) {
+        failures.push("the tab switch did not hand the sidebar panel to the other tab");
+    }
+    if (Math.abs(widthOf("released") - widthOf("dragged")) > HOST_WIDTH_TOLERANCE_PX) {
+        failures.push(
+            `the width the host wrote while OpenClaw was mounted was not kept after the tab ` +
+                `switch: dragged to ${widthOf("dragged")}px, released at ${widthOf("released")}px`,
+        );
+    }
+    if (evidence.released.inlineFlexBasis !== evidence.dragged.inlineFlexBasis) {
+        failures.push(
+            `the host flex-basis changed when OpenClaw released the panel: ` +
+                `"${evidence.dragged.inlineFlexBasis}" -> "${evidence.released.inlineFlexBasis}"`,
+        );
+    }
+    if (evidence.released.inlineMinWidth !== evidence.hostOnly.inlineMinWidth) {
+        failures.push(
+            `OpenClaw left min-width "${evidence.released.inlineMinWidth}" on the panel after ` +
+                `release; the host had "${evidence.hostOnly.inlineMinWidth}"`,
+        );
+    }
+    return failures;
+}
+
 /** Require a connected host input, projection and inner prompt readback. */
 export function evaluatePromotedWidget(widget) {
     const failures = [];

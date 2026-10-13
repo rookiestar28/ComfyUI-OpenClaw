@@ -4,7 +4,8 @@
  * Every assertion here is about a surface a real ComfyUI host owns and the
  * mocked harness can only imitate: which frontend the host actually served, that
  * OpenClaw registered into the host's sidebar, that its floor survives the host's
- * own layout, that a promoted widget connects a host input to an inner node and
+ * own layout, that a width the host's splitter writes while OpenClaw is mounted
+ * survives a tab switch, that a promoted widget connects a host input to an inner node and
  * survives an OpenClaw edit and prompt serialization, that an annotated temporary
  * result is fetched from the temporary directory, and that OpenClaw releases the shared mount when the
  * host hands it to another custom tab without calling a destroy callback.
@@ -31,6 +32,7 @@ import {
   classifyFailedRequests,
   detectSubjectMismatch,
   evaluateAnnotatedTempResult,
+  evaluateHostWidthOwnership,
   evaluatePromotedWidget,
   evaluateSidebarGeometry,
   parseHostBindOrigin,
@@ -57,6 +59,9 @@ const PEER_CONTENT = '#openclaw-smoke-peer-content';
 // How long the served frontend gets to announce its own version before the
 // subject is treated as unidentifiable.
 const FRONTEND_VERSION_BUDGET_MS = 30_000;
+// How far the sizing case drags the host gutter. Wide enough to be unmistakable,
+// small enough to stay clear of the canvas minimum on the default 1280px viewport.
+const SIDEBAR_DRAG_DELTA_PX = 120;
 
 /**
  * Find the path the host actually serves OpenClaw's modules under.
@@ -149,6 +154,34 @@ async function activateSidebarTab(page, tabId) {
       store.toggleSidebarTab(id);
     }
   }, tabId);
+}
+
+/** Inline sizing and measured width of the host's sidebar panel. */
+async function readSidebarPanel(page) {
+  return page.evaluate(() => {
+    const panel = document.querySelector('.side-bar-panel');
+    if (!panel) {
+      return null;
+    }
+    return {
+      width: panel.getBoundingClientRect().width,
+      inlineMinWidth: panel.style.getPropertyValue('min-width'),
+      inlineFlexBasis: panel.style.getPropertyValue('flex-basis'),
+    };
+  });
+}
+
+/**
+ * Let deferred layout work land before measuring: OpenClaw re-applies its floor in
+ * the next animation frame, and the host re-pins widths after its next tick.
+ */
+async function settleFrames(page) {
+  await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 50)));
+      }),
+  );
 }
 
 async function openOpenClawSidebar(page) {
@@ -311,6 +344,85 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
     expect(geometry.tabCount).toBeGreaterThan(0);
     const failures = evaluateSidebarGeometry(geometry, POLICY.geometry.sidebar_min_width_px);
     expect(failures, failures.join('\n')).toEqual([]);
+  });
+
+  test('a sidebar width the host writes while OpenClaw is mounted survives a tab switch', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    // Start on a tab OpenClaw does not own, so the host's own inline sizing is read
+    // before OpenClaw captures anything.
+    await activateSidebarTab(page, PEER_TAB_ID);
+    await page.waitForSelector(PEER_CONTENT, { timeout: 30_000 });
+
+    const layout = await page.evaluate(() => {
+      const read = (id) =>
+        window.app?.extensionManager?.setting?.get?.(id) ??
+        window.app?.ui?.settings?.getSettingValue?.(id);
+      return {
+        unifiedWidth: read('Comfy.Sidebar.UnifiedWidth'),
+        location: read('Comfy.Sidebar.Location'),
+      };
+    });
+    // With per-tab widths the host itself resizes the panel on a tab switch, which
+    // this case would misread as OpenClaw's doing. The host default is unified.
+    expect(layout.unifiedWidth, 'this case needs Comfy.Sidebar.UnifiedWidth=true').toBe(true);
+
+    const hostOnly = await readSidebarPanel(page);
+
+    await activateSidebarTab(page, OPENCLAW_TAB_ID);
+    await page.waitForSelector(OPENCLAW_MOUNT, { timeout: 60_000 });
+    await page.waitForSelector(OPENCLAW_ROOT, { timeout: 60_000 });
+    await settleFrames(page);
+    const mounted = await readSidebarPanel(page);
+
+    // Drag the host's own gutter, so the width is written by the host's splitter
+    // code rather than by this test assigning a style.
+    const gutter = await page.evaluate((location) => {
+      const panel = document.querySelector('.side-bar-panel');
+      const sibling =
+        location === 'right' ? panel?.previousElementSibling : panel?.nextElementSibling;
+      if (!sibling?.classList.contains('p-splitter-gutter')) {
+        return null;
+      }
+      const box = sibling.getBoundingClientRect();
+      return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+    }, layout.location);
+    expect(gutter, 'the host renders no splitter gutter beside the sidebar').not.toBeNull();
+
+    const direction = layout.location === 'right' ? -1 : 1;
+    await page.mouse.move(gutter.x, gutter.y);
+    await page.mouse.down();
+    await page.mouse.move(gutter.x + direction * SIDEBAR_DRAG_DELTA_PX, gutter.y, { steps: 12 });
+    await page.mouse.up();
+    await settleFrames(page);
+    const dragged = await readSidebarPanel(page);
+
+    await activateSidebarTab(page, PEER_TAB_ID);
+    await page.waitForSelector(PEER_CONTENT, { timeout: 30_000 });
+    await page.waitForSelector(OPENCLAW_ROOT, { state: 'detached', timeout: 30_000 });
+    await settleFrames(page);
+    const released = {
+      ...(await readSidebarPanel(page)),
+      ...(await page.evaluate(
+        (selectors) => ({
+          peerMounted:
+            document.querySelector(selectors.peer)?.dataset.openclawSmokePeer === 'mounted',
+          openclawRootRemoved: document.querySelector(selectors.root) === null,
+        }),
+        { peer: PEER_CONTENT, root: OPENCLAW_ROOT },
+      )),
+    };
+
+    const evidence = {
+      dragDeltaPx: SIDEBAR_DRAG_DELTA_PX,
+      hostOnly,
+      mounted,
+      dragged,
+      released,
+    };
+    const failures = evaluateHostWidthOwnership(evidence, POLICY.geometry.sidebar_min_width_px);
+    expect(failures, `${failures.join('\n')}\n${JSON.stringify(evidence)}`).toEqual([]);
   });
 
   test('a host-promoted widget reaches the inner prompt through OpenClaw', async ({ page }) => {
