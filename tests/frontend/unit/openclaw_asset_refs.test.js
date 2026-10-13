@@ -606,6 +606,61 @@ describe("openclaw asset refs", () => {
         expect(outputs.map(({ subfolder }) => subfolder)).toEqual(["different", "3d", "3d"]);
     });
 
+    it("ignores the standard 3d sibling keys camera_info and model_3d_info", () => {
+        const outputs = extractHistoryOutputRefs({
+            outputs: {
+                load: {
+                    "3d": [{ filename: "mesh_00001.glb", subfolder: "", type: "temp" }],
+                    camera_info: [{ position: { x: 1, y: 2, z: 3 }, zoom: 1 }],
+                    model_3d_info: [{ vertices: 1024 }],
+                },
+                save: {
+                    "3d": [
+                        { filename: "model_00001_.glb", subfolder: "3d", type: "output" },
+                        { filename: "model_00002_.glb", subfolder: "3d", type: "output" },
+                    ],
+                    camera_info: [null],
+                    model_3d_info: [],
+                },
+            },
+        });
+        expect(outputs.map(({ media_type, type, subfolder, filename }) => [media_type, type, subfolder, filename])).toEqual([
+            ["3d", "temp", "", "mesh_00001.glb"],
+            ["3d", "output", "3d", "model_00001_.glb"],
+            ["3d", "output", "3d", "model_00002_.glb"],
+        ]);
+        for (const ref of outputs) {
+            expect(ref.resolution).toBe("view");
+            expect(ref.asset_api_required).toBe(false);
+        }
+    });
+
+    it("keeps the Preview3D legacy result-only output", () => {
+        const outputs = extractHistoryOutputRefs({
+            outputs: {
+                preview: {
+                    result: ["3d/model_00001_.glb", { position: { x: 0, y: 0, z: 5 } }, "temp/bg_0123abcd.png"],
+                },
+            },
+        });
+        expect(outputs.map(({ media_type, type, subfolder, filename }) => [media_type, type, subfolder, filename])).toEqual([
+            ["3d", "output", "3d", "model_00001_.glb"],
+        ]);
+    });
+
+    it("ignores optional per-file media metadata", () => {
+        const history = (withMetadata) => {
+            const image = { filename: "ComfyUI_00001_.png", subfolder: "", type: "output" };
+            const video = { filename: "clip_00001.mp4", subfolder: "video", type: "output" };
+            if (withMetadata) {
+                image.metadata = { kind: "image", width: 512, height: 768 };
+                video.metadata = { kind: "video", width: 640, height: 360, duration: 2.5, fps: 24, frame_count: 60 };
+            }
+            return { outputs: { 3: { images: [image] }, 5: { images: [video], animated: [true] } } };
+        };
+        expect(extractHistoryOutputRefs(history(true))).toEqual(extractHistoryOutputRefs(history(false)));
+    });
+
     it("keeps advanced 3d suffix and path parity with the backend", () => {
         const suffixes = [
             "glb",

@@ -371,6 +371,113 @@ class TestComfyUIHistoryParsing(unittest.TestCase):
         self.assertNotIn("width=", outputs[0]["view_url"])
         self.assertNotIn("height=", outputs[0]["view_url"])
 
+    def test_extract_output_refs_ignores_standard_3d_sibling_keys(self):
+        from services.comfyui_history import extract_output_refs
+
+        history_item = {
+            "outputs": {
+                "load": {
+                    "3d": [
+                        {"filename": "mesh_00001.glb", "subfolder": "", "type": "temp"}
+                    ],
+                    "camera_info": [{"position": {"x": 1, "y": 2, "z": 3}, "zoom": 1}],
+                    "model_3d_info": [{"vertices": 1024}],
+                },
+                "save": {
+                    "3d": [
+                        {
+                            "filename": "model_00001_.glb",
+                            "subfolder": "3d",
+                            "type": "output",
+                        },
+                        {
+                            "filename": "model_00002_.glb",
+                            "subfolder": "3d",
+                            "type": "output",
+                        },
+                    ],
+                    "camera_info": [None],
+                    "model_3d_info": [],
+                },
+            }
+        }
+
+        outputs = extract_output_refs(history_item)
+        self.assertEqual(
+            [
+                (ref["media_type"], ref["type"], ref["subfolder"], ref["filename"])
+                for ref in outputs
+            ],
+            [
+                ("3d", "temp", "", "mesh_00001.glb"),
+                ("3d", "output", "3d", "model_00001_.glb"),
+                ("3d", "output", "3d", "model_00002_.glb"),
+            ],
+        )
+        for ref in outputs:
+            self.assertEqual(ref["resolution"], "view")
+            self.assertFalse(ref["asset_api_required"])
+
+    def test_extract_output_refs_keeps_preview3d_legacy_result_only_output(self):
+        from services.comfyui_history import extract_output_refs
+
+        history_item = {
+            "outputs": {
+                "preview": {
+                    "result": [
+                        "3d/model_00001_.glb",
+                        {"position": {"x": 0, "y": 0, "z": 5}},
+                        "temp/bg_0123abcd.png",
+                    ]
+                }
+            }
+        }
+
+        outputs = extract_output_refs(history_item)
+        self.assertEqual(
+            [
+                (ref["media_type"], ref["type"], ref["subfolder"], ref["filename"])
+                for ref in outputs
+            ],
+            [("3d", "output", "3d", "model_00001_.glb")],
+        )
+
+    def test_extract_output_refs_ignores_optional_media_metadata(self):
+        from services.comfyui_history import extract_output_refs
+
+        def history(with_metadata):
+            image = {
+                "filename": "ComfyUI_00001_.png",
+                "subfolder": "",
+                "type": "output",
+            }
+            video = {
+                "filename": "clip_00001.mp4",
+                "subfolder": "video",
+                "type": "output",
+            }
+            if with_metadata:
+                image["metadata"] = {"kind": "image", "width": 512, "height": 768}
+                video["metadata"] = {
+                    "kind": "video",
+                    "width": 640,
+                    "height": 360,
+                    "duration": 2.5,
+                    "fps": 24,
+                    "frame_count": 60,
+                }
+            return {
+                "outputs": {
+                    "3": {"images": [image]},
+                    "5": {"images": [video], "animated": [True]},
+                }
+            }
+
+        self.assertEqual(
+            extract_output_refs(history(with_metadata=True)),
+            extract_output_refs(history(with_metadata=False)),
+        )
+
     def test_extract_images_remains_image_only_for_callbacks(self):
         from services.comfyui_history import extract_images
 
