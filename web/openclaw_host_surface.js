@@ -18,38 +18,39 @@ export const HOST_SURFACES = Object.freeze({
  * core manifest pins. These are three different subjects; do not collapse them.
  */
 export const HOST_CORE_REFERENCE = Object.freeze({
-    sourceRevision: "e638023d",
-    sourceDescribe: "v0.37.0-9-ge638023d",
-    version: "0.37.0",
-    tag: "v0.37.0",
-    tagRevision: "73c9bad4",
-    bundledFrontendVersion: "1.53.6",
+    sourceRevision: "8010b48d",
+    sourceDescribe: "v0.39.0-49-g8010b48d2",
+    version: "0.39.0",
+    tag: "v0.39.0",
+    tagRevision: "b0b74356",
+    bundledFrontendVersion: "1.55.14",
 });
 
 /**
  * Real-host validation state for the pinned core and two frontend subjects.
  *
- * CRITICAL: source review and repository validation are not runtime proof. This
- * state is backed by the paired pinned-host campaign in the compatibility matrix;
- * do not extend it to the later frontend source head or Desktop surfaces.
+ * CRITICAL: source review and repository validation are not runtime proof. The
+ * refreshed core and frontend subjects stay `pending` until an authorized
+ * real-host run on those exact subjects passes; earlier campaigns on previous
+ * subjects never carry over, and neither does a local gate result.
  */
-export const HOST_REAL_VALIDATION_STATE = "validated";
+export const HOST_REAL_VALIDATION_STATE = "pending";
 
 export const HOST_SURFACE_REFERENCES = Object.freeze({
     [HOST_SURFACES.standaloneFrontend]: Object.freeze({
-        frontendVersion: "1.55.11",
-        sourceRevision: "23559a8f86",
-        sourceDescribe: "v1.55.11-104-g23559a8f86",
-        // The reproducible release, 104 commits behind the reviewed source head.
-        releaseVersion: "1.55.11",
-        releaseTag: "v1.55.11",
-        releaseRevision: "3a851363",
+        frontendVersion: "1.57.0",
+        sourceRevision: "0e1a2fbbe4",
+        sourceDescribe: "v1.57.0-309-g0e1a2fbbe4",
+        // The reproducible release, 309 commits behind the reviewed source head.
+        releaseVersion: "1.57.0",
+        releaseTag: "v1.57.0",
+        releaseRevision: "cdc18a92",
     }),
     [HOST_SURFACES.desktop]: Object.freeze({
         desktopVersion: "0.9.4",
         coreVersion: "0.22.3",
         embeddedFrontendVersion: "1.43.18",
-        standaloneFrontendVersion: "1.55.11",
+        standaloneFrontendVersion: "1.57.0",
         frontendParity: "lagging",
         generation: "legacy_fixed_bundle",
         hostedVersionMode: "fixed",

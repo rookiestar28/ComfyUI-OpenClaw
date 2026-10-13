@@ -24,8 +24,8 @@ from services.operator_doctor import DoctorReport, check_compatibility_matrix_go
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_CURRENT_ANCHORS = {
-    "comfyui": "e638023d (v0.37.0-9-ge638023d / pyproject 0.37.0)",
-    "comfyui_frontend": "1.55.11 (23559a8f86 / v1.55.11-104-g23559a8f86)",
+    "comfyui": "8010b48d (v0.39.0-49-g8010b48d2 / pyproject 0.39.0)",
+    "comfyui_frontend": "1.57.0 (0e1a2fbbe4 / v1.57.0-309-g0e1a2fbbe4)",
     "desktop": "0.9.4 (core 0.22.3 / frontend 1.43.18)",
     "comfy_desktop": "1.0.32-rc.1 (85e28b7a / v1.0.32-rc.1-3-g85e28b7)",
 }
@@ -62,23 +62,26 @@ STALE_ACTIVE_REFERENCE_TOKENS = (
     "v0.33.0-27-g3aba3dae",
     "569e65b30f",
     "v1.52.1-3-g569e65b30f",
+    # Superseded by the 2026-10-13 source-review baseline.
+    "23559a8f86",
+    "v1.55.11-104-g23559a8f86",
 )
 EXPECTED_REFERENCE_BASELINES = {
     "comfyui": {
-        "bundled_frontend_version": "1.53.6",
-        "project_version": "0.37.0",
-        "source_describe": "v0.37.0-9-ge638023d",
-        "source_head": "e638023d54497dbe0579565e5de4bb7076899592",
-        "tag": "v0.37.0",
-        "tag_commit": "73c9bad4d21e7addbe1d13bc92eee0f1431b017d",
+        "bundled_frontend_version": "1.55.14",
+        "project_version": "0.39.0",
+        "source_describe": "v0.39.0-49-g8010b48d2",
+        "source_head": "8010b48d2c1be986613f8e8c761527d205bd756f",
+        "tag": "v0.39.0",
+        "tag_commit": "b0b743566f65daafc423b4fea8a2fbda94b3384a",
     },
     "comfyui_frontend": {
-        "package_version": "1.55.12",
-        "release_tag": "v1.55.11",
-        "release_tag_commit": "3a851363c48b233b3b576131dff6e1e92b0e1573",
-        "release_version": "1.55.11",
-        "source_describe": "v1.55.11-104-g23559a8f86",
-        "source_head": "23559a8f86227837aef21d1da8b7aa8149f3b2cc",
+        "package_version": "1.57.0",
+        "release_tag": "v1.57.0",
+        "release_tag_commit": "cdc18a92d227a965810b08928963124959951908",
+        "release_version": "1.57.0",
+        "source_describe": "v1.57.0-309-g0e1a2fbbe4",
+        "source_head": "0e1a2fbbe4d5ed1eeefb70a3fd6f0d805331d3e8",
     },
 }
 
@@ -105,7 +108,7 @@ class TestR90CompatMatrixGovernance(unittest.TestCase):
         )
 
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("standalone frontend release `1.55.11`", readme)
+        self.assertIn("standalone frontend release `1.57.0`", readme)
         self.assertIn("Both historical frontend subjects", readme)
 
     def test_active_current_reference_files_reject_stale_anchors(self):
@@ -521,26 +524,20 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
         validation = validate_metadata(metadata, today=date(2026, 9, 6))
         return validation, {entry["code"] for entry in validation["violations"]}
 
-    def test_repo_matrix_names_the_completed_real_host_campaign(self):
+    def test_repo_matrix_keeps_refreshed_subject_evidence_pending(self):
+        # CRITICAL: a campaign on earlier subjects never validates refreshed anchors.
         doc = read_matrix_document(
             REPO_ROOT / "docs" / "release" / "compatibility_matrix.md"
         )
         states = doc["metadata"]["evidence_states"]
-        self.assertEqual(states["real_host"]["state"], "validated")
-        self.assertEqual(states["real_host"]["run_id"], "host-pair-20260922-01")
-        self.assertEqual(
-            states["real_host"]["evidence_id"], "host-evidence-20260922-01"
-        )
         self.assertEqual(states["source_review"]["state"], "reviewed")
-        self.assertEqual(states["repository_validation"]["state"], "validated")
         self.assertEqual(
-            states["repository_validation"]["run_id"],
-            "windows-full-gate-20260922-host-refresh",
+            states["source_review"]["evidence_id"], "source-review-20261013"
         )
-        self.assertEqual(
-            states["repository_validation"]["evidence_id"],
-            "repo-validation-20260922-host-refresh",
-        )
+        for key in ("real_host", "repository_validation"):
+            self.assertEqual(states[key]["state"], "pending", msg=key)
+            self.assertIsNone(states[key]["run_id"], msg=key)
+            self.assertIsNone(states[key]["evidence_id"], msg=key)
 
     def test_repo_matrix_separates_frontend_source_head_from_release(self):
         doc = read_matrix_document(
@@ -548,11 +545,11 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
         )
         frontend = doc["metadata"]["reference_baselines"]["comfyui_frontend"]
         self.assertNotEqual(frontend["source_head"], frontend["release_tag_commit"])
-        self.assertEqual(frontend["release_version"], "1.55.11")
-        self.assertEqual(frontend["package_version"], "1.55.12")
+        self.assertEqual(frontend["release_version"], "1.57.0")
+        self.assertEqual(frontend["package_version"], "1.57.0")
         core = doc["metadata"]["reference_baselines"]["comfyui"]
         self.assertNotEqual(core["source_head"], core["tag_commit"])
-        self.assertEqual(core["bundled_frontend_version"], "1.53.6")
+        self.assertEqual(core["bundled_frontend_version"], "1.55.14")
 
     def test_schema_v3_metadata_validates(self):
         validation, codes = self._codes(self._schema3())

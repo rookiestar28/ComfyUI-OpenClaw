@@ -39,21 +39,23 @@ STALE_MARKERS = (
     "v1.52.1-3-g569e65b30f",
     "standalone frontend `1.52.1`",
     "`1.49.6`",
+    # Superseded by the 2026-10-13 source-review baseline.
+    "23559a8f86",
+    "v1.55.11-104-g23559a8f86",
 )
 
 CURRENT_MARKERS = (
     # Core tag and reviewed HEAD pin different bundled frontend versions.
-    "e638023d",
-    "v0.37.0-9-ge638023d",
-    "73c9bad4",
-    "1.52.7",
-    "1.53.6",
-    # Standalone frontend source head/package versus reproducible release.
-    "23559a8f86",
-    "v1.55.11-104-g23559a8f86",
-    "3a851363",
-    "1.55.12",
-    "1.55.11",
+    "8010b48d",
+    "v0.39.0-49-g8010b48d2",
+    "b0b74356",
+    "1.53.10",
+    "1.55.14",
+    # Standalone frontend source head versus reproducible release.
+    "0e1a2fbbe4",
+    "v1.57.0-309-g0e1a2fbbe4",
+    "cdc18a92",
+    "1.57.0",
     # Desktop generations are unchanged and must stay published.
     "85e28b7a",
     "installation_specific",

@@ -15,35 +15,35 @@
   },
   "core": {
     "repository": "https://github.com/comfyanonymous/ComfyUI.git",
-    "source_head": "e638023d54497dbe0579565e5de4bb7076899592",
-    "project_version": "0.37.0",
-    "bundled_frontend_version": "1.53.6"
+    "source_head": "8010b48d2c1be986613f8e8c761527d205bd756f",
+    "project_version": "0.39.0",
+    "bundled_frontend_version": "1.55.14"
   },
   "subjects": {
     "bundled": {
       "id": "bundled",
-      "frontend_version": "1.53.6",
+      "frontend_version": "1.55.14",
       "front_end_version_arg": null,
       "summary": "The frontend package the core manifest pins. The host serves it when no frontend version is requested."
     },
     "standalone_release": {
       "id": "standalone_release",
-      "frontend_version": "1.55.11",
-      "front_end_version_arg": "Comfy-Org/ComfyUI_frontend@v1.55.11",
-      "release_tag": "v1.55.11",
-      "release_tag_commit": "3a851363c48b233b3b576131dff6e1e92b0e1573",
+      "frontend_version": "1.57.0",
+      "front_end_version_arg": "Comfy-Org/ComfyUI_frontend@v1.57.0",
+      "release_tag": "v1.57.0",
+      "release_tag_commit": "cdc18a92d227a965810b08928963124959951908",
       "release_asset_name": "dist.zip",
-      "release_asset_sha256": "37fac946be14a9cd96ec3fc0dd92fca826c24093c11e1e7184262f8a187f1071",
-      "release_asset_size_bytes": 25031746,
-      "release_asset_digest_source": "GitHub release API, tag v1.55.11, asset dist.zip; publisher-reported on 2026-09-22 and not independently downloaded here. The lane hashes downloaded bytes and refuses a mismatch.",
-      "web_root_relative": "web_custom_versions/Comfy-Org_ComfyUI_frontend/1.55.11",
+      "release_asset_sha256": "1dfa438ea71cf322a6a1342f8d5fdf75c7d83fe37f600ca5b0262cb9907e2d82",
+      "release_asset_size_bytes": 25610537,
+      "release_asset_digest_source": "GitHub release API, tag v1.57.0, asset dist.zip; publisher-reported on 2026-10-13 and not independently downloaded here. The lane hashes downloaded bytes and refuses a mismatch.",
+      "web_root_relative": "web_custom_versions/Comfy-Org_ComfyUI_frontend/1.57.0",
       "summary": "The reproducible standalone release. Its asset digest is pinned from published release metadata, so the lane verifies the artifact before the host sees it; the subject still refuses to run without explicit authorization."
     }
   },
   "not_executed": {
-    "frontend_source_head": "23559a8f86227837aef21d1da8b7aa8149f3b2cc",
-    "frontend_source_describe": "v1.55.11-104-g23559a8f86",
-    "reason": "A reviewed checkout 104 commits ahead of the release, with package version 1.55.12. The host can reproduce release 1.55.11, not this commit, so no runtime evidence may name it."
+    "frontend_source_head": "0e1a2fbbe4d5ed1eeefb70a3fd6f0d805331d3e8",
+    "frontend_source_describe": "v1.57.0-309-g0e1a2fbbe4",
+    "reason": "A reviewed checkout 309 commits ahead of the release, with package version 1.57.0 and unreleased splitter and extension-loader changes. The host can reproduce release 1.57.0, not this commit, so no runtime evidence may name it."
   },
   "deadlines_seconds": {
     "fetch": 900,
@@ -77,9 +77,7 @@
     "matrix_path": "docs/release/compatibility_matrix.md",
     "surface_module": "web/openclaw_host_surface.js",
     "evidence_key": "real_host",
-    "current_state": "validated",
-    "run_id": "host-pair-20260922-01",
-    "evidence_id": "host-evidence-20260922-01",
+    "current_state": "pending",
     "states_requiring_run_id": [
       "validated",
       "failed"
