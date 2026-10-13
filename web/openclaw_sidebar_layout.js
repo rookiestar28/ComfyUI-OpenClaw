@@ -11,19 +11,31 @@ function measureWidth(element) {
     return Number.isFinite(width) ? width : 0;
 }
 
+function readInlineStyle(element, property) {
+    return Object.freeze({
+        priority: element.style.getPropertyPriority(property),
+        value: element.style.getPropertyValue(property),
+    });
+}
+
+function sameInlineStyle(left, right) {
+    return left.value === right.value && left.priority === right.priority;
+}
+
 function captureInlineStyles(element) {
     const values = new Map();
     for (const property of OWNED_STYLE_PROPERTIES) {
-        values.set(property, {
-            priority: element.style.getPropertyPriority(property),
-            value: element.style.getPropertyValue(property),
-        });
+        values.set(property, { original: readInlineStyle(element, property), written: null });
     }
     return values;
 }
 
-function restoreInlineStyles(element, values) {
-    for (const [property, original] of values) {
+function releaseInlineStyles(element, values) {
+    for (const [property, { original, written }] of values) {
+        // CRITICAL: release only a value OpenClaw wrote and the element still holds. The host
+        // splitter pins user-dragged widths (flex-basis) on resize end; restoring the captured
+        // value over that pin snaps the sidebar back to its pre-OpenClaw width on tab switch.
+        if (!written || !sameInlineStyle(readInlineStyle(element, property), written)) continue;
         if (original.value === "") {
             element.style.removeProperty(property);
         } else {
@@ -62,6 +74,12 @@ export function acquireOpenClawSidebarLayout(container) {
         captured.set(element, captureInlineStyles(element));
     };
 
+    const write = (element, property, value) => {
+        element.style.setProperty(property, value);
+        // Record the normalized read-back so release can tell OpenClaw's value from a host rewrite.
+        captured.get(element).get(property).written = readInlineStyle(element, property);
+    };
+
     const apply = () => {
         if (disposed) return;
 
@@ -73,26 +91,26 @@ export function acquireOpenClawSidebarLayout(container) {
         if (splitterPanel) {
             const startingWidth = measureWidth(splitterPanel);
             own(splitterPanel);
-            splitterPanel.style.minWidth = floor;
+            write(splitterPanel, "min-width", floor);
             // CRITICAL: SplitterPanel owns visible allocation. A child/min-width-only edit
             // leaves percentage flex sizing narrow and clips the right side of OpenClaw.
             if (startingWidth < OPENCLAW_SIDEBAR_MIN_WIDTH_PX) {
-                splitterPanel.style.width = floor;
-                splitterPanel.style.flexBasis = floor;
+                write(splitterPanel, "width", floor);
+                write(splitterPanel, "flex-basis", floor);
             }
         }
 
         if (sidebarContent) {
             const startingWidth = measureWidth(sidebarContent);
             own(sidebarContent);
-            sidebarContent.style.minWidth = floor;
+            write(sidebarContent, "min-width", floor);
             if (startingWidth < OPENCLAW_SIDEBAR_MIN_WIDTH_PX) {
-                sidebarContent.style.width = floor;
+                write(sidebarContent, "width", floor);
             }
         }
 
         own(container);
-        container.style.minWidth = floor;
+        write(container, "min-width", floor);
     };
 
     apply();
@@ -109,7 +127,7 @@ export function acquireOpenClawSidebarLayout(container) {
         cancelDeferred?.();
         cancelDeferred = null;
         for (const [element, values] of [...captured.entries()].reverse()) {
-            restoreInlineStyles(element, values);
+            releaseInlineStyles(element, values);
         }
         captured.clear();
     };

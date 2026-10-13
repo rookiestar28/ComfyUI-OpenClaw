@@ -176,6 +176,82 @@ test.describe('OpenClaw sidebar layout ownership', () => {
     expect(evidence.nextOwnerPresent).toBe(true);
   });
 
+  test('keeps a width the host pins while OpenClaw is mounted after the tab is destroyed', async ({ page }, testInfo) => {
+    const evidence = await page.evaluate(async () => {
+      const panel = document.querySelector('.side-bar-panel');
+      const tab = window.__openclawMockSidebarTab;
+      const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+      await frame();
+      const mounted = {
+        flexBasis: panel.style.flexBasis,
+        width: panel.getBoundingClientRect().width,
+      };
+
+      // The host splitter sizer pins the dragged width as rigid flex values on resize end.
+      panel.style.flexBasis = '700px';
+      panel.style.flexGrow = '0';
+      panel.style.flexShrink = '0';
+      await frame();
+      tab.destroy();
+      await frame();
+
+      return {
+        mounted,
+        released: {
+          flexBasis: panel.style.flexBasis,
+          inlineMinWidth: panel.style.minWidth,
+          inlineWidth: panel.style.width,
+          width: panel.getBoundingClientRect().width,
+        },
+      };
+    });
+
+    await captureSidebarEvidence(page, testInfo, 'sidebar-host-pin-after-destroy');
+    expect(evidence.mounted.flexBasis).toBe('560px');
+    expect(evidence.mounted.width).toBeGreaterThanOrEqual(560);
+    expect(evidence.released).toEqual({
+      flexBasis: '700px',
+      inlineMinWidth: '',
+      inlineWidth: '',
+      width: 700,
+    });
+  });
+
+  test('applies and releases the floor on a reka-shaped sidebar without PrimeVue classes', async ({ page }) => {
+    const evidence = await page.evaluate(async () => {
+      const panel = document.querySelector('.side-bar-panel');
+      const tab = window.__openclawMockSidebarTab;
+      const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+      tab.destroy();
+      await frame();
+      panel.classList.remove('p-splitterpanel');
+      panel.id = 'first-side-panel';
+      tab.render();
+      await frame();
+      const mounted = {
+        flexBasis: panel.style.flexBasis,
+        width: panel.getBoundingClientRect().width,
+      };
+      tab.destroy();
+      await frame();
+      return {
+        mounted,
+        primeVuePanels: document.querySelectorAll('.p-splitterpanel').length,
+        released: {
+          flexBasis: panel.style.flexBasis,
+          minWidth: panel.style.minWidth,
+          width: panel.style.width,
+          measured: panel.getBoundingClientRect().width,
+        },
+      };
+    });
+
+    expect(evidence.primeVuePanels).toBe(0);
+    expect(evidence.mounted.flexBasis).toBe('560px');
+    expect(evidence.mounted.width).toBeGreaterThanOrEqual(560);
+    expect(evidence.released).toEqual({ flexBasis: '', minWidth: '', width: '', measured: 340 });
+  });
+
   test('restores acquired layout before rendering an error fallback', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { openclawUI } = await import('/web/openclaw_ui.js');

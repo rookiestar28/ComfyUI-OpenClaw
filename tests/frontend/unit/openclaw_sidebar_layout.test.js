@@ -165,6 +165,74 @@ describe("OpenClaw sidebar layout ownership", () => {
         }
     });
 
+    it("keeps a width the host pins while mounted and releases only OpenClaw's own writes", () => {
+        const { content, mount, panel } = buildHost();
+        const dispose = acquireOpenClawSidebarLayout(mount);
+        expect(panel.style.flexBasis).toBe("560px");
+
+        // The host splitter sizer pins the dragged width on resize end.
+        panel.style.flexBasis = "700px";
+        panel.style.flexGrow = "0";
+        panel.style.flexShrink = "0";
+        dispose();
+
+        expect(panel.style.flexBasis).toBe("700px");
+        expect(panel.style.flexGrow).toBe("0");
+        expect(panel.style.width).toBe("");
+        expect(panel.style.minWidth).toBe("");
+        expect(content.style.width).toBe("");
+        expect(content.style.minWidth).toBe("");
+        expect(mount.style.minWidth).toBe("");
+    });
+
+    it("never rewrites a property it did not write when releasing an above-floor panel", () => {
+        const { mount, panel } = buildHost({ panelWidth: 720, contentWidth: 720, mountWidth: 720 });
+        panel.style.flexBasis = "600px";
+        const dispose = acquireOpenClawSidebarLayout(mount);
+        expect(panel.style.flexBasis).toBe("600px");
+
+        panel.style.flexBasis = "700px";
+        dispose();
+
+        expect(panel.style.flexBasis).toBe("700px");
+        expect(panel.style.minWidth).toBe("");
+    });
+
+    it("keeps a host min-width rewrite together with its priority", () => {
+        const { mount, panel } = buildHost();
+        panel.style.setProperty("min-width", "12px", "important");
+        const dispose = acquireOpenClawSidebarLayout(mount);
+        panel.style.setProperty("min-width", "600px", "important");
+        dispose();
+
+        expect(panel.style.minWidth).toBe("600px");
+        expect(panel.style.getPropertyPriority("min-width")).toBe("important");
+        expect(panel.style.flexBasis).toBe("");
+        expect(panel.style.width).toBe("");
+    });
+
+    it.each([
+        ["left", '<div id="first-side-panel" class="side-bar-panel"><div class="sidebar-content-container"><div id="mount"></div></div></div><div id="last-side-panel"></div>'],
+        ["right", '<div id="first-side-panel"></div><div id="last-side-panel" class="side-bar-panel"><div class="sidebar-content-container"><div id="mount"></div></div></div>'],
+    ])("applies and releases the floor on a reka-shaped %s sidebar without PrimeVue classes", (_side, markup) => {
+        document.body.innerHTML = markup;
+        const panel = document.querySelector(".side-bar-panel");
+        const content = document.querySelector(".sidebar-content-container");
+        const mount = document.querySelector("#mount");
+        setMeasuredWidth(panel, 320);
+        setMeasuredWidth(content, 320);
+        setMeasuredWidth(mount, 320);
+        expect(document.querySelector(".p-splitterpanel")).toBeNull();
+
+        const dispose = acquireOpenClawSidebarLayout(mount);
+        expect(panel.style.minWidth).toBe("560px");
+        expect(panel.style.flexBasis).toBe("560px");
+        expect(content.style.width).toBe("560px");
+        dispose();
+
+        expect([panel.style.cssText, content.style.cssText, mount.style.cssText]).toEqual(["", "", ""]);
+    });
+
     it("keeps the JavaScript floor aligned with canonical and legacy CSS", () => {
         const webRoot = resolve(process.cwd(), "web");
         const canonical = readFileSync(`${webRoot}/styles/openclaw_core.css`, "utf8");
