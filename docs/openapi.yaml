@@ -780,6 +780,39 @@ paths:
           required: true
           schema:
             type: "string"
+  /openclaw/schedule-deliveries:
+    get:
+      operationId: "get_openclaw_schedule_deliveries"
+      summary: "List schedule delivery intents (`state`, `platform` and `limit` filters)."
+      responses:
+        200:
+          description: "OK"
+      x-openclaw-auth: "Unknown"
+      x-openclaw-section: "1.5 Schedules & Approvals"
+  /openclaw/schedule-deliveries/claim:
+    post:
+      operationId: "post_openclaw_schedule_deliveries_claim"
+      summary: "Lease pending schedule deliveries for the listed connector platforms."
+      responses:
+        200:
+          description: "OK"
+      x-openclaw-auth: "Unknown"
+      x-openclaw-section: "1.5 Schedules & Approvals"
+  /openclaw/schedule-deliveries/{delivery_id}/ack:
+    post:
+      operationId: "post_openclaw_schedule_deliveries_delivery_id_ack"
+      summary: "Record the outcome of a leased schedule delivery."
+      responses:
+        200:
+          description: "OK"
+      x-openclaw-auth: "Unknown"
+      x-openclaw-section: "1.5 Schedules & Approvals"
+      parameters:
+        - name: "delivery_id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
   /openclaw/approvals:
     get:
       operationId: "get_openclaw_approvals"

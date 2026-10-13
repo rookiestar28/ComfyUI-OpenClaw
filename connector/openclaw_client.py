@@ -257,3 +257,30 @@ class OpenClawClient:
 
     async def run_schedule(self, schedule_id: str) -> dict:
         return await self._request("POST", f"/openclaw/schedules/{schedule_id}/run")
+
+    async def claim_schedule_deliveries(
+        self, platforms: list[str], limit: int, lease_sec: int
+    ) -> dict:
+        """Lease pending schedule deliveries for the given platforms (admin token)."""
+        return await self._request(
+            "POST",
+            "/openclaw/schedule-deliveries/claim",
+            {"platforms": list(platforms), "limit": limit, "lease_sec": lease_sec},
+        )
+
+    async def ack_schedule_delivery(
+        self,
+        delivery_id: str,
+        lease_token: str,
+        outcome: str,
+        reason: str | None = None,
+    ) -> dict:
+        """Record the outcome of a leased schedule delivery."""
+        body: dict = {"lease_token": lease_token, "outcome": outcome}
+        if reason is not None:
+            body["reason"] = reason
+        return await self._request(
+            "POST",
+            f"/openclaw/schedule-deliveries/{quote(delivery_id, safe='')}/ack",
+            body,
+        )

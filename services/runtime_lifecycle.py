@@ -80,6 +80,10 @@ def reset_runtime_state(*, flush_first: bool = True) -> Dict[str, Any]:
             lambda: _import_scheduler_history().reset_run_history(flush=False),
         ),
         (
+            "scheduler.delivery_outbox.reset",
+            lambda: _import_delivery_outbox().reset_delivery_outbox(),
+        ),
+        (
             "failover.reset",
             lambda: _import_failover().reset_failover_state(flush=False),
         ),
@@ -145,6 +149,13 @@ def _import_scheduler_history():
     except ImportError:
         from services.scheduler import history as _history  # type: ignore
     return _history
+
+
+def _import_delivery_outbox():
+    # The outbox writes every mutation through, so reset needs no flush step.
+    from .scheduler import delivery_outbox as _outbox
+
+    return _outbox
 
 
 def _import_failover():

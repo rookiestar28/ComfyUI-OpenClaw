@@ -183,6 +183,7 @@ Connector posture rules:
 | Variable | Description |
 | :--- | :--- |
 | `OPENCLAW_CONNECTOR_DELIVERY_TIMEOUT_SEC` | Timeout (sec) for delivering results to chat (default `600`, clamped to `30..3600`). |
+| `OPENCLAW_CONNECTOR_SCHEDULE_DELIVERY_POLL_SEC` | Interval (sec) between scheduled-run delivery claims (default `15`, clamped to `5..300`). |
 | `OPENCLAW_CONNECTOR_PUBLIC_BASE_URL` | Public base URL for serving images to LINE/Webhooks. |
 | `OPENCLAW_CONNECTOR_MEDIA_PATH` | Local directory for staging media files. |
 | `OPENCLAW_CONNECTOR_DELIVERY_MAX_IMAGES` | Max completed images delivered per job (default `4`, clamped to `1..16`). |

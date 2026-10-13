@@ -2586,13 +2586,6 @@
     {
       "tool": "ruff",
       "path": "api/schedules.py",
-      "code": "F401",
-      "message": "`typing.Optional` imported but unused",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "api/schedules.py",
       "code": "SIM105",
       "message": "Use `contextlib.suppress(RuntimeError)` instead of `try`-`except`-`pass`",
       "count": 2

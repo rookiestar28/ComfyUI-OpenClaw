@@ -725,7 +725,7 @@
     "packs": "optional pack imports succeed"
   },
   "legacy_rule": "moltbot handlers retain telemetry and deprecation headers",
-  "openapi_sha256": "7997883a91ca7b3e3058d3c299512947ca634d92ddd1aa4c06f0d33539325f33",
+  "openapi_sha256": "e15bfc34f32e4f0b1da4a86eebf3875d62d8c001b85cb068b3edb30dbd28a638",
   "registration_order": [
     "startup_profile_gate",
     "core:/openclaw",

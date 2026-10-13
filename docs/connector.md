@@ -233,6 +233,7 @@ Set the following environment variables (or put them in a `.env` file if you use
 - `OPENCLAW_CONNECTOR_DELIVERY_MAX_IMAGES`: Max completed images delivered per job (default `4`, clamped to `1..16`).
 - `OPENCLAW_CONNECTOR_DELIVERY_MAX_BYTES`: Per-image delivery cap in bytes (default `10485760`, clamped to `65536..52428800`).
 - `OPENCLAW_CONNECTOR_DELIVERY_TIMEOUT_SEC`: Result delivery timeout in seconds (default `600`, clamped to `30..3600`).
+- `OPENCLAW_CONNECTOR_SCHEDULE_DELIVERY_POLL_SEC`: How often the connector claims pending scheduled-run deliveries (default `15`, clamped to `5..300`).
 - `OPENCLAW_CONNECTOR_PUBLIC_BASE_URL`: Public HTTPS URL of your connector (e.g. `https://your-tunnel.example.com`). Required for sending images.
 - `OPENCLAW_CONNECTOR_MEDIA_PATH`: URL path for serving temporary media (default `/media`).
 - `OPENCLAW_CONNECTOR_MEDIA_TTL_SEC`: Image expiry in seconds (default `300`, clamped to `60..86400`).
@@ -310,6 +311,30 @@ The connector validates jobs contract version 1 before rendering any reply:
 
 Public `/status` remains separate: it can summarize health and the coarse ComfyUI queue,
 but it does not fetch or forward the Admin-only jobs snapshot.
+
+### Scheduled run delivery
+
+Schedules with a Telegram, Discord, Slack, or Feishu/Lark delivery target are delivered by
+the connector, which keeps the chat credentials. The connector starts the delivery worker
+only when `OPENCLAW_CONNECTOR_ADMIN_TOKEN` is set and at least one of those platforms is
+running. Every `OPENCLAW_CONNECTOR_SCHEDULE_DELIVERY_POLL_SEC` seconds it claims pending
+deliveries for its running platforms, waits up to `OPENCLAW_CONNECTOR_DELIVERY_TIMEOUT_SEC`
+for the job result, and reports the outcome back to ComfyUI.
+
+- Finished jobs are sent to the schedule's target (and thread, when set) like `/run` results.
+- Failed jobs send a short failure notice only when the schedule keeps `failure_alert`
+  enabled (the default); job errors and outputs are never copied into the notice.
+- Results that do not arrive in time send a short timeout notice.
+- A target outside the platform's allowlist (`OPENCLAW_CONNECTOR_TELEGRAM_ALLOWED_CHATS`,
+  `OPENCLAW_CONNECTOR_DISCORD_ALLOWED_CHANNELS`, `OPENCLAW_CONNECTOR_SLACK_ALLOWED_CHANNELS`,
+  `OPENCLAW_CONNECTOR_FEISHU_ALLOWED_CHATS`) is never sent and is reported as
+  `undeliverable`; an empty allowlist does not restrict targets.
+- Each delivery is leased to one connector at a time. If a connector stops after sending
+  but before reporting, the delivery is offered again when the lease expires, so that one
+  result can arrive twice.
+
+Delivery state per run is visible in the schedule run history and through
+`GET /openclaw/schedule-deliveries` (admin token).
 
 ### 3. Usage
 

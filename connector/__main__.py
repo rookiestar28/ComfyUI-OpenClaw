@@ -21,6 +21,7 @@ from .platforms.wechat_webhook import WeChatWebhookServer
 from .platforms.whatsapp_webhook import WhatsAppWebhookServer
 from .results_poller import ResultsPoller
 from .router import CommandRouter
+from .schedule_delivery import ScheduleDeliveryWorker
 
 # Configure logging
 logging.basicConfig(
@@ -291,6 +292,15 @@ async def main():
         await client.close()
         return
 
+    schedule_worker = ScheduleDeliveryWorker(config, client, poller, platforms)
+    if schedule_worker.is_enabled():
+        tasks.append(asyncio.create_task(schedule_worker.start()))
+    else:
+        logger.info(
+            "Schedule delivery disabled (needs OPENCLAW_CONNECTOR_ADMIN_TOKEN and a "
+            "Telegram, Discord, Slack or Feishu platform)."
+        )
+
     # 4. Run Check
     logger.info(f"Connecting to ComfyUI at {config.openclaw_url}...")
     health = await client.get_health()
@@ -319,6 +329,7 @@ async def main():
             await feishu_long_client.stop()
         if feishu_server:
             await feishu_server.stop()
+        await schedule_worker.stop()
         if poller:
             await poller.stop()
         await client.close()

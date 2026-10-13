@@ -25,6 +25,10 @@ DEFAULT_DELIVERY_TIMEOUT_SEC = 600
 MIN_DELIVERY_TIMEOUT_SEC = 30
 MAX_DELIVERY_TIMEOUT_SEC = 3600
 
+DEFAULT_SCHEDULE_DELIVERY_POLL_SEC = 15
+MIN_SCHEDULE_DELIVERY_POLL_SEC = 5
+MAX_SCHEDULE_DELIVERY_POLL_SEC = 300
+
 DEFAULT_LINE_BIND_PORT = 8099
 DEFAULT_WHATSAPP_BIND_PORT = 8098
 DEFAULT_WECHAT_BIND_PORT = 8097
@@ -187,6 +191,7 @@ class ConnectorConfig:
     delivery_max_images: int = DEFAULT_DELIVERY_MAX_IMAGES
     delivery_max_bytes: int = DEFAULT_DELIVERY_MAX_BYTES
     delivery_timeout_sec: int = DEFAULT_DELIVERY_TIMEOUT_SEC
+    schedule_delivery_poll_sec: int = DEFAULT_SCHEDULE_DELIVERY_POLL_SEC
 
     # Telegram
     telegram_bot_token: Optional[str] = None
@@ -354,6 +359,12 @@ def load_config() -> ConnectorConfig:
         default=DEFAULT_DELIVERY_TIMEOUT_SEC,
         minimum=MIN_DELIVERY_TIMEOUT_SEC,
         maximum=MAX_DELIVERY_TIMEOUT_SEC,
+    )
+    cfg.schedule_delivery_poll_sec = _load_bounded_int_env(
+        "OPENCLAW_CONNECTOR_SCHEDULE_DELIVERY_POLL_SEC",
+        default=DEFAULT_SCHEDULE_DELIVERY_POLL_SEC,
+        minimum=MIN_SCHEDULE_DELIVERY_POLL_SEC,
+        maximum=MAX_SCHEDULE_DELIVERY_POLL_SEC,
     )
 
     # Telegram

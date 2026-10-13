@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional
 
 from ..runtime_config import get_scheduler_config
+from ..tenant_context import get_current_tenant_id
+from .delivery_outbox import get_delivery_outbox
 from .history import RunRecord, get_run_history
 from .models import Schedule, TriggerType
 from .storage import get_schedule_store
@@ -461,6 +463,32 @@ class SchedulerRunner:
         for schedule in due_schedules:
             self._execute_schedule(schedule, now_ts)
 
+    @staticmethod
+    def _record_delivery_intent(
+        schedule: Schedule, run_id: str, idempotency_key: str, prompt_id: str
+    ) -> None:
+        delivery = schedule.delivery
+        if not isinstance(delivery, dict) or not delivery.get("enabled"):
+            return
+        # CRITICAL: delivery must be durable data, not a watcher task. The submit
+        # coroutine runs on a short-lived loop that closes when it returns, so a task
+        # started there is destroyed and the result is never delivered.
+        try:
+            get_delivery_outbox().record(
+                idempotency_key=idempotency_key,
+                run_id=run_id,
+                schedule_id=schedule.schedule_id,
+                prompt_id=prompt_id,
+                delivery=delivery,
+                tenant_id=get_current_tenant_id(),
+            )
+        except Exception as exc:  # the run itself succeeded; keep it recorded
+            logger.error(
+                "Schedule delivery intent not recorded for run %s (%s)",
+                run_id,
+                type(exc).__name__,
+            )
+
     def _execute_schedule(self, schedule: Schedule, tick_ts: float) -> None:
         """Execute a single due schedule."""
         if self.is_execution_delegated():
@@ -523,6 +551,12 @@ class SchedulerRunner:
                     run_record.complete(prompt_id)
                     logger.info(
                         f"Schedule {schedule.schedule_id} queued: prompt_id={prompt_id}"
+                    )
+                # Deduped retries also record: a crash between submit and the run
+                # record must not lose the delivery of the prompt that was queued.
+                if prompt_id:
+                    self._record_delivery_intent(
+                        schedule, run_id, idempotency_key, str(prompt_id)
                     )
             else:
                 logger.warning(

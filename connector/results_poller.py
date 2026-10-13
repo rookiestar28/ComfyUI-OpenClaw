@@ -229,6 +229,27 @@ class ResultsPoller:
         delivery_context: Optional[Dict[str, Any]] = None,
     ):
         """Poll history with backoff until complete or timeout."""
+        job_data = await self.wait_for_job(prompt_id)
+        if job_data is not None:
+            await self._deliver_results(
+                prompt_id,
+                job_data,
+                platform_name,
+                channel_id,
+                delivery_context=delivery_context,
+            )
+            return
+
+        logger.warning(f"Job {prompt_id} timed out waiting for results.")
+        await self._send_text(
+            platform_name,
+            channel_id,
+            f"⚠️ Job {prompt_id} timed out waiting for results.",
+            delivery_context=delivery_context,
+        )
+
+    async def wait_for_job(self, prompt_id: str) -> dict[str, Any] | None:
+        """Poll history with backoff; return the job entry, or None after the timeout."""
         start_time = time.time()
         delay = 1.0
 
@@ -239,16 +260,9 @@ class ResultsPoller:
                 if hist.get("ok"):
                     # ComfyUI /history/{prompt_id} -> { "prompt_id": { ... } }
                     data = hist.get("data", {})
-                    if prompt_id in data:
-                        job_data = data[prompt_id]
-                        await self._deliver_results(
-                            prompt_id,
-                            job_data,
-                            platform_name,
-                            channel_id,
-                            delivery_context=delivery_context,
-                        )
-                        return
+                    entry = data.get(prompt_id) if isinstance(data, dict) else None
+                    if isinstance(entry, dict):
+                        return entry
             except Exception as e:
                 logger.debug(f"Poll check failed for {prompt_id}: {e}")
 
@@ -258,13 +272,37 @@ class ResultsPoller:
             except asyncio.CancelledError:
                 raise
             delay = min(delay * 2, 15)  # Cap at 15s
+        return None
 
-        logger.warning(f"Job {prompt_id} timed out waiting for results.")
-        await self._send_text(
+    async def deliver_job_results(
+        self,
+        prompt_id: str,
+        job_data: dict[str, Any],
+        platform_name: str,
+        channel_id: str,
+        *,
+        delivery_context: dict[str, Any] | None = None,
+    ) -> None:
+        """Send a finished job's images (or a no-output notice) to a platform target."""
+        await self._deliver_results(
+            prompt_id,
+            job_data,
             platform_name,
             channel_id,
-            f"⚠️ Job {prompt_id} timed out waiting for results.",
             delivery_context=delivery_context,
+        )
+
+    async def send_text(
+        self,
+        platform_name: str,
+        channel_id: str,
+        text: str,
+        *,
+        delivery_context: dict[str, Any] | None = None,
+    ) -> None:
+        """Send text through the platform adapter, honoring reply visibility policy."""
+        await self._send_text(
+            platform_name, channel_id, text, delivery_context=delivery_context
         )
 
     async def _deliver_results(

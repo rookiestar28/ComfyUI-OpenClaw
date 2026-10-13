@@ -5,8 +5,13 @@ REST endpoints for managing persistent schedules.
 
 from __future__ import annotations
 
+import contextlib
 import logging
-from typing import Optional
+import re
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from aiohttp import web as aiohttp_web
 
 # Import discipline:
 # - ComfyUI runtime: package-relative imports only (prevents collisions with other custom nodes).
@@ -15,24 +20,60 @@ from typing import Optional
 # IMPORTANT: Avoid a broad `try/except ImportError` here. Falling back to `services.*` in ComfyUI
 # can silently import another pack's module and break auth/approval semantics.
 if __package__ and "." in __package__:
+    from ..services.access_control import resolve_token_info
     from ..services.aiohttp_compat import import_aiohttp_web
+    from ..services.endpoint_manifest import (
+        AuthTier,
+        RiskTier,
+        RoutePlane,
+        endpoint_metadata,
+    )
+    from ..services.rate_limit import build_rate_limit_response, check_rate_limit
     from ..services.scheduler.delivery_contract import (
         DeliveryContractError,
         normalize_schedule_delivery,
     )
+    from ..services.scheduler.delivery_outbox import (
+        ALL_STATES,
+        DeliveryOutboxError,
+        get_delivery_outbox,
+    )
     from ..services.scheduler.models import Schedule, TriggerType
     from ..services.scheduler.storage import get_schedule_store
     from ..services.templates import is_template_allowed
+    from ..services.tenant_context import (
+        TenantBoundaryError,
+        get_current_tenant_id,
+        request_tenant_scope,
+    )
     from ..services.webhook_auth import AuthError
 else:  # pragma: no cover (test-only import mode)
+    from services.access_control import resolve_token_info
     from services.aiohttp_compat import import_aiohttp_web  # type: ignore
+    from services.endpoint_manifest import (
+        AuthTier,
+        RiskTier,
+        RoutePlane,
+        endpoint_metadata,
+    )
+    from services.rate_limit import build_rate_limit_response, check_rate_limit
     from services.scheduler.delivery_contract import (  # type: ignore
         DeliveryContractError,
         normalize_schedule_delivery,
     )
+    from services.scheduler.delivery_outbox import (
+        ALL_STATES,
+        DeliveryOutboxError,
+        get_delivery_outbox,
+    )
     from services.scheduler.models import Schedule, TriggerType  # type: ignore
     from services.scheduler.storage import get_schedule_store  # type: ignore
     from services.templates import is_template_allowed  # type: ignore
+    from services.tenant_context import (
+        TenantBoundaryError,
+        get_current_tenant_id,
+        request_tenant_scope,
+    )
     from services.webhook_auth import AuthError  # type: ignore
 
 logger = logging.getLogger("ComfyUI-OpenClaw.api.schedules")
@@ -41,6 +82,58 @@ web = import_aiohttp_web()
 
 def _delivery_error_response(exc: DeliveryContractError) -> web.Response:
     return web.json_response({"error": str(exc), "code": exc.code}, status=400)
+
+
+_DELIVERY_ID = re.compile(r"^dlv_[0-9a-f]{24}$")
+_OUTBOX_ERROR_STATUS = {
+    "invalid_outcome": 400,
+    "invalid_reason": 400,
+    "lease_token_required": 400,
+    "not_found": 404,
+    "lease_mismatch": 409,
+    "already_finalized": 409,
+}
+_MAX_CLAIM_PLATFORMS = 8
+_DEFAULT_LEASE_SEC = 720
+
+
+def _outbox_error(code: str, status: int) -> aiohttp_web.Response:
+    return web.json_response({"ok": False, "error": code}, status=status)
+
+
+def _bounded_int(value: Any, *, default: int, low: int, high: int) -> int | None:
+    """Parse an optional integer and clamp it; None means the value was malformed."""
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return max(low, min(number, high))
+
+
+async def _json_object(request: aiohttp_web.Request) -> dict | None:
+    try:
+        body = await request.json()
+    except ValueError:
+        return None
+    return body if isinstance(body, dict) else None
+
+
+def _runs_with_delivery(runs: list) -> list[dict]:
+    """Run dicts plus the delivery summary of each run's scheduled tick, when one exists."""
+    rows = [run.to_dict() for run in runs]
+    summaries = get_delivery_outbox().summaries_for_keys(
+        (row.get("idempotency_key") or "" for row in rows),
+        tenant_id=get_current_tenant_id(),
+    )
+    for row in rows:
+        summary = summaries.get(row.get("idempotency_key") or "")
+        if summary:
+            row["delivery"] = summary
+    return rows
 
 
 def _get_scheduler_runner():
@@ -372,7 +465,7 @@ class ScheduleHandlers:
 
         return web.json_response(
             {
-                "runs": [r.to_dict() for r in runs],
+                "runs": _runs_with_delivery(runs),
                 "count": len(runs),
                 "total": history.count_runs(schedule_id),
             }
@@ -402,9 +495,171 @@ class ScheduleHandlers:
 
         return web.json_response(
             {
-                "runs": [r.to_dict() for r in runs],
+                "runs": _runs_with_delivery(runs),
                 "count": len(runs),
                 "total": history.count_runs(),
+            }
+        )
+
+    async def _delivery_guard(
+        self, request: aiohttp_web.Request, rate_class: str
+    ) -> aiohttp_web.Response | None:
+        if not check_rate_limit(request, rate_class):
+            return build_rate_limit_response(
+                request,
+                rate_class,
+                web_module=web,
+                error="Rate limit exceeded",
+                include_ok=True,
+            )
+        # Fail closed: delivery routes are never open, even without an injected checker.
+        if self._require_admin_token is None:
+            return _outbox_error("admin_token_required", 403)
+        try:
+            await self._check_auth(request)
+        except Exception:
+            return _outbox_error("admin_token_required", 403)
+        return None
+
+    @endpoint_metadata(
+        auth=AuthTier.ADMIN,
+        risk=RiskTier.LOW,
+        summary="List schedule delivery intents",
+        description="Returns bounded schedule delivery intents with normalized targets and states.",
+        audit="schedules.deliveries.list",
+        plane=RoutePlane.ADMIN,
+    )
+    async def list_deliveries(
+        self, request: aiohttp_web.Request
+    ) -> aiohttp_web.Response:
+        """GET /openclaw/schedule-deliveries"""
+        if (guard := await self._delivery_guard(request, "admin")) is not None:
+            return guard
+        state = request.query.get("state") or None
+        if state is not None and state not in ALL_STATES:
+            return _outbox_error("invalid_state", 400)
+        platform = (request.query.get("platform") or "").strip().lower() or None
+        limit = _bounded_int(request.query.get("limit"), default=50, low=1, high=200)
+        if limit is None:
+            return _outbox_error("invalid_limit", 400)
+        try:
+            with request_tenant_scope(
+                request=request,
+                token_info=resolve_token_info(request),
+                allow_default_when_missing=True,
+            ) as tenant:
+                intents = get_delivery_outbox().list_intents(
+                    tenant_id=tenant.tenant_id,
+                    state=state,
+                    platform=platform,
+                    limit=limit,
+                )
+        except TenantBoundaryError as exc:
+            return _outbox_error(exc.code, 403)
+        return web.json_response(
+            {"ok": True, "deliveries": [intent.to_public() for intent in intents]}
+        )
+
+    @endpoint_metadata(
+        auth=AuthTier.ADMIN,
+        risk=RiskTier.MEDIUM,
+        summary="Claim schedule delivery intents",
+        description="Leases pending schedule delivery intents for the requested connector platforms.",
+        audit="schedules.deliveries.claim",
+        plane=RoutePlane.ADMIN,
+    )
+    async def claim_deliveries(
+        self, request: aiohttp_web.Request
+    ) -> aiohttp_web.Response:
+        """POST /openclaw/schedule-deliveries/claim"""
+        if (guard := await self._delivery_guard(request, "connector")) is not None:
+            return guard
+        body = await _json_object(request)
+        if body is None:
+            return _outbox_error("invalid_json", 400)
+        platforms = body.get("platforms")
+        if (
+            not isinstance(platforms, list)
+            or not 0 < len(platforms) <= _MAX_CLAIM_PLATFORMS
+            or not all(isinstance(item, str) for item in platforms)
+        ):
+            return _outbox_error("invalid_platforms", 400)
+        limit = _bounded_int(body.get("limit"), default=5, low=1, high=10)
+        lease_sec = _bounded_int(
+            body.get("lease_sec"), default=_DEFAULT_LEASE_SEC, low=60, high=7200
+        )
+        if limit is None or lease_sec is None:
+            return _outbox_error("invalid_limit", 400)
+        try:
+            with request_tenant_scope(
+                request=request,
+                token_info=resolve_token_info(request),
+                allow_default_when_missing=True,
+            ) as tenant:
+                claimed = get_delivery_outbox().claim(
+                    tenant_id=tenant.tenant_id,
+                    platforms=[item.strip().lower() for item in platforms],
+                    limit=limit,
+                    lease_sec=lease_sec,
+                )
+        except TenantBoundaryError as exc:
+            return _outbox_error(exc.code, 403)
+        return web.json_response(
+            {"ok": True, "deliveries": [item.to_public() for item in claimed]}
+        )
+
+    @endpoint_metadata(
+        auth=AuthTier.ADMIN,
+        risk=RiskTier.MEDIUM,
+        summary="Acknowledge a schedule delivery",
+        description="Records the bounded outcome of a leased schedule delivery intent.",
+        audit="schedules.deliveries.ack",
+        plane=RoutePlane.ADMIN,
+    )
+    async def ack_delivery(self, request: aiohttp_web.Request) -> aiohttp_web.Response:
+        """POST /openclaw/schedule-deliveries/{delivery_id}/ack"""
+        if (guard := await self._delivery_guard(request, "connector")) is not None:
+            return guard
+        delivery_id = request.match_info.get("delivery_id", "")
+        if not _DELIVERY_ID.match(delivery_id):
+            return _outbox_error("not_found", 404)
+        body = await _json_object(request)
+        if body is None:
+            return _outbox_error("invalid_json", 400)
+        lease_token = body.get("lease_token")
+        outcome = body.get("outcome")
+        reason = body.get("reason")
+        if (
+            not isinstance(lease_token, str)
+            or len(lease_token) > 128
+            or not isinstance(outcome, str)
+            or (reason is not None and not isinstance(reason, str))
+        ):
+            return _outbox_error("invalid_ack", 400)
+        try:
+            with request_tenant_scope(
+                request=request,
+                token_info=resolve_token_info(request),
+                allow_default_when_missing=True,
+            ) as tenant:
+                result = get_delivery_outbox().ack(
+                    tenant_id=tenant.tenant_id,
+                    delivery_id=delivery_id,
+                    lease_token=lease_token,
+                    outcome=outcome,
+                    reason=reason,
+                )
+        except TenantBoundaryError as exc:
+            return _outbox_error(exc.code, 403)
+        except DeliveryOutboxError as exc:
+            return _outbox_error(exc.code, _OUTBOX_ERROR_STATUS.get(exc.code, 400))
+        return web.json_response(
+            {
+                "ok": True,
+                "status": (
+                    "already_acknowledged" if result.repeated else "acknowledged"
+                ),
+                "delivery": result.intent.to_public(),
             }
         )
 
@@ -444,5 +699,20 @@ def register_schedule_routes(app: web.Application, require_admin_token_fn=None) 
                 app.router.add_route(method, "/api" + path, handler)
             except RuntimeError:
                 pass
+
+    # New delivery routes use the canonical prefix only; legacy aliases cover old routes.
+    delivery_routes = [
+        ("GET", "/openclaw/schedule-deliveries", handlers.list_deliveries),
+        ("POST", "/openclaw/schedule-deliveries/claim", handlers.claim_deliveries),
+        (
+            "POST",
+            "/openclaw/schedule-deliveries/{delivery_id}/ack",
+            handlers.ack_delivery,
+        ),
+    ]
+    for method, path, handler in delivery_routes:
+        for route_path in (path, "/api" + path):
+            with contextlib.suppress(RuntimeError):
+                app.router.add_route(method, route_path, handler)
 
     logger.info("Registered schedule CRUD routes (dual)")

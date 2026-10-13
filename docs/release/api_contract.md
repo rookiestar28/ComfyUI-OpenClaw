@@ -233,6 +233,9 @@ Model-manager contract notes:
 | `DELETE` | `/schedules/{id}` | Delete a schedule. |
 | `POST` | `/schedules/{id}/run` | Manually trigger a schedule. |
 | `GET` | `/schedules/{id}/runs` | Get run history for a schedule. |
+| `GET` | `/schedule-deliveries` | List schedule delivery intents (`state`, `platform` and `limit` filters). |
+| `POST` | `/schedule-deliveries/claim` | Lease pending schedule deliveries for the listed connector platforms. |
+| `POST` | `/schedule-deliveries/{delivery_id}/ack` | Record the outcome of a leased schedule delivery. |
 | `GET` | `/approvals` | List pending approvals (includes pagination/scan diagnostics; bounded serialization scan on malformed records). |
 | `POST` | `/approvals/{id}/approve` | Approve a pending request. |
 | `POST` | `/approvals/{id}/reject` | Reject a pending request. |
@@ -246,6 +249,31 @@ clears it, and `{"enabled": false}` or `{"mode": "none"}` records explicit
 no-delivery. Invalid delivery targets are rejected before persistence with
 bounded codes: `delivery_malformed`, `delivery_ambiguous`, or
 `delivery_unsupported`.
+
+When a run with an enabled delivery target submits a job, the server records one
+durable delivery intent per run (a retried tick reuses it). The chat connector
+claims intents, sends the finished result through its own platform adapter, and
+acknowledges the outcome; the ComfyUI process never holds chat credentials.
+
+- Intent states: `pending`, `claimed`, and the terminal `sent` (handed to the
+  platform adapter), `job_failed`, `timed_out`, `undeliverable`, and `expired`
+  (never claimed within 24 hours). Reasons are bounded codes such as
+  `job_error`, `result_timeout`, `target_not_allowed`, `platform_unavailable`,
+  `connector_error`, and `no_connector_adapter` (`webhook` and `custom`
+  targets).
+- `claim` accepts `platforms` (`telegram`, `discord`, `slack`, `feishu`),
+  `limit` (1-10), and `lease_sec` (60-7200). Each returned intent carries a
+  one-time `lease_token`; an intent is offered again only after its lease
+  expires.
+- `ack` accepts `lease_token`, `outcome` (`sent`, `job_failed`, `timed_out`,
+  `undeliverable`), and `reason`. Repeating the accepted acknowledgement returns
+  `already_acknowledged`; a stale or wrong lease token returns `409`.
+- Claim and ack use the connector rate-limit class; listing uses the admin
+  class. Responses carry normalized target identifiers only.
+- Run history (`GET /schedules/{id}/runs`, `GET /runs`) includes a `delivery`
+  summary (`delivery_id`, `state`, `reason`) for runs that recorded an intent.
+- A connector that stops after sending but before acknowledging can resend the
+  result once the lease expires; chat platforms offer no idempotent send.
 
 ### 1.5A External Tools
 
