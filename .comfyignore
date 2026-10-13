@@ -1,0 +1,26 @@
+# Registry archives built by `comfy node publish` contain the runtime package, web assets,
+# data, docs and the operator scripts named in the docs. Tests and development tooling stay
+# in the git repository. Patterns use gitwildmatch rules; the last matching pattern wins.
+# Keep `scripts/*` (not `scripts/`) so the re-includes below mean the same thing to git.
+tests/
+scripts/*
+!scripts/check_deployment_profile.py
+!scripts/openclaw_smoke_import.py
+!scripts/operator_doctor.py
+!scripts/run_crypto_lifecycle_drills.py
+!scripts/verify_audit_chain.py
+.github/
+.githooks/
+.comfyignore
+.detect-secrets.cfg
+.gitattributes
+.gitignore
+.nvmrc
+.pre-commit-config.yaml
+.secrets.baseline
+package-lock.json
+package.json
+playwright.config.js
+playwright.real-host.config.js
+requirements-quality.txt
+vitest.config.mjs

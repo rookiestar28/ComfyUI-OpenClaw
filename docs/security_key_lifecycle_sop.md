@@ -207,7 +207,7 @@ Operational notes:
 
 ## 7. Validation Gate After Any Lifecycle Change
 
-Run at minimum:
+From a source checkout of the repository (registry installs do not include the test suite), run at minimum:
 
 ```bash
 python scripts/run_unittests.py --module tests.test_s58_bridge_token_lifecycle

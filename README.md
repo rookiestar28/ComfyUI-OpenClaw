@@ -785,6 +785,7 @@ Logs:
 OpenClaw keeps package-owned resources, runtime state, and local validation artifacts separate:
 
 - package-owned defaults, such as `data/tools_allowlist.json`, are read from the installed custom-node pack
+- Comfy Registry installs contain the runtime package, web assets, data, docs and the operator scripts named in these docs (`scripts/check_deployment_profile.py`, `scripts/verify_audit_chain.py`, `scripts/operator_doctor.py`, `scripts/openclaw_smoke_import.py`, `scripts/run_crypto_lifecycle_drills.py`); tests and development tooling are only in the git repository, and git-based installs receive the full tree
 - custom external-tool allowlists should be supplied explicitly with `OPENCLAW_TOOLS_CONFIG_PATH`
 - runtime cache and external-tool sandbox scratch space belong under the configured state directory (`cache/` and `tool_sandbox/`)
 - repo-local generated folders such as `.tmp/`, `.venv/`, and `node_modules/` are validation/development artifacts and are regenerated from project metadata or lockfiles

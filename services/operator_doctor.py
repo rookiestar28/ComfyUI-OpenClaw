@@ -147,10 +147,11 @@ class DoctorReport:
 
 def _get_pack_root() -> Path:
     """Detect the ComfyUI-OpenClaw pack root directory."""
-    # Try relative to this file
+    # IMPORTANT: the marker must ship in every install. An untracked marker never reaches
+    # installed packs, which then fell back to the working directory (the ComfyUI root).
     this_dir = Path(__file__).resolve().parent
     candidate = this_dir.parent
-    if (candidate / "ROADMAP.md").exists():
+    if (candidate / "pyproject.toml").exists():
         return candidate
     # Fallback to cwd
     return Path.cwd()
@@ -248,19 +249,23 @@ def check_venv(report: DoctorReport) -> None:
         )
 
 
+_CONTRACT_FILES = (
+    "docs/release/api_contract.md",
+    "docs/release/config_secrets_contract.md",
+    "docs/release/compatibility_matrix.md",
+    "docs/release/support_policy.md",
+    "docs/release/ci_regression_policy.md",
+    "docs/RELEASE_CHECKLIST.md",
+    "docs/SECURITY.md",
+)
+# Registry archives omit tests/ (see .comfyignore); these files exist only in a checkout.
+_SOURCE_CHECKOUT_CONTRACT_FILES = ("tests/TEST_SOP.md",)
+
+
 def check_contract_files(report: DoctorReport, pack_root: Path) -> None:
     """Check that required release-gate contract files exist."""
-    required_files = [
-        "docs/release/api_contract.md",
-        "docs/release/config_secrets_contract.md",
-        "docs/release/compatibility_matrix.md",
-        "docs/release/support_policy.md",
-        "docs/release/ci_regression_policy.md",
-        "RELEASE_CHECKLIST.md",
-        "SECURITY.md",
-        "tests/TEST_SOP.md",
-    ]
-    for rel_path in required_files:
+    has_source_tree = (pack_root / "tests").is_dir()
+    for rel_path in _CONTRACT_FILES + _SOURCE_CHECKOUT_CONTRACT_FILES:
         full = pack_root / rel_path
         if full.exists():
             report.add(
@@ -268,6 +273,17 @@ def check_contract_files(report: DoctorReport, pack_root: Path) -> None:
                     name=f"contract_file:{rel_path}",
                     severity=Severity.PASS.value,
                     message=f"Found: {rel_path}",
+                )
+            )
+        elif rel_path in _SOURCE_CHECKOUT_CONTRACT_FILES and not has_source_tree:
+            report.add(
+                CheckResult(
+                    name=f"contract_file:{rel_path}",
+                    severity=Severity.SKIP.value,
+                    message=(
+                        f"Not applicable to an installed package: {rel_path} ships "
+                        "only with a source checkout"
+                    ),
                 )
             )
         else:
