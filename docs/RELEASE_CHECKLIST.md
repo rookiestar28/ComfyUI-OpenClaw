@@ -108,6 +108,18 @@ If staged/manual execution is required, follow the explicit command order in
 
 ---
 
+## Publication Order
+
+A push to `main` that changes the `pyproject.toml` version publishes that version to the Comfy
+Registry, and a later push cannot replace that published version. Hosted CI also runs on platforms
+and dependency sets that a local gate may not cover.
+
+- [ ] Push the release commit to `dev` first and wait for its CI run on `dev` to pass.
+- [ ] Only then fast-forward `main` to the same commit and push it.
+- [ ] Push the release tag after `main`.
+
+---
+
 ## Sign-off
 
 - [ ] **Gate A Passed**: (Date/Initials)

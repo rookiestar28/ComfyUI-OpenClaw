@@ -152,6 +152,13 @@ if ! "$VENV_PY" -c "import defusedxml" >/dev/null 2>&1; then
   pip_install_or_fail "required for S85 fail-closed XML parsing tests" defusedxml
 fi
 
+if ! "$VENV_PY" -c "import Cryptodome" >/dev/null 2>&1; then
+  # IMPORTANT: skip-policy lanes install every pyproject optional extra; without it the
+  # WeChat AES tests skip here and spend skip budget the Windows gate never sees.
+  echo "[tests] Installing pycryptodomex into project venv ($VENV_DIR) ..."
+  pip_install_or_fail "required for WeChat AES tests (wechat-aes extra)" "pycryptodomex>=3.20"
+fi
+
 NODE_MAJOR="$(node -p "process.versions.node.split('.')[0]")"
 if [ "$NODE_MAJOR" -lt 18 ]; then
   # Best-effort: try to use nvm if available

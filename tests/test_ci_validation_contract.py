@@ -26,6 +26,17 @@ def _job_block(text: str, job_id: str) -> str:
     return match.group("body")
 
 
+def _push_branches(text: str) -> list[str]:
+    match = re.search(
+        r"^  push:\n    branches:\n(?P<items>(?:      - .+\n)+)",
+        text,
+        flags=re.MULTILINE,
+    )
+    if match is None:
+        raise AssertionError("missing push branch filter")
+    return [line.strip()[2:] for line in match.group("items").splitlines()]
+
+
 def _load_evidence_helper():
     if not EVIDENCE_HELPER_PATH.is_file():
         raise AssertionError(
@@ -58,6 +69,16 @@ class HostedValidationWorkflowContractTests(unittest.TestCase):
                 re.MULTILINE,
             ),
         )
+
+    def test_dev_pushes_run_ci_but_only_release_branches_publish(self):
+        # A version change pushed to main publishes to the Comfy Registry, so dev needs
+        # its own CI run first; dev must never trigger the publish workflow.
+        self.assertEqual(_push_branches(self.workflow), ["main", "master", "dev"])
+        publish = (CI_PATH.parent / "publish.yml").read_text(encoding="utf-8")
+        self.assertEqual(_push_branches(publish), ["main", "master"])
+        checklist = (ROOT / "docs" / "RELEASE_CHECKLIST.md").read_text(encoding="utf-8")
+        self.assertIn("## Publication Order", checklist)
+        self.assertIn("CI run on `dev`", checklist)
 
     def test_every_job_has_a_measured_finite_timeout(self):
         expected = {

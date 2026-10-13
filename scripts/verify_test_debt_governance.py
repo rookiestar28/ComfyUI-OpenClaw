@@ -17,6 +17,20 @@ from typing import Any
 
 # Keep equal to SKIP_POLICY_PLATFORMS in scripts/run_unittests.py (pinned by a test).
 SKIP_POLICY_PLATFORMS = frozenset({"darwin", "linux", "win32"})
+# Platform probes a test can condition a skip on: os.name, sys.platform, platform.*().
+_PLATFORM_PROBES = frozenset(
+    {
+        ("os", "name"),
+        ("sys", "platform"),
+        ("platform", "system"),
+        ("platform", "platform"),
+        ("platform", "win32_ver"),
+        ("platform", "mac_ver"),
+    }
+)
+_SKIP_DECORATORS = frozenset({"skipIf", "skipUnless"})
+_CLASS_SETUP_METHODS = frozenset({"setUp", "setUpClass"})
+_PRUNED_TEST_DIRS = frozenset({"__pycache__", "node_modules"})
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
@@ -67,6 +81,127 @@ def _test_definition_problem(
                     return None
             return f"class {class_name} does not define {method_name}"
     return f"module does not define class {class_name}"
+
+
+def _references_platform(node: ast.AST, platform_names: set[str]) -> bool:
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Attribute) and isinstance(sub.value, ast.Name):
+            if (sub.value.id, sub.attr) in _PLATFORM_PROBES:
+                return True
+        elif isinstance(sub, ast.Name) and sub.id in platform_names:
+            return True
+    return False
+
+
+def _module_platform_names(tree: ast.Module) -> set[str]:
+    """Module-level names assigned from a platform probe, such as IS_WINDOWS."""
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets, value = [node.target], node.value
+        else:
+            continue
+        if _references_platform(value, names):
+            names.update(
+                target.id for target in targets if isinstance(target, ast.Name)
+            )
+    return names
+
+
+def _is_platform_skip_decorator(node: ast.expr, platform_names: set[str]) -> bool:
+    if not isinstance(node, ast.Call) or not node.args:
+        return False
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        name = func.attr
+    elif isinstance(func, ast.Name):
+        name = func.id
+    else:
+        return False
+    return name in _SKIP_DECORATORS and _references_platform(
+        node.args[0], platform_names
+    )
+
+
+def _skips_under_platform_check(function: ast.AST, platform_names: set[str]) -> bool:
+    for node in ast.walk(function):
+        if isinstance(node, ast.If) and _references_platform(node.test, platform_names):
+            for inner in ast.walk(node):
+                if (
+                    isinstance(inner, ast.Call)
+                    and isinstance(inner.func, ast.Attribute)
+                    and inner.func.attr == "skipTest"
+                ):
+                    return True
+    return False
+
+
+def _platform_conditional_skips(repo_root: Path) -> dict[str, str]:
+    """Return ``{canonical test id: form}`` for each platform-conditional skip in tests/."""
+    tests_root = repo_root / "tests"
+    found: dict[str, str] = {}
+    if not tests_root.is_dir():
+        return found
+    for path in sorted(tests_root.rglob("test_*.py")):
+        relative = path.relative_to(repo_root)
+        if any(
+            part.startswith(".") or part in _PRUNED_TEST_DIRS for part in relative.parts
+        ):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"), str(path))
+        names = _module_platform_names(tree)
+        module = ".".join(relative.with_suffix("").parts)
+        for node in tree.body:
+            if not isinstance(node, ast.ClassDef):
+                continue
+            methods = [
+                item
+                for item in node.body
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+            ]
+            class_form = None
+            if any(_is_platform_skip_decorator(d, names) for d in node.decorator_list):
+                class_form = "class decorator"
+            elif any(
+                method.name in _CLASS_SETUP_METHODS
+                and _skips_under_platform_check(method, names)
+                for method in methods
+            ):
+                class_form = "setUp skipTest under a platform check"
+            for method in methods:
+                if not method.name.startswith("test"):
+                    continue
+                form = class_form
+                if form is None and any(
+                    _is_platform_skip_decorator(d, names) for d in method.decorator_list
+                ):
+                    form = "method decorator"
+                if form is None and _skips_under_platform_check(method, names):
+                    form = "skipTest under a platform check"
+                if form is not None:
+                    found[f"{module}.{node.name}.{method.name}"] = form
+    return found
+
+
+def _validate_platform_skip_inventory(repo_root: Path, raw: Any) -> list[str]:
+    # CRITICAL: the Windows gate runs Windows-only tests, so an undeclared platform skip
+    # passes here and only spends skip budget on Linux CI (v1.3.0 failed that way). Both
+    # directions are checked so the declarations cannot drift from the code.
+    declared = set(raw) if isinstance(raw, dict) else set()
+    found = _platform_conditional_skips(repo_root)
+    failures = [
+        "skip policy: platform-conditional skip not declared in "
+        f"platform_exclusive_tests: {test_id} ({found[test_id]})"
+        for test_id in sorted(set(found) - declared)
+    ]
+    failures.extend(
+        f"skip policy platform_exclusive_tests[{test_id}]: no platform-conditional skip "
+        "found (skip decorator or skipTest under a platform check)"
+        for test_id in sorted(declared - set(found))
+    )
+    return failures
 
 
 def _validate_platform_exclusive_tests(repo_root: Path, raw: Any) -> list[str]:
@@ -126,6 +261,11 @@ def _validate_skip_policy(repo_root: Path, path: Path) -> list[str]:
 
     failures.extend(
         _validate_platform_exclusive_tests(
+            repo_root, payload.get("platform_exclusive_tests")
+        )
+    )
+    failures.extend(
+        _validate_platform_skip_inventory(
             repo_root, payload.get("platform_exclusive_tests")
         )
     )

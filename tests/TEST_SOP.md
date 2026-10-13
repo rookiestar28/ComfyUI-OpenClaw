@@ -178,6 +178,8 @@ landed on kept displaying the pre-fix failure until someone re-triaged a closed 
   - A pass result with skip-policy violations is invalid; treat as failure.
   - Skip ids are matched in their `tests.`-qualified form (`tests.<module>.<Class>.<method>`) in every run shape.
   - A test that can only run on some platforms may be declared under `platform_exclusive_tests` with its `platforms` (`sys.platform` values: `win32`, `linux`, `darwin`), `reason` and `review_after`. Its skip is reported as platform-excused and not counted toward `max_skipped` only on other platforms; on a declared platform it counts like any skip, and no-skip modules still fail on it.
+  - Every platform-conditional skip must be declared: `scripts/verify_test_debt_governance.py` fails on a `skipIf`/`skipUnless` decorator or a `self.skipTest(...)` under an `if` whose condition uses `os.name`, `sys.platform`, `platform.system()` (or a module-level name derived from them) when the test is not declared, and on a declaration with no such skip. Write platform skips in one of these forms.
+  - Every lane that runs the full suite under the skip policy (Windows and Linux wrappers, pre-push hook, CI `unit-tests` and `python-compatibility`) installs every `[project.optional-dependencies]` package from `pyproject.toml`, so dependency skips are the same on every lane.
   - Public MAE hard-guarantee suites must be no-skip in both local SOP runs and CI:
     - `tests.test_s60_mae_route_segmentation`
     - `tests.test_s60_routes_startup_gate`

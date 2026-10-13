@@ -334,17 +334,23 @@ class RepositoryPolicyTests(unittest.TestCase):
                 )
 
 
-def _write_governance_fixture(root: Path, declarations) -> list[str]:
+WINDOWS_ONLY_SOURCE = (
+    "import sys\nimport unittest\n\n\n"
+    "class ExampleTests(unittest.TestCase):\n"
+    '    @unittest.skipUnless(sys.platform == "win32", "Windows only")\n'
+    "    def test_windows_only(self):\n"
+    "        pass\n"
+)
+
+
+def _write_governance_fixture(root: Path, declarations, files=None) -> list[str]:
     tests_dir = root / "tests"
     tests_dir.mkdir()
-    (tests_dir / "test_example.py").write_text(
-        "import unittest\n\n\n"
-        "class ExampleTests(unittest.TestCase):\n"
-        '    @unittest.skipUnless(False, "elsewhere only")\n'
-        "    def test_windows_only(self):\n"
-        "        pass\n",
-        encoding="utf-8",
-    )
+    sources = files if files is not None else {"test_example.py": WINDOWS_ONLY_SOURCE}
+    for relative, source in sources.items():
+        path = tests_dir / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
     policy = tests_dir / "skip_policy.json"
     policy.write_text(
         json.dumps(
@@ -369,6 +375,25 @@ def _write_governance_fixture(root: Path, declarations) -> list[str]:
     ]
 
 
+def _run_governance(declarations, files=None) -> subprocess.CompletedProcess:
+    with tempfile.TemporaryDirectory() as tmp:
+        args = _write_governance_fixture(Path(tmp), declarations, files)
+        return subprocess.run(
+            [sys.executable, str(GOVERNANCE_SCRIPT), *args],
+            capture_output=True,
+            text=True,
+            cwd=str(ROOT),
+            check=False,
+        )
+
+
+def _entry(**overrides):
+    future = (date.today() + timedelta(days=180)).isoformat()
+    entry = {"platforms": ["win32"], "reason": "NTFS only", "review_after": future}
+    entry.update(overrides)
+    return {key: value for key, value in entry.items() if value is not None}
+
+
 class DeclarationGovernanceTests(unittest.TestCase):
     def test_runner_and_governance_accept_the_same_platforms(self) -> None:
         spec = importlib.util.spec_from_file_location(
@@ -382,26 +407,8 @@ class DeclarationGovernanceTests(unittest.TestCase):
             governance.SKIP_POLICY_PLATFORMS, _load_runner().SKIP_POLICY_PLATFORMS
         )
 
-    def run_governance(self, declarations) -> subprocess.CompletedProcess:
-        with tempfile.TemporaryDirectory() as tmp:
-            args = _write_governance_fixture(Path(tmp), declarations)
-            return subprocess.run(
-                [sys.executable, str(GOVERNANCE_SCRIPT), *args],
-                capture_output=True,
-                text=True,
-                cwd=str(ROOT),
-                check=False,
-            )
-
-    @staticmethod
-    def entry(**overrides):
-        future = (date.today() + timedelta(days=180)).isoformat()
-        entry = {"platforms": ["win32"], "reason": "NTFS only", "review_after": future}
-        entry.update(overrides)
-        return {key: value for key, value in entry.items() if value is not None}
-
     def test_a_current_declaration_passes(self) -> None:
-        result = self.run_governance({DECLARED: self.entry()})
+        result = _run_governance({DECLARED: _entry()})
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
@@ -409,38 +416,159 @@ class DeclarationGovernanceTests(unittest.TestCase):
         past = (date.today() - timedelta(days=1)).isoformat()
         cases = {
             "missing method": (
-                {"tests.test_example.ExampleTests.test_gone": self.entry()},
+                {"tests.test_example.ExampleTests.test_gone": _entry()},
                 "test_gone",
             ),
             "missing class": (
-                {"tests.test_example.GoneTests.test_windows_only": self.entry()},
+                {"tests.test_example.GoneTests.test_windows_only": _entry()},
                 "GoneTests",
             ),
             "missing module": (
-                {"tests.test_gone.ExampleTests.test_windows_only": self.entry()},
+                {"tests.test_gone.ExampleTests.test_windows_only": _entry()},
                 "module path does not exist",
             ),
             "unknown platform": (
-                {DECLARED: self.entry(platforms=["nt"])},
+                {DECLARED: _entry(platforms=["nt"])},
                 "platforms",
             ),
-            "missing reason": ({DECLARED: self.entry(reason=None)}, "reason"),
+            "missing reason": ({DECLARED: _entry(reason=None)}, "reason"),
             "missing review date": (
-                {DECLARED: self.entry(review_after=None)},
+                {DECLARED: _entry(review_after=None)},
                 "missing review_after",
             ),
             "past review date": (
-                {DECLARED: self.entry(review_after=past)},
+                {DECLARED: _entry(review_after=past)},
                 "is in the past",
             ),
         }
         for label, (declarations, expected) in cases.items():
             with self.subTest(label):
-                result = self.run_governance(declarations)
+                result = _run_governance(declarations)
 
                 self.assertNotEqual(result.returncode, 0, result.stdout)
                 self.assertIn("platform_exclusive_tests", result.stdout)
                 self.assertIn(expected, result.stdout)
+
+
+class PlatformSkipInventoryTests(unittest.TestCase):
+    """The gate must fail on a platform-conditional skip nobody declared.
+
+    Otherwise the Windows gate passes while every Linux run spends budget on it.
+    """
+
+    FORMS = {
+        "decorator through a module-level alias": (
+            {
+                "test_example.py": "import os\nimport unittest\n\n"
+                'IS_WINDOWS = os.name == "nt"\n\n\n'
+                "class ExampleTests(unittest.TestCase):\n"
+                '    @unittest.skipUnless(IS_WINDOWS, "Windows only")\n'
+                "    def test_alias(self):\n"
+                "        pass\n"
+            },
+            ["tests.test_example.ExampleTests.test_alias"],
+        ),
+        "class decorator": (
+            {
+                "test_example.py": "import sys\nimport unittest\n\n\n"
+                '@unittest.skipIf(sys.platform.startswith("win"), "POSIX only")\n'
+                "class ExampleTests(unittest.TestCase):\n"
+                "    def test_one(self):\n"
+                "        pass\n\n"
+                "    def test_two(self):\n"
+                "        pass\n"
+            },
+            [
+                "tests.test_example.ExampleTests.test_one",
+                "tests.test_example.ExampleTests.test_two",
+            ],
+        ),
+        "skipTest under a platform check": (
+            {
+                "test_example.py": "import platform\nimport unittest\n\n\n"
+                "class ExampleTests(unittest.TestCase):\n"
+                "    def test_body(self):\n"
+                '        if platform.system() != "Windows":\n'
+                '            self.skipTest("Windows only")\n'
+            },
+            ["tests.test_example.ExampleTests.test_body"],
+        ),
+        "skipTest under a platform check in setUp": (
+            {
+                "test_example.py": "import os\nimport unittest\n\n\n"
+                "class ExampleTests(unittest.TestCase):\n"
+                "    def setUp(self):\n"
+                '        if os.name != "nt":\n'
+                '            self.skipTest("Windows only")\n\n'
+                "    def test_one(self):\n"
+                "        pass\n"
+            },
+            ["tests.test_example.ExampleTests.test_one"],
+        ),
+        "decorator imported by name": (
+            {
+                "test_example.py": "import os\nimport unittest\n"
+                "from unittest import skipIf\n\n\n"
+                "class ExampleTests(unittest.TestCase):\n"
+                '    @skipIf(os.name == "nt", "POSIX only")\n'
+                "    def test_bare(self):\n"
+                "        pass\n"
+            },
+            ["tests.test_example.ExampleTests.test_bare"],
+        ),
+        "module in a test subdirectory": (
+            {"connector/test_sub.py": WINDOWS_ONLY_SOURCE},
+            ["tests.connector.test_sub.ExampleTests.test_windows_only"],
+        ),
+    }
+
+    def test_each_undeclared_platform_skip_fails_the_gate(self) -> None:
+        for label, (files, test_ids) in self.FORMS.items():
+            with self.subTest(label):
+                result = _run_governance({}, files)
+
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                for test_id in test_ids:
+                    self.assertIn(
+                        f"not declared in platform_exclusive_tests: {test_id}",
+                        result.stdout,
+                    )
+
+    def test_each_declared_platform_skip_passes(self) -> None:
+        for label, (files, test_ids) in self.FORMS.items():
+            with self.subTest(label):
+                result = _run_governance(
+                    {test_id: _entry() for test_id in test_ids}, files
+                )
+
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_a_dependency_skip_is_not_a_platform_skip(self) -> None:
+        files = {
+            "test_example.py": "import unittest\n\nweb = None\n\n\n"
+            "class ExampleTests(unittest.TestCase):\n"
+            '    @unittest.skipIf(web is None, "aiohttp not installed")\n'
+            "    def test_route(self):\n"
+            "        pass\n"
+        }
+
+        result = _run_governance({}, files)
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_a_declaration_without_a_platform_condition_fails(self) -> None:
+        files = {
+            "test_example.py": "import unittest\n\n\n"
+            "class ExampleTests(unittest.TestCase):\n"
+            '    @unittest.skipUnless(False, "never")\n'
+            "    def test_windows_only(self):\n"
+            "        pass\n"
+        }
+
+        result = _run_governance({DECLARED: _entry()}, files)
+
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("no platform-conditional skip", result.stdout)
 
 
 if __name__ == "__main__":

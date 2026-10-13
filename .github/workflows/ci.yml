@@ -2,10 +2,13 @@ name: CI
 
 on:
   pull_request:
+  # IMPORTANT: dev runs CI before a release reaches main; a version change pushed to
+  # main publishes to the Comfy Registry (publish.yml stays main/master only).
   push:
     branches:
       - main
       - master
+      - dev
   workflow_dispatch:
   schedule:
     - cron: '0 3 * * *'  # nightly 03:00 UTC for adversarial-extended
@@ -135,6 +138,9 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install -r requirements-quality.txt
           python -m pip install numpy pillow aiohttp "coverage[toml]"
+          # IMPORTANT: install every pyproject optional extra (wechat-aes); a missing
+          # extra makes its tests skip here and exceed the shared skip budget.
+          python -m pip install "pycryptodomex>=3.20"
       - name: R120 preflight
         run: |
           python scripts/preflight_check.py --strict
@@ -393,6 +399,8 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install -r requirements-quality.txt
           python -m pip install numpy pillow aiohttp "coverage[toml]"
+          # IMPORTANT: same optional extras as unit-tests; this job enforces the skip policy too.
+          python -m pip install "pycryptodomex>=3.20"
       - name: R120 preflight
         run: python scripts/preflight_check.py --strict
       - name: Run exact-version backend suite
