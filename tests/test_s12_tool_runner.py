@@ -4,6 +4,7 @@ S12 Tool Runner Tests.
 
 import json
 import os
+import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -18,7 +19,7 @@ class TestS12ToolRunner(unittest.TestCase):
         # Manually inject a test tool
         self.tool = ToolDefinition(
             name="test_echo",
-            command_template=["echo", "{msg}"],
+            command_template=[sys.executable, "{msg}"],
             allowed_args={"msg": "^[a-z0-9]+$"},
             timeout_sec=1,
             max_output_bytes=100,
@@ -52,7 +53,7 @@ class TestS12ToolRunner(unittest.TestCase):
 
         # Verify call args
         args, kwargs = mock_run.call_args
-        self.assertEqual(args[0], ["echo", "hello"])
+        self.assertEqual(args[0], [sys.executable, "hello"])
 
     @patch("subprocess.run")
     def test_env_sanitization(self, mock_run):

@@ -133,7 +133,7 @@ External tool execution is opt-in and remains admin-gated. Set `OPENCLAW_ENABLE_
 
 Current runtime behavior:
 
-- default tool definitions are loaded from the package-owned `data/tools_allowlist.json`
+- the package-owned `data/tools_allowlist.json` ships with no tools, so enabling the feature flag alone runs nothing
 - custom tool definitions must be supplied with `OPENCLAW_TOOLS_CONFIG_PATH`
 - tool scratch/temp execution paths default to the state directory's `tool_sandbox/`
 - `OPENCLAW_TOOL_SANDBOX_DIR` can override the scratch path for an explicitly reviewed deployment
@@ -145,6 +145,46 @@ Hardened posture behavior:
 - tools without an explicit `sandbox` block fail closed in hardened mode
 - network-enabled tools require `allow_network_hosts` in hardened mode
 - filesystem allowlists are checked before execution; out-of-scope paths are blocked
+
+Tool definition rules:
+
+- `command` is a non-empty list of strings; arguments are passed as a list and never through a shell
+- the first element is the program: a bare program name or an absolute path, with no `{placeholder}`; definitions that break this rule are skipped at load with a warning
+- a bare program name is resolved only from absolute `PATH` entries, never from the working directory, and the absolute path is executed; use an absolute path when the interpreter you need is not on `PATH`
+- on Windows, a program name without an extension resolves to `<name>.exe`, and `.bat`/`.cmd` programs are refused because `cmd.exe` would re-parse their arguments; call the interpreter explicitly instead
+- every value must match its `args` pattern, and values containing control characters are rejected
+- a value that starts an argument (for example `{path}` or `{name}.txt`) must not begin with `-`; put flag-like values after a fixed prefix such as `--offset={n}`
+- with `allow_fs_read`/`allow_fs_write`, every value must resolve (after links) inside one of the listed directories; relative values are resolved against the tool's working directory, the sandbox workspace
+- rejection messages and logs name the argument, not its value
+
+Example definition file for `OPENCLAW_TOOLS_CONFIG_PATH`:
+
+```json
+{
+    "tools": [
+        {
+            "name": "python_version",
+            "description": "Print the interpreter version",
+            "command": ["/opt/python/bin/python3", "--version"],
+            "args": {},
+            "timeout_sec": 5,
+            "max_output_bytes": 1024,
+            "sandbox": {"network": false, "allow_fs_read": [], "allow_fs_write": []}
+        },
+        {
+            "name": "word_count",
+            "description": "Count words in a file under the shared input folder",
+            "command": ["wc", "-w", "{path}"],
+            "args": {"path": "^[A-Za-z0-9_./-]+$"},
+            "timeout_sec": 5,
+            "max_output_bytes": 1024,
+            "sandbox": {"network": false, "allow_fs_read": ["/srv/comfyui/input"], "allow_fs_write": []}
+        }
+    ]
+}
+```
+
+Replace the paths with ones that exist on your host; on Windows use absolute paths such as `C:\\Python313\\python.exe` (escaped in JSON).
 
 Common service-level diagnostic codes:
 

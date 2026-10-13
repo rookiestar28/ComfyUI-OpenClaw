@@ -1,17 +1,3 @@
 {
-    "tools": [
-        {
-            "name": "example_echo",
-            "description": "Example tool that echoes input",
-            "command": [
-                "echo",
-                "{message}"
-            ],
-            "args": {
-                "message": "^[a-zA-Z0-9_ -]+$"
-            },
-            "timeout_sec": 5,
-            "max_output_bytes": 1024
-        }
-    ]
+    "tools": []
 }

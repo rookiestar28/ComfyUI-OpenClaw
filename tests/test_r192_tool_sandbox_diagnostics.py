@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,7 +17,7 @@ def _runner_with_tool(tool: ToolDefinition) -> ToolRunner:
 def _echo_tool(name: str = "diagnostic_echo") -> ToolDefinition:
     return ToolDefinition(
         name=name,
-        command_template=["echo", "{msg}"],
+        command_template=[sys.executable, "{msg}"],
         allowed_args={"msg": "^[a-z]+$"},
         timeout_sec=1,
         max_output_bytes=100,
@@ -82,7 +83,7 @@ class TestR192ToolSandboxDiagnostics(unittest.TestCase):
 
             tool = ToolDefinition(
                 name="path_reader",
-                command_template=["echo", "{path}"],
+                command_template=[sys.executable, "{path}"],
                 allowed_args={"path": r"^.+$"},
                 timeout_sec=1,
                 sandbox=SandboxProfile(allow_fs_read=[str(allowed)]),

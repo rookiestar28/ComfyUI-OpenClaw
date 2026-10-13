@@ -262,7 +262,8 @@ bounded codes: `delivery_malformed`, `delivery_ambiguous`, or
 Tool execution contract notes:
 
 - tools are disabled unless `OPENCLAW_ENABLE_EXTERNAL_TOOLS` is truthy
-- tool definitions load from package-owned `data/tools_allowlist.json` unless `OPENCLAW_TOOLS_CONFIG_PATH` is set
+- tool definitions load from package-owned `data/tools_allowlist.json` (shipped empty) unless `OPENCLAW_TOOLS_CONFIG_PATH` is set
+- argument values that contain control characters, would start an argument with `-`, fail their pattern, or fall outside a declared filesystem allowlist are rejected before any process starts; the `error` text names the argument, not its value
 - in public/split high-risk surfaces, tool execution can be blocked by the surface guard even when the feature flag is enabled
 - execution responses preserve the current HTTP payload shape: failed runs return `ok=false`, `tool`, `error`, redacted `output`, `exit_code`, and `duration_ms`
 - the service-level tool runner classifies common local failures with stable diagnostics such as `sandbox_runtime_unavailable`, `interpreter_missing`, `timeout`, and `workspace_violation`; clients should still follow this API document for the current HTTP response shape

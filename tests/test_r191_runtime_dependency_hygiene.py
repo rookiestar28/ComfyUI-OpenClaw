@@ -74,7 +74,7 @@ class TestR191RuntimeDependencyHygiene(unittest.TestCase):
             Path(runner._config_path),
             ROOT / "data" / "tools_allowlist.json",
         )
-        self.assertIn("example_echo", {tool["name"] for tool in runner.list_tools()})
+        self.assertEqual(runner.list_tools(), [])
 
     def test_explicit_tools_config_path_still_overrides_default(self):
         with tempfile.TemporaryDirectory() as temp_dir:

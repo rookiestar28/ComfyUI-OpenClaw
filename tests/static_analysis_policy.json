@@ -9390,13 +9390,6 @@
     {
       "tool": "ruff",
       "path": "services/tool_runner.py",
-      "code": "F401",
-      "message": "`shlex` imported but unused",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "services/tool_runner.py",
       "code": "UP006",
       "message": "Use `dict` instead of `Dict` for type annotation",
       "count": 6

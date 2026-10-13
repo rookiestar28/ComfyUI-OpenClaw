@@ -793,6 +793,7 @@ OpenClaw keeps package-owned resources, runtime state, and local validation arti
 External tools remain opt-in and admin-gated:
 
 - `OPENCLAW_ENABLE_EXTERNAL_TOOLS=true` enables the route family
+- the shipped allowlist contains no tools; supply reviewed definitions with `OPENCLAW_TOOLS_CONFIG_PATH` (definition rules and an example are in `docs/runtime_hardening_and_startup.md`)
 - `GET /openclaw/tools` lists the allowlisted tools
 - `POST /openclaw/tools/{name}/run` executes a named allowlisted tool with validated args
 - hardened runtime posture fails closed on missing sandbox runtime or ambiguous sandbox policy

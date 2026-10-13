@@ -25,6 +25,7 @@ import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
 from enum import Enum
+from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -803,19 +804,16 @@ def check_runtime_provenance(report: DoctorReport) -> None:
     provenance_records.append(node_prov.to_dict())
 
     # --- Pip ---
+    # Read the running interpreter's pip version from package metadata; no child process.
     pip_exe = shutil.which("pip") or ""
     pip_ver = ""
     pip_status = "not_found"
-    if pip_exe:
-        try:
-            pip_out = subprocess.check_output(
-                [pip_exe, "--version"], text=True, timeout=5
-            ).strip()
-            pip_ver = pip_out.split()[1] if " " in pip_out else pip_out
-            pip_status = "ok"
-            report.environment["pip_version"] = pip_out
-        except Exception:
-            pip_status = "not_found"
+    try:
+        pip_ver = importlib_metadata.version("pip")
+        pip_status = "ok"
+        report.environment["pip_version"] = f"pip {pip_ver}"
+    except importlib_metadata.PackageNotFoundError:
+        pip_ver = ""
 
     pip_prov = RuntimeProvenance(
         runtime="pip",
@@ -836,20 +834,12 @@ def check_runtime_provenance(report: DoctorReport) -> None:
                 message=f"Pip found: {pip_ver}",
             )
         )
-    elif pip_exe:
-        report.add(
-            CheckResult(
-                name="pip_provenance",
-                severity=Severity.WARN.value,
-                message="Pip found but failed to run",
-            )
-        )
     else:
         report.add(
             CheckResult(
                 name="pip_provenance",
                 severity=Severity.WARN.value,
-                message="Pip not found on PATH",
+                message="Pip is not installed for this Python interpreter",
             )
         )
 

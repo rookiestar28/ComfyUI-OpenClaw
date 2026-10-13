@@ -97,12 +97,13 @@ Checklist:
    - `GET /openclaw/tools`
    - `POST /openclaw/tools/{name}/run`
 3. Confirm the tool definition exists in the allowlist:
-   - default allowlist: package-owned `data/tools_allowlist.json`
+   - default allowlist: package-owned `data/tools_allowlist.json`, which ships with no tools
    - custom allowlist: set `OPENCLAW_TOOLS_CONFIG_PATH=/path/to/tools_allowlist.json`
+   - definitions whose program contains a `{placeholder}` or is a relative path such as `bin/tool` are skipped at load; check the startup log for `Skipping tool definition`
 4. If the result or logs report `sandbox_runtime_unavailable`, do not bypass hardened mode blindly:
    - make the sandbox runtime available, then set `OPENCLAW_TOOL_SANDBOX_RUNTIME_AVAILABLE=1`
    - or keep tooling disabled until the deployment can fail closed safely
-5. If the result or logs report `interpreter_missing`, install the executable referenced by the tool allowlist or update the command path.
+5. If the result or logs report `interpreter_missing`, install the executable referenced by the tool allowlist or update the command path. Bare program names are looked up only in absolute `PATH` entries, not in the working directory; use an absolute path for an interpreter that is not on `PATH`.
 6. If the result or logs report `timeout`, review the command behavior before increasing the tool's `timeout_sec`.
 7. If the result or logs report `workspace_violation`, move inputs under the configured filesystem allowlist or update the tool sandbox policy.
 

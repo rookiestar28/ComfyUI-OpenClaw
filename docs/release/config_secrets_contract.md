@@ -197,7 +197,7 @@ External tool execution is opt-in and admin-gated. Package-owned defaults, runti
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `OPENCLAW_ENABLE_EXTERNAL_TOOLS` | `false` | Enables `/openclaw/tools` and `/openclaw/tools/{name}/run`. Keep disabled unless a reviewed deployment needs allowlisted external CLI execution. |
-| `OPENCLAW_TOOLS_CONFIG_PATH` | package `data/tools_allowlist.json` | Explicit path to a custom tools allowlist. If unset, OpenClaw uses the package-owned shipped allowlist rather than a state-dir shadow file. |
+| `OPENCLAW_TOOLS_CONFIG_PATH` | package `data/tools_allowlist.json` | Explicit path to a custom tools allowlist. If unset, OpenClaw uses the package-owned shipped allowlist, which contains no tools, rather than a state-dir shadow file. |
 | `OPENCLAW_TOOL_SANDBOX_RUNTIME_AVAILABLE` | `1` | Runtime availability marker used by hardened tool execution diagnostics. In hardened mode, `0` fails closed before tool execution. |
 | `OPENCLAW_TOOL_SANDBOX_DIR` | `{state_dir}/tool_sandbox` | Optional override for external-tool scratch/temp workspace. Legacy alias: `MOLTBOT_TOOL_SANDBOX_DIR`. |
 

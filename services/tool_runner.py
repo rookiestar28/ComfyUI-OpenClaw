@@ -8,10 +8,10 @@ import json
 import logging
 import os
 import re
-import shlex
 import subprocess
 import time
 from dataclasses import dataclass, field
+from string import Formatter
 from typing import Any, Dict, List, Optional, Tuple
 
 from .env_aliases import get_env_value
@@ -68,6 +68,100 @@ _TOOL_ERROR_REMEDIATIONS = {
         "Review the tool allowlist, validated arguments, and local runtime setup."
     ),
 }
+
+
+_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
+_WINDOWS_BATCH_SUFFIXES = (".bat", ".cmd")
+_FORMATTER = Formatter()
+
+
+def _canonical_path(path: str) -> str:
+    return os.path.normcase(os.path.realpath(path))
+
+
+def _is_within(path: str, prefix: str) -> bool:
+    """Return True when ``path`` is ``prefix`` or below it after resolving links."""
+    candidate = _canonical_path(path)
+    root = _canonical_path(prefix)
+    # CRITICAL: compare whole path components. A string prefix check accepts sibling
+    # directories such as "<allowed>-evil"; commonpath does not.
+    try:
+        return os.path.commonpath([candidate, root]) == root
+    except ValueError:
+        # Paths on different drives cannot share a root.
+        return False
+
+
+def _command_template_problem(command: Any) -> str | None:
+    """Return why a command template is unsafe, or None when it is acceptable."""
+    if (
+        not isinstance(command, list)
+        or not command
+        or not all(isinstance(part, str) for part in command)
+    ):
+        return "command must be a non-empty list of strings"
+    executable = command[0]
+    if not executable.strip():
+        return "command executable must not be empty"
+    # CRITICAL: the program is operator-owned. A placeholder in the executable element
+    # would let a request argument choose which program runs.
+    if "{" in executable or "}" in executable:
+        return "command executable must not contain placeholders"
+    if not os.path.isabs(executable) and os.path.dirname(executable):
+        return "command executable must be a program name or an absolute path"
+    return None
+
+
+def _executable_file_name(name: str) -> str:
+    # Same rule as CreateProcess: Windows appends ".exe" only when there is no extension.
+    if os.name == "nt" and not os.path.splitext(name)[1]:
+        return name + ".exe"
+    return name
+
+
+def _resolve_executable(name: str, search_path: str) -> str | None:
+    """Resolve the program to an absolute file path without implicit lookups."""
+    file_name = _executable_file_name(name)
+    if os.path.isabs(file_name):
+        candidates = [file_name]
+    else:
+        # CRITICAL: search only absolute PATH entries. On Windows both CreateProcess and
+        # shutil.which consult the current directory first, so a planted file there
+        # would run instead of the allowlisted program.
+        candidates = [
+            os.path.join(directory, file_name)
+            for directory in search_path.split(os.pathsep)
+            if directory and os.path.isabs(directory)
+        ]
+    for candidate in candidates:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def _leading_placeholder(element: str) -> str | None:
+    """Return the field that supplies the first character of a template element."""
+    for literal, field_name, _spec, _conversion in _FORMATTER.parse(element):
+        if literal:
+            return None
+        return field_name
+    return None
+
+
+def _check_argument_values(
+    template: list[str], arguments: dict[str, Any], rendered: list[str]
+) -> None:
+    """Reject values that could change how the program parses its arguments."""
+    for key, value in arguments.items():
+        if _CONTROL_CHARACTERS.search(str(value)):
+            raise ValueError(f"Argument '{key}' contains control characters.")
+    for element, output in zip(template[1:], rendered[1:], strict=True):
+        field_name = _leading_placeholder(element)
+        # A request value that starts an argv element must not turn it into an option.
+        if field_name is not None and output.startswith("-"):
+            raise ValueError(
+                f"Argument '{field_name}' must not start with '-' in this position."
+            )
 
 
 def is_tools_enabled() -> bool:
@@ -144,19 +238,8 @@ class SandboxProfile:
             return []
         violations: List[str] = []
         for p in paths:
-            # S54: Canonicalize path to resolve symlinks and '..'
             resolved = os.path.realpath(p)
-
-            # Check against allowed prefixes
-            is_allowed = False
-            for allowed in allowlist:
-                allowed_abs = os.path.realpath(allowed)
-                # Ensure we match directory boundary (exact match or subdir)
-                if resolved == allowed_abs or resolved.startswith(allowed_abs + os.sep):
-                    is_allowed = True
-                    break
-
-            if not is_allowed:
+            if not any(_is_within(p, allowed) for allowed in allowlist):
                 mode = "write" if write else "read"
                 violations.append(
                     f"Path '{resolved}' not in allow_fs_{mode}: {allowlist}"
@@ -193,8 +276,9 @@ class ToolDefinition:
             if key in args:
                 val = str(args[key])
                 if not re.fullmatch(pattern, val):
+                    # The value is request data and the message reaches audit records.
                     raise ValueError(
-                        f"Argument '{key}' validation failed: '{val}' does not match pattern '{pattern}'"
+                        f"Argument '{key}' validation failed: value does not match pattern '{pattern}'"
                     )
 
 
@@ -235,6 +319,17 @@ class ToolRunner:
                 data = json.load(f)
 
             for tool_data in data.get("tools", []):
+                if not isinstance(tool_data, dict):
+                    logger.warning("Skipping tool definition that is not an object")
+                    continue
+                problem = _command_template_problem(tool_data.get("command"))
+                if problem:
+                    logger.warning(
+                        "Skipping tool definition %r: %s",
+                        tool_data.get("name", "<unnamed>"),
+                        problem,
+                    )
+                    continue
                 try:
                     # S47: Parse Sandbox Profile
                     sb_data = tool_data.get("sandbox", {})
@@ -445,6 +540,16 @@ class ToolRunner:
                     error_code=TOOL_ERROR_NETWORK_HOSTS_MISSING,
                 )
 
+        # Definitions injected without reload_config() get the same template check.
+        template_problem = _command_template_problem(tool.command_template)
+        if template_problem:
+            return _diagnostic_failure_result(
+                tool_name=tool_name,
+                duration_ms=0,
+                error=f"Tool definition rejected: {template_problem}.",
+                error_code=TOOL_ERROR_EXECUTION_ERROR,
+            )
+
         try:
             # 1. Validate Arguments
             tool.validate_args(arguments)
@@ -460,6 +565,7 @@ class ToolRunner:
                     raise ValueError(
                         f"Missing required argument for tool template: {e}"
                     )
+            _check_argument_values(tool.command_template, arguments, cmd)
 
             logger.info(
                 "S12: Executing tool '%s' (Network: %s)",
@@ -470,6 +576,7 @@ class ToolRunner:
             # 3. S47 Sandbox Enforcement
             # Environment Sanitization
             clean_env = self._sanitize_env(tool.sandbox.network)
+            sandbox_cwd = self._sandbox_workspace()
 
             # S47: FS Path Validation
             # If the tool declares any FS allowlists, validate all argument
@@ -478,31 +585,61 @@ class ToolRunner:
                 tool.sandbox.allow_fs_read + tool.sandbox.allow_fs_write
             )
             if combined_allowlist:
-                arg_values = list(arguments.values())
-                violations = []
-                for val in arg_values:
-                    resolved = os.path.abspath(val)
+                # IMPORTANT: resolve relative values against the child's working directory;
+                # checking them against this process's directory approves a different file.
+                violations = sorted(
+                    key
+                    for key, value in arguments.items()
                     if not any(
-                        resolved.startswith(os.path.abspath(prefix))
+                        _is_within(os.path.join(sandbox_cwd, str(value)), prefix)
                         for prefix in combined_allowlist
-                    ):
-                        violations.append(resolved)
+                    )
+                )
                 if violations:
-                    violation_msg = ", ".join(violations)
+                    # Name arguments only: values are request data and reach audit records.
+                    names = ", ".join(f"'{key}'" for key in violations)
                     logger.warning(
-                        "S47: Tool '%s' blocked -- FS path violation: %s",
+                        "Tool '%s' blocked: argument(s) %s outside the filesystem allowlist",
                         tool_name,
-                        violation_msg,
+                        names,
                     )
                     return _diagnostic_failure_result(
                         tool_name=tool_name,
                         duration_ms=(time.monotonic() - start_time) * 1000,
-                        error=f"Sandbox FS violation: {violation_msg}",
+                        error=(
+                            f"Sandbox FS violation: argument(s) {names} outside the "
+                            "allowed filesystem prefixes."
+                        ),
                         error_code=TOOL_ERROR_WORKSPACE_VIOLATION,
                     )
 
+            executable = _resolve_executable(cmd[0], clean_env.get("PATH", ""))
+            if executable is None:
+                logger.error("Executable for tool '%s' was not found", tool_name)
+                return _diagnostic_failure_result(
+                    tool_name=tool_name,
+                    duration_ms=(time.monotonic() - start_time) * 1000,
+                    error=f"Executable not found for tool '{tool_name}'.",
+                    error_code=TOOL_ERROR_INTERPRETER_MISSING,
+                )
+            # CRITICAL: Windows runs .bat/.cmd files through cmd.exe, which re-parses the
+            # command line, so list arguments no longer keep values from becoming commands.
+            if (
+                os.name == "nt"
+                and os.path.splitext(executable)[1].lower() in _WINDOWS_BATCH_SUFFIXES
+            ):
+                return _diagnostic_failure_result(
+                    tool_name=tool_name,
+                    duration_ms=(time.monotonic() - start_time) * 1000,
+                    error=(
+                        f"Tool '{tool_name}' resolves to a Windows batch file, which is "
+                        "not supported; call the interpreter explicitly."
+                    ),
+                    error_code=TOOL_ERROR_EXECUTION_ERROR,
+                )
+            cmd[0] = executable
+
             # Execute under sandbox workspace.
-            sandbox_cwd = self._sandbox_workspace()
             proc = subprocess.run(
                 cmd,
                 capture_output=True,

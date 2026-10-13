@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -17,7 +18,7 @@ class TestSandbox(unittest.TestCase):
                         {
                             "name": "test_net_off",
                             "command": [
-                                "python",
+                                sys.executable,
                                 "-c",
                                 "import os; print(os.environ.get('HTTP_PROXY', 'NONE'))",
                             ],
@@ -27,7 +28,7 @@ class TestSandbox(unittest.TestCase):
                         {
                             "name": "test_net_on",
                             "command": [
-                                "python",
+                                sys.executable,
                                 "-c",
                                 "import os; print(os.environ.get('HTTP_PROXY', 'NONE'))",
                             ],
@@ -143,7 +144,7 @@ class TestSandbox(unittest.TestCase):
                                 {
                                     "name": "restricted_tool",
                                     "command": [
-                                        "python",
+                                        sys.executable,
                                         "-c",
                                         "import sys; print(sys.argv[1])",
                                         "{path}",

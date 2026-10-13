@@ -21,6 +21,42 @@ from .transform_common import (
 
 logger = logging.getLogger("ComfyUI-OpenClaw.services.transform_runner")
 
+# CRITICAL: the worker gets only what starting this interpreter needs. Do not return to
+# copying os.environ with a name deny-list; passwords, DSNs and provider credentials whose
+# names lack TOKEN/SECRET/KEY reached transform code that way.
+_WORKER_ENV_ALLOWLIST = frozenset(
+    {
+        "PATH",
+        "PATHEXT",
+        "SYSTEMROOT",
+        "SYSTEMDRIVE",
+        "WINDIR",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "HOME",
+        "USERPROFILE",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "PYTHONIOENCODING",
+        "PYTHONUTF8",
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "LD_LIBRARY_PATH",
+    }
+)
+
+
+def _worker_environment() -> dict[str, str]:
+    """Build the transform worker environment from the explicit allowlist."""
+    # Windows variable names are case-insensitive; compare in upper case.
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if name.upper() in _WORKER_ENV_ALLOWLIST
+    }
+
 
 class TransformProcessRunner:
     """
@@ -73,15 +109,7 @@ class TransformProcessRunner:
         input_json = json.dumps(payload)
 
         try:
-            # capability-deny: no environment variable inheritance by default?
-            # Or minimal env.
-            env = os.environ.copy()
-            # Remove sensitive vars if needed?
-            # S34 Obs: redact env in logs, but here process sees env.
-            # Best practice: clear sensitive vars.
-            for key in list(env.keys()):
-                if "TOKEN" in key or "SECRET" in key or "KEY" in key:
-                    del env[key]
+            env = _worker_environment()
 
             # Subprocess Run
             proc = subprocess.run(
