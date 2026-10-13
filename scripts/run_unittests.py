@@ -7,25 +7,120 @@ Suppresses dot-progress noise while preserving failure tracebacks.
 from __future__ import annotations
 
 import argparse
+import fnmatch
+import importlib
 import io
 import json
 import os
 import sys
 import time
+import traceback
+import types
 import unittest
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+_PRUNED_DIRS = frozenset({"__pycache__", "node_modules"})
+
 
 def _build_suite(args: argparse.Namespace) -> unittest.TestSuite:
+    loader = unittest.defaultTestLoader
     if args.module:
-        return unittest.defaultTestLoader.loadTestsFromName(args.module)
-    return unittest.defaultTestLoader.discover(
+        return loader.loadTestsFromName(args.module)
+    suite = loader.discover(
         args.start_dir,
         pattern=args.pattern,
         top_level_dir=args.top_level_dir,
     )
+    if args.top_level_dir is None:
+        suite.addTests(
+            _unreachable_module_suite(
+                loader, Path(args.start_dir), args.pattern, REPO_ROOT
+            )
+        )
+    return suite
+
+
+def _unreachable_test_modules(
+    start_dir: Path, pattern: str, repo_root: Path
+) -> list[tuple[str, Path]]:
+    """Test modules that discovery cannot enter, named from the repository root.
+
+    Python 3.11+ unittest discovery only descends through packages, so a test module
+    under a directory without ``__init__.py`` (for example ``tests/connector``) is never
+    loaded. Those modules are named ``tests.connector.test_x``: the same dotted names
+    Hosted CI and the frozen contracts already use.
+    """
+    start = start_dir.resolve()
+    try:
+        prefix = start.relative_to(repo_root.resolve()).parts
+    except ValueError:
+        return []
+    # IMPORTANT: never name these modules relative to the start directory or add
+    # __init__.py to tests/connector or tests/services: a top-level test package called
+    # "connector" or "services" would shadow the runtime package for every later test.
+    if not prefix:
+        return []
+    selected: list[tuple[str, Path]] = []
+    for current, dirnames, filenames in os.walk(start):
+        dirnames[:] = sorted(
+            name
+            for name in dirnames
+            if not name.startswith(".") and name not in _PRUNED_DIRS
+        )
+        directory = Path(current)
+        rel_dirs = directory.relative_to(start).parts
+        if not rel_dirs:
+            continue
+        reachable = all(
+            (start.joinpath(*rel_dirs[: depth + 1]) / "__init__.py").is_file()
+            for depth in range(len(rel_dirs))
+        )
+        if reachable:
+            continue
+        for filename in sorted(filenames):
+            if filename.endswith(".py") and fnmatch.fnmatch(filename, pattern):
+                name = ".".join((*prefix, *rel_dirs, filename[:-3]))
+                selected.append((name, directory / filename))
+    return sorted(selected)
+
+
+def _unreachable_module_suite(
+    loader: unittest.TestLoader, start_dir: Path, pattern: str, repo_root: Path
+) -> unittest.TestSuite:
+    suite = unittest.TestSuite()
+    for name, path in _unreachable_test_modules(start_dir, pattern, repo_root):
+        try:
+            module = importlib.import_module(name)
+        except Exception as exc:
+            # Same outcome as discovery: an unimportable module is a failing test.
+            suite.addTest(_failed_import_test(name, exc))
+            continue
+        _require_module_file(module, path)
+        suite.addTests(loader.loadTestsFromModule(module))
+    return suite
+
+
+def _require_module_file(module: types.ModuleType, expected: Path) -> None:
+    # CRITICAL: dotted names resolve through the namespace "tests" directory; a regular
+    # "tests" package earlier on sys.path would win silently, so verify the file.
+    actual = getattr(module, "__file__", None)
+    if actual is None or Path(actual).resolve() != expected.resolve():
+        raise RuntimeError(
+            f"test module {module.__name__} resolved to {actual!r}, expected {expected}"
+        )
+
+
+def _failed_import_test(name: str, error: BaseException) -> unittest.TestCase:
+    detail = "".join(traceback.format_exception(error))
+
+    def _raise_import_failure() -> None:
+        raise ImportError(f"Failed to import test module: {name}\n{detail}")
+
+    _raise_import_failure.__name__ = f"import {name}"
+    return unittest.FunctionTestCase(_raise_import_failure)
 
 
 def _load_skip_policy(path: str) -> dict[str, Any]:

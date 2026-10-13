@@ -629,7 +629,7 @@ class RepositoryArchitecturePolicyTests(unittest.TestCase):
         self.assertIn("scripts/bootstrap_project_venv.py", analysis.owned_paths)
         self.assertEqual(len(analysis.owned_paths), 316)
         self.assertEqual(len(policy["accepted_cycles"]), 2)
-        self.assertEqual(len(policy["dynamic_imports"]), 9)
+        self.assertEqual(len(policy["dynamic_imports"]), 10)
         self.assertEqual(len(policy["compatibility_exceptions"]), 9)
         self.assertIn(
             ("services.queue_submit", "api.errors"),

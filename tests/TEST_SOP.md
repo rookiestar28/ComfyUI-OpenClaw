@@ -450,6 +450,14 @@ pre-commit run --all-files --show-diff-on-failure
 OPENCLAW_STATE_DIR="$(pwd)/.tmp/test-state/manual/unit" python scripts/run_unittests.py --start-dir tests --pattern "test_*.py" --enforce-skip-policy tests/skip_policy.json
 ```
 
+Test modules in subdirectories without `__init__.py` (for example `tests/connector`,
+`tests/security`, `tests/services`, `tests/contract`) are not entered by unittest discovery on
+Python 3.11+; the runner loads them by dotted name (`tests.connector.test_poller`) after
+discovery, and `tests/test_unittest_discovery_reach.py` fails if any test module is not
+reached. Do not add `__init__.py` to `tests/connector` or `tests/services`: the test package
+would shadow the runtime `connector`/`services` package. Every module runs in one process, so a
+test module must not write to `sys.modules` at import time; patch inside the test instead.
+
 1) Backend real E2E lane (low-mock; recommended CI parity spot-check)
 
 ```bash

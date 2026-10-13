@@ -3846,13 +3846,6 @@
     {
       "tool": "ruff",
       "path": "scripts/run_unittests.py",
-      "code": "F401",
-      "message": "`os` imported but unused",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "scripts/run_unittests.py",
       "code": "SIM108",
       "message": "Use ternary operator `test_id = test_case.id() if hasattr(test_case, \"id\") else str(test_case)` instead of `if`-`else`-block",
       "count": 1

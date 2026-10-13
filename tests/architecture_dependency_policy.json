@@ -1328,6 +1328,16 @@
       "review_condition": "Remove or update when the dynamic loading boundary changes."
     },
     {
+      "path": "scripts/run_unittests.py",
+      "scope": "_unreachable_module_suite",
+      "callee": "importlib.import_module",
+      "target_kind": "expression",
+      "target": "name",
+      "owner": "architecture-maintainers",
+      "rationale": "Gate runner loads test modules that unittest discovery cannot enter by dotted name and verifies each loaded file.",
+      "review_condition": "Remove or update when the dynamic loading boundary changes."
+    },
+    {
       "path": "services/import_fallback.py",
       "scope": "import_module_dual",
       "callee": "importlib.import_module",

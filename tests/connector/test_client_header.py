@@ -1,12 +1,7 @@
-import sys
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from connector.config import ConnectorConfig
 from connector.openclaw_client import OpenClawClient
-
-# Mock aiohttp
-sys.modules["aiohttp"] = MagicMock()
 
 
 class TestClientHeader(unittest.IsolatedAsyncioTestCase):

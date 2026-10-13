@@ -7,6 +7,8 @@ import sys
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
+
 # Add project root to path
 sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -28,7 +30,8 @@ class TestBridgeClient(unittest.IsolatedAsyncioTestCase):
                     "Authorization": "Bearer token",
                     "X-Worker-ID": "worker1",
                     "User-Agent": "OpenClaw-Sidecar/1.0",
-                }
+                },
+                timeout=aiohttp.ClientTimeout(total=30),
             )
 
     async def test_fetch_jobs_empty(self):

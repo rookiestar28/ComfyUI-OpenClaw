@@ -12,9 +12,6 @@ from unittest.mock import MagicMock, patch
 
 from aiohttp import web
 
-# Mock ComfyUI environment if needed
-sys.modules["server"] = MagicMock()
-
 from api.routes import register_routes
 from services.endpoint_manifest import (
     AuthTier,
