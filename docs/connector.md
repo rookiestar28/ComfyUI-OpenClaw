@@ -18,7 +18,7 @@ The connector runs alongside ComfyUI on your machine.
 **Security**:
 
 - **Transport Model**: Telegram/Discord are outbound. LINE/WhatsApp/WeChat/KakaoTalk/Slack require inbound HTTPS webhook endpoints. Feishu/Lark supports webhook ingress or long-connection transport, but interactive callbacks still use a bounded local HTTPS callback path.
-- **Allowlist/Trust Model**: Allowlists define trusted senders/channels. Non-allowlisted senders are treated as untrusted (for example, `/run` is approval-routed instead of auto-executed).
+- **Allowlist/Trust Model**: Allowlists define trusted senders/channels. Non-allowlisted senders are treated as untrusted (for example, `/run` is approval-routed instead of auto-executed). A non-empty chat/channel allowlist also restricts scheduled-run delivery targets.
 - **Strict Profile Gate**: In `public` deployment or `hardened` runtime posture, enabling connector ingress without platform allowlist coverage is fail-closed at startup/deployment checks.
 - **Local Secrets**: Bot tokens are stored in your local environment, never sent to ComfyUI.
 - **Admin Boundary**: Control-plane actions call admin endpoints on the local OpenClaw server and require connector-side admin token configuration for admin command paths.
@@ -114,7 +114,7 @@ Set the following environment variables (or put them in a `.env` file if you use
 
 - Connector admin command paths require `OPENCLAW_CONNECTOR_ADMIN_TOKEN` to be set in connector runtime.
 - If the OpenClaw server has `OPENCLAW_ADMIN_TOKEN` configured, `OPENCLAW_CONNECTOR_ADMIN_TOKEN` must match it or admin calls return HTTP 403.
-- Without `OPENCLAW_CONNECTOR_ADMIN_TOKEN`, admin command flows (`/approve`, `/reject`, `/trace`, schedules) are blocked by connector policy before upstream calls.
+- Without `OPENCLAW_CONNECTOR_ADMIN_TOKEN`, admin command flows (`/approve`, `/reject`, `/trace`, schedules) are blocked by connector policy before upstream calls, and the scheduled-run delivery worker does not start.
 
 **SecretRef service environment behavior:**
 
@@ -228,7 +228,7 @@ Set the following environment variables (or put them in a `.env` file if you use
 - `OPENCLAW_CONNECTOR_FEISHU_REQUIRE_MENTION`: Set `false` to allow commands without explicit mention in shared chats.
 - `OPENCLAW_CONNECTOR_FEISHU_REPLY_IN_THREAD`: Set `false` to disable reply threading when the source chat supports it.
 
-**Image Delivery:**
+**Result Delivery:**
 
 - `OPENCLAW_CONNECTOR_DELIVERY_MAX_IMAGES`: Max completed images delivered per job (default `4`, clamped to `1..16`).
 - `OPENCLAW_CONNECTOR_DELIVERY_MAX_BYTES`: Per-image delivery cap in bytes (default `10485760`, clamped to `65536..52428800`).
@@ -698,7 +698,7 @@ Notes:
 | `/approve <id>` | Approve a pending request (triggers execution immediately). |
 | `/reject <id> [reason]` | Reject a workflow. |
 | `/schedules` | List schedules. |
-| `/schedule run <id>` | Trigger a schedule immediately. |
+| `/schedule run <id>` | Trigger a schedule immediately. The chat gets a confirmation; the run's result goes to the schedule's own delivery target, if it has one, not to this chat. |
 
 ## Usage Examples
 

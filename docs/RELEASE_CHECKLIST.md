@@ -38,7 +38,7 @@ If the deployment enables remote control or bridge features, it must also pass *
 - [ ] **SSRF**: LLM `base_url` defaults to known providers. Custom public URLs require `OPENCLAW_ALLOW_ANY_PUBLIC_LLM_HOST=1` or explicit allowlist; private/reserved IP targets require the scoped LLM private-network setting or the broader `OPENCLAW_ALLOW_INSECURE_BASE_URL=1` override.
 - [ ] **Public Boundary Contract (S69)**: for `OPENCLAW_DEPLOYMENT_PROFILE=public`, set `OPENCLAW_PUBLIC_SHARED_SURFACE_BOUNDARY_ACK=1` only after reverse-proxy path allowlist + network ACL deny ComfyUI-native high-risk routes.
 - [ ] **Budgets**: `OPENCLAW_MAX_INFLIGHT_SUBMITS_TOTAL` (concurrency) and `OPENCLAW_MAX_RENDERED_WORKFLOW_BYTES` (payloads) are enforced.
-- [ ] **External Tools**: external tool execution is disabled unless explicitly required; if enabled, the package-owned/default or custom allowlist is reviewed, sandbox policy is explicit for hardened posture, and sandbox/interpreter/timeout/workspace diagnostics are deterministic.
+- [ ] **External Tools**: external tool execution is disabled unless explicitly required; if enabled, the custom allowlist named by `OPENCLAW_TOOLS_CONFIG_PATH` is reviewed (the shipped default is empty), sandbox policy is explicit for hardened posture, and sandbox/interpreter/timeout/workspace diagnostics are deterministic.
 - [ ] **Contracts**: API endpoints match `docs/release/api_contract.md`; Configuration follows `docs/release/config_secrets_contract.md`.
 
 ### 2. Documentation & Recipes

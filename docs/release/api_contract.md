@@ -123,6 +123,7 @@ Trigger callbacks:
 - `POST /triggers/fire` accepts an optional `callback` object with `url` (required, `http`/`https`, no embedded credentials, at most 2048 characters), `method` (`POST` or `PUT`), `headers` (at most 20 string pairs; routing and hop-by-hop headers such as `Host` are rejected) and `mode`. Other fields are rejected.
 - An invalid `callback` returns HTTP `400` with code `callback_malformed`. When callback egress is blocked by the control plane (public profile in split mode), a request carrying `callback` returns the surface-guard `403` (`SURFACE_BLOCKED`). In both cases nothing is submitted and no approval is created.
 - Results are delivered with the same executor, host allowlist (`OPENCLAW_CALLBACK_ALLOW_HOSTS`; no allowlist means no delivery), SSRF policy and retry budget as webhook callbacks.
+- `scheduled` means the result watcher started, not that the host is allowlisted. The watcher polls history every 2 seconds for about five minutes; a job that finishes later gets no callback.
 - Immediate executions that include a callback report `callback`: `scheduled`, `deduped` (a repeated trigger reuses the original delivery) or `not_submitted`. For approval-gated triggers, the callback is stored with the approval and dispatched when `POST /approvals/{id}/approve` executes it; that response reports `callback` as `scheduled`, `deduped`, `not_submitted`, `blocked` (egress blocked at execution time; the approved job still runs) or `invalid` (stored callback no longer passes validation).
 
 ComfyUI prompt submission interoperability:

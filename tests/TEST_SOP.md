@@ -519,7 +519,7 @@ python -m connector
 ### Common env (all platforms)
 
 - `OPENCLAW_CONNECTOR_URL`: ComfyUI base URL (default: `http://127.0.0.1:8188`)
-- `OPENCLAW_CONNECTOR_ADMIN_TOKEN`: optional; required for admin endpoints if your server enforces it
+- `OPENCLAW_CONNECTOR_ADMIN_TOKEN`: optional; required for admin commands and for scheduled-run delivery
 - `OPENCLAW_CONNECTOR_DEBUG=1`: verbose logs (recommended while setting up allowlists)
 
 ### 1) Telegram (recommended first: no webhook/HTTPS required)

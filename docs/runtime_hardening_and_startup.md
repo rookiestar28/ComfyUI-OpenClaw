@@ -195,6 +195,7 @@ Common service-level diagnostic codes:
 - `timeout`
 - `workspace_violation`
 - `process_failed`
+- `execution_error` (definition or argument rejected, such as a Windows batch target, a control character, or a value that would start an argument with `-`)
 
 These diagnostics are designed to help operators fix local runtime setup without silently falling back to broader host execution. OpenClaw does not currently install Docker images, repair sandbox runtimes, or auto-delete runtime dependency caches.
 

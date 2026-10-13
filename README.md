@@ -91,6 +91,67 @@ Deployment profiles and hardening references:
 
 <details>
 
+<summary><strong>Trigger callbacks and scheduled chat results are now delivered</strong></summary>
+
+- Trigger requests and approval-gated runs that name a callback now deliver their result to
+  it. The callback was previously accepted and stored but never used. Its format is checked
+  before anything runs and split deployments refuse it; the host allowlist
+  (`OPENCLAW_CALLBACK_ALLOW_HOSTS`) and SSRF policy apply when the result is delivered.
+  Responses report the callback status.
+- Schedules with a Telegram, Discord, Slack, or Feishu/Lark delivery target now send each
+  run's result through the connector. Every run records one durable delivery that the
+  connector claims, waits on, answers with the result or a short failure or timeout notice,
+  and acknowledges. Acknowledgement failures are retried, so a result is normally posted
+  once; a connector that stops between sending and acknowledging can post it again. Targets
+  must pass the platform allowlist; webhook and custom targets are recorded as undeliverable.
+- The connector starts this worker only when its admin token is set, and polls every
+  `OPENCLAW_CONNECTOR_SCHEDULE_DELIVERY_POLL_SEC` seconds (default `15`). Schedule run
+  history shows the delivery outcome.
+
+</details>
+
+<details>
+
+<summary><strong>Process spawning and the registry package hardened</strong></summary>
+
+- External tool definitions are stricter: allowlisted paths match whole path components
+  after links and case are resolved, programs must be absolute paths or bare names found on
+  absolute `PATH` entries, Windows batch files are refused, and argument values with control
+  characters, or that would start an argument with `-`, are rejected. The default tool
+  allowlist now ships empty.
+- The transform worker starts with an explicit environment allowlist, and the operator doctor
+  reads the pip version from package metadata instead of starting pip.
+- Registry archives now contain only runtime content: the package, web assets, data, docs,
+  and the operator scripts the docs describe. Tests and development tooling stay in the git
+  repository, and a contract test pins the shipped file set and the reviewed list of shipped
+  modules that start processes.
+- A high-severity advisory in a frontend development dependency (`source-map-js`) is patched
+  in the lockfile.
+
+</details>
+
+<details>
+
+<summary><strong>Host qualification refreshed for ComfyUI 0.39.0 and frontend 1.57.0</strong></summary>
+
+- Reference anchors now follow ComfyUI `0.39.0` (source head `8010b48d`, bundled frontend
+  `1.55.14`) and the standalone frontend release `1.57.0`.
+- Both frontend subjects passed the real-host browser checks with no skipped cases, and the
+  compatibility matrix records them as validated. The later frontend source checkout and both
+  Desktop surfaces remain unexecuted.
+- Switching from OpenClaw to another sidebar tab no longer snaps the sidebar back to its
+  earlier width: OpenClaw releases only the sizing it applied and keeps widths the host
+  splitter wrote, now covered by a real-host check.
+- Current 3D output shapes (`3d` items with camera and model information, Preview3D's legacy
+  `result` item, and optional per-file metadata) are pinned in both the Python and browser
+  parsers.
+- The backend test gate now also runs the suites kept in test subdirectories, including the
+  connector, security, and contract suites.
+
+</details>
+
+<details>
+
 <summary><strong>Refreshed host alignment and output handling verified</strong></summary>
 
 - A saved 3D output exposed through both `3d` and legacy `result` now appears once in
@@ -100,9 +161,10 @@ Deployment profiles and hardening references:
 - Browser requests preserve OpenClaw's deadlines across host fetch adapters. Host timeouts
   report as timeouts without retrying the timed-out request, while caller cancellation stays
   distinct and ordinary eligible GET network failures retain bounded retries.
-- The refreshed ComfyUI core passed the real-host browser checks with both its bundled
-  frontend `1.53.6` and the verified standalone release `1.55.11`. The later frontend
-  source checkout and both Desktop surfaces remain separate, unexecuted subjects.
+- Both historical frontend subjects of the then-current ComfyUI `0.37.0` core, its bundled
+  frontend `1.53.6` and the verified standalone release `1.55.11`, passed the real-host
+  browser checks. The later frontend source checkout and both Desktop surfaces remain
+  separate, unexecuted subjects.
 - The scheduled release download now follows the pinned version and digest policy;
   acceptance receipts follow the applicable self-review or independent-review rule.
 
@@ -133,76 +195,6 @@ Deployment profiles and hardening references:
 - Verified against a running ComfyUI host: a healthy session leaves no stored alerts, a
   sustained outage records exactly one, recovery clears it, and the false startup warning is
   gone.
-
-</details>
-
-<details>
-
-<summary><strong>Frontend test files no longer shipped to browsers, and real-host verification executed</strong></summary>
-
-- The frontend test suite no longer lives inside the served web directory. ComfyUI publishes
-  every JavaScript file under a registered web directory and its frontend imports all of them,
-  so those files were previously fetched and run by every browser on every page load, where
-  they failed to resolve their test-runner imports and left a standing cluster of console
-  errors. Entries served by this pack dropped from 90 to 56, all of them runtime modules.
-- A guard test now fails if any test file or test directory reappears under the served web
-  directory, so the layout cannot regress quietly. The served directory name is unchanged, so
-  existing installations keep working.
-- The earlier pinned real-host frontend compatibility smoke lane was executed against a
-  running ComfyUI rather than only reviewed. Both historical frontend subjects were confirmed
-  in the browser from the frontend's own reported version: the bundled `1.51.9` and the
-  reproducible standalone release `1.54.3`. This run does not qualify the refreshed subjects.
-- That lane now attributes browser errors by the failing request URL instead of by console
-  text, because the browser does not name the failing file in its console output. Requests the
-  host makes for its own optional files, and errors raised by other installed packs, are
-  reported separately instead of being charged to this pack.
-- A later authorized qualification exercised the refreshed pinned ComfyUI core with its bundled
-  frontend `1.53.6` and the SHA256-checked standalone frontend release `1.55.11`. Both passed
-  the real-host browser checks, including a host-created promoted widget and sidebar handover.
-  The compatibility matrix records this paired subject scope separately from the later frontend
-  source checkout and Desktop surfaces.
-- Public names and comments are now held to a ratchet that blocks new internal-code-only
-  naming, and type annotations were modernized in the best-covered packages.
-
-</details>
-
-<details>
-
-<summary><strong>Startup, security posture, and architecture boundaries hardened</strong></summary>
-
-- Added an executable production dependency boundary check that detects forbidden ownership
-  direction, cycles, and dynamic-import drift without importing application modules.
-- Patched high-severity transitive frontend development dependencies and made local full-test,
-  pre-push, and CI security paths rebuild the exact lockfile tree before blocking high/critical
-  findings across production and development dependencies.
-- Startup health now exposes typed, redacted phase, readiness, retry, fatal, timing, and optional
-  warmup outcomes.
-- Process-static deployment and security decisions now resolve once into an immutable,
-  secret-free posture snapshot reused across startup and authorization boundaries.
-- Bootstrap lifecycle, route registration, and effective posture implementations now live in
-  focused owner packages while legacy import identities remain compatible.
-- Loader-realistic startup regression coverage now verifies that the packaged entrypoint registers
-  the real route families on the first attempt without leaking retry or process state.
-- The public systemd environment template now follows `.env.example` conventions, while
-  secret-bearing deployment environment files remain excluded from version control.
-
-</details>
-
-<details>
-
-<summary><strong>Host alignment, Parameter Lab, and native workflow ownership refreshed</strong></summary>
-
-- Legacy fixed-bundle Desktop and current managed-install Comfy-Desktop are modeled separately;
-  current bridge presence is detected without granting privileged capability access.
-- ComfyUI's `datasets` user-data root is excluded from model inventory and Model Manager
-  destinations.
-- Parameter Lab now accepts only bounded scalar values and correlates queued runs through exact
-  request-ID receipts, failing explicitly on unsupported or ambiguous host queue shapes.
-- Advanced 3D `result` references, including the `<path> [temp]` form the current preview
-  nodes report, are recognized as bounded view links that carry the host directory type,
-  without inspecting later metadata or rendering binary content.
-- Native ComfyUI video/webcam inputs, audio and text-to-speech flows, and the Graph/Workflows
-  workspace remain host-owned instead of being duplicated by OpenClaw.
 
 </details>
 
@@ -288,36 +280,6 @@ Notes:
 - Built-in local-provider defaults use loopback-only OpenAI-compatible URLs:
   - `Ollama (Local)` -> `http://127.0.0.1:11434/v1`
   - `LM Studio (Local)` -> `http://localhost:1234/v1`
-
-#### Hosted OpenAI-compatible provider: Atlas Cloud
-
-> 🎁 **[Atlas Cloud](https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=comfyui-openclaw)** is a full-modal AI inference platform with an OpenAI-compatible API (DeepSeek, Qwen, GLM, Kimi, MiniMax, …). Use it through the `custom` provider:
-
-```bash
-OPENCLAW_LLM_PROVIDER=custom
-OPENCLAW_LLM_BASE_URL=https://api.atlascloud.ai/v1
-OPENCLAW_LLM_MODEL=deepseek-ai/deepseek-v4-pro
-OPENCLAW_LLM_API_KEY=your_atlascloud_api_key
-```
-
-`api.atlascloud.ai` is a public HTTPS host, so it passes the default SSRF-safe egress validation with no `OPENCLAW_LLM_ALLOW_PRIVATE_NETWORK` or insecure override needed. `deepseek-ai/deepseek-v4-pro` is a reasoning model; any other Atlas chat model id works the same way.
-
-<details>
-<summary>All Atlas Cloud chat models (59)</summary>
-
-- **Anthropic (Claude):** `anthropic/claude-haiku-4.5-20251001`, `anthropic/claude-opus-4.8`, `anthropic/claude-sonnet-4.6`
-- **OpenAI (GPT):** `openai/gpt-5.4`, `openai/gpt-5.5`
-- **Google (Gemini):** `google/gemini-3.1-flash-lite`, `google/gemini-3.1-pro-preview`, `google/gemini-3.5-flash`
-- **Qwen:** `qwen/qwen2.5-7b-instruct`, `Qwen/Qwen3-235B-A22B-Instruct-2507`, `qwen/qwen3-235b-a22b-thinking-2507`, `qwen/qwen3-30b-a3b`, `Qwen/Qwen3-30B-A3B-Instruct-2507`, `qwen/qwen3-30b-a3b-thinking-2507`, `qwen/qwen3-32b`, `qwen/qwen3-8b`, `Qwen/Qwen3-Coder`, `qwen/qwen3-coder-next`, `qwen/qwen3-max-2026-01-23`, `Qwen/Qwen3-Next-80B-A3B-Instruct`, `Qwen/Qwen3-Next-80B-A3B-Thinking`, `Qwen/Qwen3-VL-235B-A22B-Instruct`, `qwen/qwen3-vl-235b-a22b-thinking`, `qwen/qwen3-vl-30b-a3b-instruct`, `qwen/qwen3-vl-30b-a3b-thinking`, `qwen/qwen3-vl-8b-instruct`, `qwen/qwen3.5-122b-a10b`, `qwen/qwen3.5-27b`, `qwen/qwen3.5-35b-a3b`, `qwen/qwen3.5-397b-a17b`, `qwen/qwen3.6-35b-a3b`, `qwen/qwen3.6-plus`
-- **DeepSeek:** `deepseek-ai/deepseek-ocr`, `deepseek-ai/deepseek-r1-0528`, `deepseek-ai/DeepSeek-V3-0324`, `deepseek-ai/DeepSeek-V3.1`, `deepseek-ai/DeepSeek-V3.1-Terminus`, `deepseek-ai/deepseek-v3.2`, `deepseek-ai/DeepSeek-V3.2-Exp`, `deepseek-ai/deepseek-v4-flash`, `deepseek-ai/deepseek-v4-pro`
-- **Moonshot (Kimi):** `moonshotai/Kimi-K2-Instruct`, `moonshotai/Kimi-K2-Instruct-0905`, `moonshotai/Kimi-K2-Thinking`, `moonshotai/kimi-k2.5`, `moonshotai/kimi-k2.6`
-- **Zhipu (GLM):** `zai-org/GLM-4.6`, `zai-org/glm-4.7`, `zai-org/glm-5`, `zai-org/glm-5-turbo`, `zai-org/glm-5.1`, `zai-org/glm-5v-turbo`
-- **MiniMax:** `MiniMaxAI/MiniMax-M2`, `minimaxai/minimax-m2.1`, `minimaxai/minimax-m2.5`, `minimaxai/minimax-m2.7`
-- **xAI:** `xai/grok-4.3`
-- **Kwaipilot:** `kwaipilot/kat-coder-pro-v2`
-- **Other:** `owl`
-
-</details>
 
 ### 2 Configure webhook auth (required for `/webhook*`)
 
@@ -544,7 +506,7 @@ The OpenClaw sidebar includes these built-in tabs. Some tabs are capability-gate
 | Tab | What it does | Related docs |
 | --- | --- | --- |
 | `Settings` | Health/config/log visibility, provider/model setup, model connectivity checks, and optional localhost key storage. | [Quick Start](#quick-start-minimal), [API Overview](#api-overview), [Troubleshooting](#troubleshooting) |
-| `Jobs` | Tracks prompt IDs, consumes deterministic event/task cursor metadata for polling, and shows recent outputs across classic history refs, optional `asset_hash`/`hash`-backed refs when host metadata is present, and current previewable media groups (`images`, `video`, `audio`, `3d`, bounded inline or file-backed `text`). Duplicate `3d`/legacy `result` aliases for one saved output appear once. Allowlisted text files use a bounded same-origin `/view` reader and literal text rendering with an explicit source-link fallback; asset-service-only refs stay explicit instead of silently upgrading to `/api/assets`. | [API Overview](#api-overview), [Remote Control (Connector)](#remote-control-connector) |
+| `Jobs` | Tracks prompt IDs, consumes deterministic event/task cursor metadata for polling, and shows recent outputs across classic history refs, optional `asset_hash`/`hash`-backed refs when host metadata is present, and current previewable media groups (`images`, `video`, `audio`, `3d`, bounded inline or file-backed `text`). Duplicate `3d`/legacy `result` aliases that older hosts report for one saved output appear once. Allowlisted text files use a bounded same-origin `/view` reader and literal text rendering with an explicit source-link fallback; asset-service-only refs stay explicit instead of silently upgrading to `/api/assets`. | [API Overview](#api-overview), [Remote Control (Connector)](#remote-control-connector) |
 | `Planner` | Uses assist endpoint to generate structured prompt plans (positive/negative/params). | [Configure an LLM key](#1-configure-an-llm-key-for-plannerrefinervision-helpers), [Nodes](#nodes) |
 | `Refiner` | Refines existing prompts with optional image context and issue/goal input. | [Configure an LLM key](#1-configure-an-llm-key-for-plannerrefinervision-helpers), [Nodes](#nodes) |
 | `Variants` | Local helper for generating batch variant parameter JSON (seed/range-style sweeps). | [Nodes](#nodes), [Operator UX Features](#operator-ux-features) |
@@ -642,7 +604,7 @@ Main API families:
 - Connector diagnostics: installation state, resolution, callback/tenant binding evidence, audit views, extraction seam metadata, and static service-env SecretRef propagation policy
 - External tools: admin-gated, feature-flagged allowlist execution with sandbox/path diagnostics
 - Webhooks + events: validate, submit, callback delivery, SSE/polling status
-- Admin operations: approvals, schedules, presets, rewrite recipes
+- Admin operations: approvals, schedules (including the scheduled-delivery outbox the connector claims and acknowledges), presets, rewrite recipes
 - Model Manager + Packs: search, download/import lifecycle, pack import/export
 - Bridge / sidecar: worker poll/result/heartbeat and bridge health/submit routes
 
@@ -707,7 +669,7 @@ Templates live in `data/templates/`.
   - Only exact string values matching `{{key}}` are replaced
   - Partial substitutions (e.g. `"foo {{bar}}"`) are intentionally not supported
 
-For the full step-by-step guide (where to put exported workflow JSON, how to author `manifest.json`, how to verify `/openclaw/templates`, and how to use `/run`), see `tests/TEST_SOP.md`.
+For the full step-by-step guide (where to put exported workflow JSON, how to author `manifest.json`, how to verify `/openclaw/templates`, and how to use `/run`), see `tests/TEST_SOP.md` in a git checkout of this repository (registry installs do not include `tests/`).
 
 ### Basic `/run` usage (chat)
 
@@ -846,7 +808,9 @@ Quick jumps:
 
 ## Tests
 
-Use [tests/TEST_SOP.md](tests/TEST_SOP.md) as the authoritative validation workflow.
+Use [tests/TEST_SOP.md](tests/TEST_SOP.md) as the authoritative validation workflow. The test
+suite, SOPs, and development tooling exist only in a git checkout; registry installs ship the
+runtime package without them.
 
 Quick entry points:
 
@@ -881,6 +845,7 @@ The connector currently remains an **optional attached subsystem inside this rep
 - **Run Jobs**: Submit templates via chat commands.
 - **Targeted cancellation**: `/stop`, `/cancel`, and `/interrupt` without job IDs send an explicit global interrupt; supplying one or more job IDs requests targeted ComfyUI job cancellation.
 - **Approvals**: Approve/Reject paused workflows from your phone.
+- **Scheduled results**: Schedules with a Telegram, Discord, Slack, or Feishu/Lark target are delivered by the connector, which needs `OPENCLAW_CONNECTOR_ADMIN_TOKEN`; see [Scheduled run delivery](docs/connector.md#scheduled-run-delivery).
 - **Secure**: Outbound-only for Telegram/Discord. LINE/WhatsApp/WeChat/KakaoTalk/Slack require inbound HTTPS (webhook), while Slack can also use Socket Mode and Feishu can run in either webhook or long-connection mode with a dedicated callback ingress path.
 - **Telegram topics**: Forum topic commands keep their topic context for immediate replies and delayed result delivery.
 - **Replay-safe actions and replies**: Duplicate or retried platform events are acknowledged without re-running completed actions; retryable failures before delivery commit can be retried.

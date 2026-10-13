@@ -59,6 +59,7 @@ Security controls:
 - Module hash is pinned at registration time
 - Integrity is re-checked before execution
 - Execution is bounded by timeout and output budget
+- The worker process receives only an allowlisted environment (`PATH`, `PATHEXT`, `SYSTEMROOT`, `SYSTEMDRIVE`, `WINDIR`, `TEMP`, `TMP`, `TMPDIR`, `HOME`, `USERPROFILE`, `LANG`, `LC_ALL`, `LC_CTYPE`, `PYTHONIOENCODING`, `PYTHONUTF8`, `PYTHONHOME`, `PYTHONPATH`, `LD_LIBRARY_PATH`); transforms cannot read other variables
 
 If transforms are disabled, transform execution is denied and mapping-only behavior continues.
 

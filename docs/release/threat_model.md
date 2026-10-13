@@ -52,9 +52,12 @@ Operators should use this to understand the risks of deployment.
 * **LLM Requests**: `POST` to `base_url`.
   * *Risk*: SSRF (Server-Side Request Forgery) to internal network.
   * *Mitigation*: Known-host allowlist by default. Custom URLs need explicit opt-in + DNS validation.
-* **Callback Delivery**: `POST` results to webhook targets.
+* **Callback Delivery**: `POST`/`PUT` results to webhook, trigger and approved-trigger callback URLs.
   * *Risk*: SSRF / Information Leakage.
-  * *Mitigation*: DNS-safe validation (no private IPs) + operator-payload redaction, including reasoning/internal-content stripping by default.
+  * *Mitigation*: exact-host allowlist (`OPENCLAW_CALLBACK_ALLOW_HOSTS`; none means no delivery) + DNS-safe validation (no private IPs) + operator-payload redaction, including reasoning/internal-content stripping by default. Split control-plane mode refuses trigger callbacks.
+* **Scheduled Result Delivery**: the connector claims and acknowledges schedule deliveries through admin-plane routes and sends results to schedule-configured chat targets.
+  * *Risk*: results reaching an unintended chat.
+  * *Mitigation*: connector admin token required; platform chat/channel allowlists restrict targets; lease tokens are single-use and stored only as hashes.
 * **Image Fetching**: `image_url` inputs.
   * *Mitigation*: SafeIO module (size limits, no file://).
 

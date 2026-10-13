@@ -5,7 +5,68 @@ The README now keeps only the most recent 3-5 update summaries and links here fo
 
 Newest entries appear first.
 
-Current release notes: [v1.2.0](v1.2.0.md). Previous: [v1.1.0](v1.1.0.md).
+Current release notes: [v1.3.0](v1.3.0.md). Previous: [v1.2.0](v1.2.0.md), [v1.1.0](v1.1.0.md).
+
+<details>
+
+<summary><strong>Trigger callbacks and scheduled chat results are now delivered</strong></summary>
+
+- Trigger requests and approval-gated runs that name a callback now deliver their result to
+  it. The callback was previously accepted and stored but never used. Its format is checked
+  before anything runs and split deployments refuse it; the host allowlist
+  (`OPENCLAW_CALLBACK_ALLOW_HOSTS`) and SSRF policy apply when the result is delivered.
+  Responses report the callback status.
+- Schedules with a Telegram, Discord, Slack, or Feishu/Lark delivery target now send each
+  run's result through the connector. Every run records one durable delivery that the
+  connector claims, waits on, answers with the result or a short failure or timeout notice,
+  and acknowledges. Acknowledgement failures are retried, so a result is normally posted
+  once; a connector that stops between sending and acknowledging can post it again. Targets
+  must pass the platform allowlist; webhook and custom targets are recorded as undeliverable.
+- The connector starts this worker only when its admin token is set, and polls every
+  `OPENCLAW_CONNECTOR_SCHEDULE_DELIVERY_POLL_SEC` seconds (default `15`). Schedule run
+  history shows the delivery outcome.
+
+</details>
+
+<details>
+
+<summary><strong>Process spawning and the registry package hardened</strong></summary>
+
+- External tool definitions are stricter: allowlisted paths match whole path components
+  after links and case are resolved, programs must be absolute paths or bare names found on
+  absolute `PATH` entries, Windows batch files are refused, and argument values with control
+  characters, or that would start an argument with `-`, are rejected. The default tool
+  allowlist now ships empty.
+- The transform worker starts with an explicit environment allowlist, and the operator doctor
+  reads the pip version from package metadata instead of starting pip.
+- Registry archives now contain only runtime content: the package, web assets, data, docs,
+  and the operator scripts the docs describe. Tests and development tooling stay in the git
+  repository, and a contract test pins the shipped file set and the reviewed list of shipped
+  modules that start processes.
+- A high-severity advisory in a frontend development dependency (`source-map-js`) is patched
+  in the lockfile.
+
+</details>
+
+<details>
+
+<summary><strong>Host qualification refreshed for ComfyUI 0.39.0 and frontend 1.57.0</strong></summary>
+
+- Reference anchors now follow ComfyUI `0.39.0` (source head `8010b48d`, bundled frontend
+  `1.55.14`) and the standalone frontend release `1.57.0`.
+- Both frontend subjects passed the real-host browser checks with no skipped cases, and the
+  compatibility matrix records them as validated. The later frontend source checkout and both
+  Desktop surfaces remain unexecuted.
+- Switching from OpenClaw to another sidebar tab no longer snaps the sidebar back to its
+  earlier width: OpenClaw releases only the sizing it applied and keeps widths the host
+  splitter wrote, now covered by a real-host check.
+- Current 3D output shapes (`3d` items with camera and model information, Preview3D's legacy
+  `result` item, and optional per-file metadata) are pinned in both the Python and browser
+  parsers.
+- The backend test gate now also runs the suites kept in test subdirectories, including the
+  connector, security, and contract suites.
+
+</details>
 
 <details>
 

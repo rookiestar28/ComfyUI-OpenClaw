@@ -57,6 +57,8 @@ python scripts/operator_doctor.py
 python scripts/operator_doctor.py --json
 ```
 
+In an installed (registry) package, checks for repository-only files such as `tests/TEST_SOP.md` are reported as `SKIP` ("Not applicable to an installed package"), not as failures. The pack root is found from `pyproject.toml`.
+
 Explorer / inventory note:
 
 - `/openclaw/preflight/inventory` is snapshot-first on current builds.
@@ -106,6 +108,7 @@ Checklist:
 5. If the result or logs report `interpreter_missing`, install the executable referenced by the tool allowlist or update the command path. Bare program names are looked up only in absolute `PATH` entries, not in the working directory; use an absolute path for an interpreter that is not on `PATH`.
 6. If the result or logs report `timeout`, review the command behavior before increasing the tool's `timeout_sec`.
 7. If the result or logs report `workspace_violation`, move inputs under the configured filesystem allowlist or update the tool sandbox policy.
+8. If the result reports `execution_error`, check the message: Windows `.bat`/`.cmd` targets are refused, and argument values with control characters or that would start an argument with `-` are rejected.
 
 Notes:
 
@@ -208,4 +211,4 @@ Safer alternative:
 - The Settings UI can use an Admin Token for authenticated requests.
 - The UI cannot set or persist the server token itself.
 
-For full setup steps, see the main README quick-start section and [`tests/TEST_SOP.md`](../tests/TEST_SOP.md).
+For full setup steps, see the main README quick-start section and [`tests/TEST_SOP.md`](../tests/TEST_SOP.md) (git checkout only).

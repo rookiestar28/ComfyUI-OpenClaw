@@ -103,11 +103,11 @@ If `assist_streaming` is unavailable or the stream transport degrades, Planner/R
 ## Quick Manual Checks
 
 1. Open ComfyUI and confirm OpenClaw appears in the sidebar.
-2. Switch between all visible tabs multiple times (and reopen the sidebar if possible) and ensure panes do not go blank.
+2. Switch between all visible tabs multiple times (and reopen the sidebar if possible) and ensure panes do not go blank. Drag the host sidebar splitter wider while OpenClaw is open, switch to another sidebar tab, and confirm the width is kept.
 3. Confirm the sidebar host-surface metadata resolves correctly for the current environment instead of defaulting silently.
 4. Planner: click **Plan Generation** with minimal input and confirm either live preview/stage updates appear (when streaming is supported) or a readable fallback result/error appears.
 5. Refiner: click **Refine Prompts** (with or without image) and confirm either live preview/stage updates appear (when streaming is supported) or a readable fallback result/error appears.
-6. Jobs: verify output previews still resolve for classic history refs, optional hash-backed refs when host metadata is present, and supported media-aware refs (`images`, `video`, `audio`, `3d`, bounded inline/file-backed `text`); a saved 3D file exposed in both `3d` and `result` should appear once; allowlisted text files should show literal bounded content or a deterministic source-link fallback, HDR `.exr` / `.hdr` image refs should render as explicit source-preview fallback links, asset-service-only refs should stay explicit as a bounded fallback state, and repeated polls should not duplicate rows after reconnect/resume.
+6. Jobs: verify output previews still resolve for classic history refs, optional hash-backed refs when host metadata is present, and supported media-aware refs (`images`, `video`, `audio`, `3d`, bounded inline/file-backed `text`); current hosts report Load3D-family and Save3D outputs as `3d` items and Preview3D as a legacy `result` item, and on older hosts a saved 3D file exposed in both `3d` and `result` should appear once; allowlisted text files should show literal bounded content or a deterministic source-link fallback, HDR `.exr` / `.hdr` image refs should render as explicit source-preview fallback links, asset-service-only refs should stay explicit as a bounded fallback state, and repeated polls should not duplicate rows after reconnect/resume.
 7. Parameter Lab: verify bounded scalar sweep/compare values queue with an exact request receipt,
    and verify unsupported structured values or unknown host queue-event shapes fail visibly without
    assigning another prompt's lifecycle.

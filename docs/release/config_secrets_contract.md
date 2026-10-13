@@ -90,7 +90,10 @@ Controls access to APIs and administrative features.
 | `OPENCLAW_WEBHOOK_BEARER_TOKEN` | **High** | Bearer secret for inbound webhook auth when bearer mode is enabled. |
 | `OPENCLAW_WEBHOOK_HMAC_SECRET` | **High** | HMAC secret for inbound webhook auth when hmac mode is enabled. |
 | `OPENCLAW_WEBHOOK_REQUIRE_REPLAY_PROTECTION` | **High** | Set `1` to enforce replay protection for webhook requests. |
-| `OPENCLAW_REQUIRE_APPROVAL_FOR_TRIGGERS` | Low | Set `1` to require admin approval for all external triggers (default: `0`). |
+| `OPENCLAW_REQUIRE_APPROVAL_FOR_TRIGGERS` | Low | Set `1` to require admin approval for all external triggers (default: `0`). A trigger callback is stored with the approval and sent when it is approved. |
+| `OPENCLAW_CALLBACK_ALLOW_HOSTS` | **High** | Comma-separated exact hosts that webhook and trigger callbacks may deliver to. Unset means no callback is delivered. |
+| `OPENCLAW_CALLBACK_TIMEOUT_SEC` | Low | Per-attempt callback delivery timeout in seconds (default `10`). |
+| `OPENCLAW_CALLBACK_MAX_RETRIES` | Low | Callback delivery retry budget (default `3`). |
 | `OPENCLAW_PRESETS_PUBLIC_READ` | Low | Set `0` to require Admin Token for listing presets (default: `1`). |
 | `OPENCLAW_STRICT_LOCALHOST_AUTH` | Low | Legacy compatibility toggle used by preset read paths; prefer explicit `OPENCLAW_PRESETS_PUBLIC_READ` + `OPENCLAW_ADMIN_TOKEN`. |
 
@@ -182,7 +185,7 @@ Connector posture rules:
 
 | Variable | Description |
 | :--- | :--- |
-| `OPENCLAW_CONNECTOR_DELIVERY_TIMEOUT_SEC` | Timeout (sec) for delivering results to chat (default `600`, clamped to `30..3600`). |
+| `OPENCLAW_CONNECTOR_DELIVERY_TIMEOUT_SEC` | Timeout (sec) for delivering results to chat, including the wait for a scheduled run's result; a scheduled delivery claim lasts this long plus 120 seconds (default `600`, clamped to `30..3600`). |
 | `OPENCLAW_CONNECTOR_SCHEDULE_DELIVERY_POLL_SEC` | Interval (sec) between scheduled-run delivery claims (default `15`, clamped to `5..300`). |
 | `OPENCLAW_CONNECTOR_PUBLIC_BASE_URL` | Public base URL for serving images to LINE/Webhooks. |
 | `OPENCLAW_CONNECTOR_MEDIA_PATH` | Local directory for staging media files. |

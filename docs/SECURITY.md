@@ -240,6 +240,7 @@ python scripts/check_deployment_profile.py --profile public --strict-warnings
 ### 6. SSRF Protection
 
 OpenClaw validates custom LLM `base_url` settings to prevent Server-Side Request Forgery (SSRF).
+Webhook and trigger callbacks are delivered only to hosts listed in `OPENCLAW_CALLBACK_ALLOW_HOSTS` and pass the same private/reserved-IP checks.
 
 * **Default**: known providers and localhost-safe paths are allowed.
 * **Pinned connect contract**: on supported CPython versions (current baseline: 3.10+), the consolidated `safe_io` outbound executor dials resolved IPs directly for HTTP/HTTPS and keeps TLS `server_hostname` on the original host; the no-skip `tests.test_s70_ssrf_pinning_regression` lane is intended to fail loudly if stdlib connect behavior drifts.

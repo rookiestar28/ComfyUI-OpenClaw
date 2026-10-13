@@ -66,6 +66,7 @@
 | Feature | Default | Effect |
 |---------|---------|--------|
 | Empty allowlists | Untrusted | All `/run` requires approval |
+| Scheduled-run delivery | Needs connector admin token | Targets are unrestricted unless the platform chat/channel allowlist is set |
 | Active connector without allowlist in strict posture (`public`/`hardened`) | Fail-closed | Startup/deployment checks block serving |
 | No admin users | Limited | Admin commands unavailable |
 | Rate limiting | Enabled | 10 req/min/user, 30 req/min/channel |
