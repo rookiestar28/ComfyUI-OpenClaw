@@ -558,7 +558,7 @@ class TestSpecUsesSurfacesThatExistOutsideTheMock(unittest.TestCase):
         # drags the host gutter and never assigns a sizing style itself.
         for marker in (
             "survives a tab switch",
-            "p-splitter-gutter",
+            '[role="separator"][data-orientation="horizontal"]',
             "page.mouse.down()",
             "page.mouse.up()",
             "evaluateHostWidthOwnership(",
