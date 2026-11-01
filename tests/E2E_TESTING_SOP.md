@@ -32,7 +32,7 @@ Boundary:
 
 ## 1. Requirements
 
-- Node.js 18+
+- Node.js matching `^20.19.0 || ^22.12.0 || >=24.0.0` (from package.json)
 - npm 9+
 - Python 3.10+ from the project-local environment (the repository floor also applies to the Playwright web server: `python -m http.server 3000`)
 - Playwright browsers installed (`npx playwright install chromium`)
@@ -49,6 +49,7 @@ Notes:
 
 ```powershell
 node -v
+node scripts/check-node-runtime.mjs
 npm -v
 python --version
 
@@ -69,8 +70,9 @@ npm test
 
 ```bash
 source ~/.nvm/nvm.sh
-nvm use 18
+nvm use 24
 node -v
+node scripts/check-node-runtime.mjs
 python3 --version
 
 # Provide `python` if only python3 exists
@@ -151,7 +153,7 @@ When adding or reviewing E2E coverage, prefer assertions that prove final user-v
 
 ### Requirements
 
-- Node.js 18+
+- Node.js matching `^20.19.0 || ^22.12.0 || >=24.0.0` (from package.json)
 - npm 9+ when the repo uses npm
 - Python command available (`python` or a local shim to `python3`) when the harness serves files through Python
 - Playwright Chromium installed with `npx playwright install chromium` when Playwright is used
@@ -160,6 +162,7 @@ When adding or reviewing E2E coverage, prefer assertions that prove final user-v
 
 ```powershell
 node -v
+node scripts/check-node-runtime.mjs
 npm -v
 python --version
 
@@ -172,8 +175,9 @@ npm test
 
 ```bash
 source ~/.nvm/nvm.sh
-nvm use 18
+nvm use 24
 node -v
+node scripts/check-node-runtime.mjs
 python3 --version
 
 mkdir -p .tmp/bin

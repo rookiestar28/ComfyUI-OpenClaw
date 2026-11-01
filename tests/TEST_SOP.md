@@ -75,7 +75,7 @@ Required guardrails:
 ## Prerequisites
 
 - Python 3.10+ package floor (the current local Windows acceptance baseline uses 3.13)
-- Node.js 18+ (CI uses 20)
+- Node.js matching `^20.19.0 || ^22.12.0 || >=24.0.0` (CI uses the compatible Node 20 line)
 - `pre-commit` installed: `python -m pip install pre-commit`
 - Backend test deps available in the same interpreter (`numpy`, `pillow`, `aiohttp`)
 - Frontend deps installed: `npm ci`
@@ -95,9 +95,9 @@ Required guardrails:
   - In GitHub Actions, `actions/setup-python` is bootstrap authority only. Every install,
     check, and test after it must resolve through repository-local `.venv`.
   - If tests fail due to missing deps in CI parity, rerun in the project venv used by scripts and record that in the implementation record.
-- **Node version must be 18+** before E2E:
+- **Node must satisfy package.json engines.node (`^20.19.0 || ^22.12.0 || >=24.0.0`)** before E2E:
   - Verify: `node -v`
-  - If mismatch in WSL, use the Node 18 path specified below.
+  - If mismatch in WSL, select a stable Node 24 runtime using the path below.
 
 ## Environment Parity Guardrails (CI Safety)
 
@@ -120,7 +120,7 @@ Before running tests or deploying, validation of the build environment is requir
 
 - **Checks performed**:
   - Python version (>=3.10)
-  - Node.js version (>=18.0.0)
+  - Node.js version (the shared package.json engine policy)
   - Essential Python dependencies (cryptography, defusedxml)
   - Optional: Use `--strict` to fail on warnings.
 
@@ -301,7 +301,7 @@ python scripts/check_workspace_hygiene.py check --root . --snapshot .tmp/workspa
 
 ### Optional: One-Command Full Test Scripts (Fastest)
 
-Use these if you want a single command that runs **all required steps** (detect-secrets, pre-commit, backend unit tests, frontend unit tests, E2E). These scripts also handle the most common environment issues (Windows cache locks, Black cache, Node 18).
+Use these if you want a single command that runs **all required steps** (detect-secrets, pre-commit, backend unit tests, frontend unit tests, E2E). These scripts also handle the most common environment issues (Windows cache locks, Black cache, early Node policy validation).
 Stage `10/11` runs `npm run test:unit`. Do not remove it: the Vitest suite owns the frozen frontend decomposition contract and the frontend render-safety ratchet, and no other gate, workflow, or hook executes it.
 Scripts enforce a project-local venv and will bootstrap missing test tooling (`pre-commit`, and `aiohttp` where needed for imports).
 R118 adversarial stage uses adaptive profile selection (`--profile auto`) and escalates to `extended` on high-risk diffs.
@@ -473,15 +473,17 @@ OPENCLAW_STATE_DIR="$(pwd)/.tmp/test-state/manual/backend-e2e-real" python scrip
 1) Frontend E2E (Playwright; CI enforces)
 
 ```bash
-# Ensure you are using Node.js 18+ (CI uses 20).
+# Ensure you are using Node.js matching `^20.19.0 || ^22.12.0 || >=24.0.0` (CI uses the compatible Node 20 line).
 node -v
+node scripts/check-node-runtime.mjs
 
 # If you're on WSL and `node -v` is < 18, your shell may be picking up the distro Node
 # (e.g. `/usr/bin/node`) instead of your user-installed Node. If you use `nvm`, do:
 #   source ~/.nvm/nvm.sh
-#   nvm use 18.20.8
+#   nvm use 24
 # Then re-check:
 #   node -v
+node scripts/check-node-runtime.mjs
 #
 # IMPORTANT: run `npm ci` with the same Node version you use for `npm test`.
 npm ci
@@ -927,7 +929,7 @@ If all touched files are documentation/planning text only and no code, tests, sc
 - Keep the Python interpreter consistent across all commands.
 - Require a project-local virtual environment: `.venv` on Windows/native Linux/Hosted CI and `.venv-wsl` on WSL when the repo supports dual-OS validation.
 - Do not mix global and venv-installed `pre-commit` accidentally.
-- Node.js must be 18+ before running frontend/E2E tests.
+- Node.js must satisfy `^20.19.0 || ^22.12.0 || >=24.0.0` before frontend/E2E tests.
 - On Windows, prefer repo-local `PRE_COMMIT_HOME` to avoid cache lock issues.
 - On WSL, if `python` is missing but `python3` exists, create a local shim before running Playwright or harness commands.
 - If pre-commit modifies files, review/stage/commit those changes and rerun hooks until clean.

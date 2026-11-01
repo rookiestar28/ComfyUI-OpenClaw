@@ -2,7 +2,7 @@
   "name": "comfyui-openclaw",
   "private": true,
   "engines": {
-    "node": ">=18.0.0"
+    "node": "^20.19.0 || ^22.12.0 || >=24.0.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.50.0",
@@ -12,11 +12,11 @@
   "scripts": {
     "test": "node scripts/run-playwright.mjs",
     "test:stress": "node scripts/run-playwright.mjs --stress",
-    "test:unit": "vitest run",
-    "test:unit:watch": "vitest",
-    "test:ui": "npx playwright test --ui",
-    "test:headed": "npx playwright test --headed",
-    "test:debug": "npx playwright test --debug",
-    "test:report": "npx playwright show-report"
+    "test:unit": "node scripts/check-node-runtime.mjs && vitest run",
+    "test:unit:watch": "node scripts/check-node-runtime.mjs && vitest",
+    "test:ui": "node scripts/check-node-runtime.mjs && npx playwright test --ui",
+    "test:headed": "node scripts/check-node-runtime.mjs && npx playwright test --headed",
+    "test:debug": "node scripts/check-node-runtime.mjs && npx playwright test --debug",
+    "test:report": "node scripts/check-node-runtime.mjs && npx playwright show-report"
   }
 }

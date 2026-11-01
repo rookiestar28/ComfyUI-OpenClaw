@@ -101,7 +101,11 @@ assert_clean_public_worktree() {
 
 assert_clean_public_worktree
 
-require_cmd node
+if ! command -v node >/dev/null 2>&1; then
+  echo "[tests] ERROR: Node.js missing. Select a stable Node 24 runtime, verify node -v, then retry." >&2
+  exit 1
+fi
+node scripts/check-node-runtime.mjs
 require_cmd npm
 
 ensure_npm_deps() {
@@ -157,28 +161,6 @@ if ! "$VENV_PY" -c "import Cryptodome" >/dev/null 2>&1; then
   # WeChat AES tests skip here and spend skip budget the Windows gate never sees.
   echo "[tests] Installing pycryptodomex into project venv ($VENV_DIR) ..."
   pip_install_or_fail "required for WeChat AES tests (wechat-aes extra)" "pycryptodomex>=3.20"
-fi
-
-NODE_MAJOR="$(node -p "process.versions.node.split('.')[0]")"
-if [ "$NODE_MAJOR" -lt 18 ]; then
-  # Best-effort: try to use nvm if available
-  if [ -n "${NVM_DIR:-}" ] && [ -s "${NVM_DIR}/nvm.sh" ]; then
-    # shellcheck disable=SC1090
-    . "${NVM_DIR}/nvm.sh"
-  elif [ -s "${HOME}/.nvm/nvm.sh" ]; then
-    # shellcheck disable=SC1091
-    . "${HOME}/.nvm/nvm.sh"
-  fi
-  if command -v nvm >/dev/null 2>&1; then
-    nvm use 18 >/dev/null 2>&1 || true
-  fi
-  NODE_MAJOR="$(node -p "process.versions.node.split('.')[0]")"
-fi
-
-if [ "$NODE_MAJOR" -lt 18 ]; then
-  echo "[tests] ERROR: Node >=18 required, current=$(node -v)" >&2
-  echo "[tests] Hint: source ~/.nvm/nvm.sh && nvm use 18" >&2
-  exit 1
 fi
 
 can_bind_local_port() {

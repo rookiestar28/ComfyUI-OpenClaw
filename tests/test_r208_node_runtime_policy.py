@@ -19,10 +19,11 @@ class TestR208NodeRuntimePolicy(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertEqual(package["engines"]["node"], ">=18.0.0")
-        self.assertIn("Node.js 18+", test_sop)
-        self.assertIn("CI uses 20", test_sop)
-        self.assertIn("Node.js 18+", e2e_sop)
+        policy = "^20.19.0 || ^22.12.0 || >=24.0.0"
+        self.assertEqual(package["engines"]["node"], policy)
+        self.assertIn(policy, test_sop)
+        self.assertIn("Node 20 line", test_sop)
+        self.assertIn(policy, e2e_sop)
         self.assertNotEqual(package["engines"]["node"], ">=26.8.2 <27")
 
     def test_compatibility_matrix_documents_host_frontend_engine_boundary(self):
@@ -32,7 +33,7 @@ class TestR208NodeRuntimePolicy(unittest.TestCase):
 
         self.assertIn("## Residual Host-Contract Decisions", matrix)
         self.assertIn("`node >=26.8.2 <27`", matrix)
-        self.assertIn("`>=18.0.0`", matrix)
+        self.assertIn("`^20.19.0 || ^22.12.0 || >=24.0.0`", matrix)
         self.assertIn("tests/TEST_SOP.md", matrix)
         self.assertIn("tests/E2E_TESTING_SOP.md", matrix)
         self.assertIn("does not build the host frontend workspace", matrix)

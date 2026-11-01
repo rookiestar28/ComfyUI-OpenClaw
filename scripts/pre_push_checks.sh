@@ -98,6 +98,12 @@ assert_clean_public_worktree() {
 
 assert_clean_public_worktree
 
+if ! command -v node >/dev/null 2>&1; then
+  echo "[pre-push] ERROR: Node.js missing. Select a stable Node 24 runtime, verify node -v, then retry." >&2
+  exit 1
+fi
+node scripts/check-node-runtime.mjs
+
 is_wsl() {
   grep -qiE "(microsoft|wsl)" /proc/version 2>/dev/null
 }
@@ -313,36 +319,6 @@ run_pre_commit_safe() {
   rm -f "$lower_log"
   return 1
 }
-
-# Ensure Node 18+ for Playwright/E2E.
-# CI uses Node 20; local baseline is Node 18.
-if [ -n "${NVM_DIR:-}" ] && [ -s "${NVM_DIR}/nvm.sh" ]; then
-  # shellcheck disable=SC1090
-  . "${NVM_DIR}/nvm.sh"
-elif [ -s "${HOME}/.nvm/nvm.sh" ]; then
-  # shellcheck disable=SC1091
-  . "${HOME}/.nvm/nvm.sh"
-fi
-
-if command -v nvm >/dev/null 2>&1; then
-  if [ -f ".nvmrc" ]; then
-    if ! nvm use >/dev/null 2>&1; then
-      echo "[pre-push] WARN: nvm use (.nvmrc) failed; using current node in PATH." >&2
-    fi
-  else
-    if ! nvm use 18 >/dev/null 2>&1; then
-      echo "[pre-push] WARN: nvm use 18 failed; using current node in PATH." >&2
-    fi
-  fi
-fi
-
-require_cmd node
-NODE_MAJOR="$(node -p "process.versions.node.split('.')[0]")"
-if [ "$NODE_MAJOR" -lt 18 ]; then
-  echo "[pre-push] ERROR: Node >=18 required, current=$(node -v)" >&2
-  echo "[pre-push] Hint: install nvm and run 'nvm use 18'." >&2
-  exit 1
-fi
 
 can_bind_local_port() {
   local port="$1"

@@ -1,6 +1,14 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { ensureSupportedNode } from './check-node-runtime.mjs';
+
+try {
+  ensureSupportedNode();
+} catch (error) {
+  console.error(`[OpenClaw] ${error.message}`);
+  process.exit(1);
+}
 
 function parsePositiveInt(value, label) {
   const parsed = Number.parseInt(value, 10);

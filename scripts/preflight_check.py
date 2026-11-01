@@ -5,7 +5,7 @@ R120: Dependency parity preflight check.
 Validates the build environment before deployment or test execution.
 Checks:
 1. Python version (>=3.10)
-2. Node.js version (>=18.0.0, per package.json + TEST_SOP)
+2. Node.js version (shared package.json engine policy)
 3. Essential Python dependencies (cryptography, defusedxml)
 
 Usage:
@@ -13,13 +13,13 @@ Usage:
 """
 
 import argparse
-import re
 import subprocess
 import sys
+from pathlib import Path
 
 # Minimum requirements
 MIN_PYTHON_VERSION = (3, 10)
-MIN_NODE_VERSION = (18, 0, 0)
+NODE_RUNTIME_GUARD = Path(__file__).resolve().with_name("check-node-runtime.mjs")
 
 REQUIRED_PYTHON_PACKAGES = [
     ("cryptography", "41.0"),
@@ -58,30 +58,26 @@ def check_python_version() -> bool:
 
 
 def check_node_version() -> bool:
-    """Validate Node.js version."""
+    """Delegate to the dependency-free guard used by npm and both full scripts."""
     try:
         output = (
-            subprocess.check_output(["node", "--version"], stderr=subprocess.STDOUT)
+            subprocess.check_output(
+                ["node", str(NODE_RUNTIME_GUARD)],
+                stderr=subprocess.STDOUT,
+                timeout=10,
+            )
             .decode("utf-8")
             .strip()
         )
-        # Output is usually vX.Y.Z
-        match = re.search(r"v(\d+)\.(\d+)\.(\d+)", output)
-        if not match:
-            log_warn(f"Could not parse Node version from '{output}'.")
-            return False
-
-        major, minor, patch = map(int, match.groups())
-        if (major, minor, patch) < MIN_NODE_VERSION:
-            log_fail(
-                f"Node version {output} is too old. Required: >={'.'.join(map(str, MIN_NODE_VERSION))}"
-            )
-            return False
-
-        log_ok(f"Node version: {output}")
+        log_ok(output)
         return True
     except FileNotFoundError:
-        log_fail("Node.js not found in PATH.")
+        log_fail(
+            "Node.js not found in PATH. Select a stable Node 24 runtime, then retry."
+        )
+        return False
+    except subprocess.CalledProcessError as exc:
+        log_fail(exc.output.decode("utf-8", errors="replace").strip())
         return False
     except Exception as e:
         log_warn(f"Failed to check Node version: {e}")

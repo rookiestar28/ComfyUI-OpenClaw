@@ -68,7 +68,10 @@ function Assert-CleanPublicWorktree {
 
 Assert-CleanPublicWorktree
 
-Require-Cmd node
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+  throw "[tests] ERROR: Node.js missing. Select a stable Node 24 runtime, verify node -v, then retry."
+}
+Invoke-Checked "Node runtime policy" { & node scripts/check-node-runtime.mjs }
 Require-Cmd npm
 
 function Ensure-NpmDeps {
@@ -214,19 +217,6 @@ if ($LASTEXITCODE -ne 0) {
 if (-not $qualityToolsReady) {
   Write-Host "[tests] Installing pinned Ruff/Mypy into project venv ..."
   Invoke-Checked "pip install quality tools" { & $venvPython -m pip install -r requirements-quality.txt }
-}
-
-# Ensure Node >= 18
-$nodeMajor = [int]((& node -p "process.versions.node.split('.')[0]").Trim())
-if ($nodeMajor -lt 18) {
-  Write-Host "[tests] WARN: Node < 18 detected. Trying nvm use 18..."
-  if (Get-Command nvm -ErrorAction SilentlyContinue) {
-    nvm use 18 | Out-Null
-    $nodeMajor = [int]((& node -p "process.versions.node.split('.')[0]").Trim())
-  }
-}
-if ($nodeMajor -lt 18) {
-  throw "[tests] ERROR: Node >=18 required, current=$(node -v)"
 }
 
 function Test-PortBindable {
