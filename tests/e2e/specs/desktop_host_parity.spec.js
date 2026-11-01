@@ -40,15 +40,15 @@ test.describe('Desktop host parity lane', () => {
     const host = page.locator('#sidebar-tab-comfyui-openclaw');
     // R254: the reviewed core/frontend source heads, the reproducible release,
     // and the bundled frontend pin are four separate published facts.
-    await expect(host).toHaveAttribute('data-openclaw-core-source-revision', '8010b48d');
-    await expect(host).toHaveAttribute('data-openclaw-core-version', '0.39.0');
-    await expect(host).toHaveAttribute('data-openclaw-core-tag-revision', 'b0b74356');
-    await expect(host).toHaveAttribute('data-openclaw-core-bundled-frontend', '1.55.14');
-    await expect(host).toHaveAttribute('data-openclaw-frontend-source-revision', '0e1a2fbbe4');
-    await expect(host).toHaveAttribute('data-openclaw-frontend-release-version', '1.57.0');
-    await expect(host).toHaveAttribute('data-openclaw-frontend-release-revision', 'cdc18a92');
+    await expect(host).toHaveAttribute('data-openclaw-core-source-revision', '7c4390a6');
+    await expect(host).toHaveAttribute('data-openclaw-core-version', '0.43.0');
+    await expect(host).toHaveAttribute('data-openclaw-core-tag-revision', '426f5eea');
+    await expect(host).toHaveAttribute('data-openclaw-core-bundled-frontend', '1.57.6');
+    await expect(host).toHaveAttribute('data-openclaw-frontend-source-revision', 'aa4e48c08d');
+    await expect(host).toHaveAttribute('data-openclaw-frontend-release-version', '1.60.0');
+    await expect(host).toHaveAttribute('data-openclaw-frontend-release-revision', '5cb2899f');
     // The paired real-host campaign qualifies the refreshed release subjects.
-    await expect(host).toHaveAttribute('data-openclaw-real-host-validation', 'validated');
+    await expect(host).toHaveAttribute('data-openclaw-real-host-validation', 'pending');
 
     const stamped = await host.evaluate((node) => JSON.stringify({ ...node.dataset }));
     for (const forbidden of ['.planning', 'reference/docs', '/mnt/', '.tmp']) {
@@ -63,7 +63,7 @@ test.describe('Desktop host parity lane', () => {
     const host = page.locator('#sidebar-tab-comfyui-openclaw');
     await expect(host).toHaveAttribute('data-openclaw-host-surface', 'standalone_frontend');
     await expect(host).toHaveAttribute('data-openclaw-desktop-host', 'false');
-    await expect(host).toHaveAttribute('data-openclaw-reference-frontend', '1.57.0');
+    await expect(host).toHaveAttribute('data-openclaw-reference-frontend', '1.60.0');
     await expect(host).toHaveAttribute('data-openclaw-current-desktop-version', '1.0.32-rc.1');
     await expect(host).toHaveAttribute('data-openclaw-current-desktop-generation', 'managed_install');
     await expect(host).toHaveAttribute(
@@ -81,7 +81,7 @@ test.describe('Desktop host parity lane', () => {
     const host = page.locator('#sidebar-tab-comfyui-openclaw');
     await expect(host).toHaveAttribute('data-openclaw-host-surface', 'desktop');
     await expect(host).toHaveAttribute('data-openclaw-desktop-host', 'true');
-    await expect(host).toHaveAttribute('data-openclaw-reference-frontend', '1.57.0');
+    await expect(host).toHaveAttribute('data-openclaw-reference-frontend', '1.60.0');
     await expect(host).toHaveAttribute('data-openclaw-current-desktop-version', '1.0.32-rc.1');
     await expect(host).toHaveAttribute('data-openclaw-current-desktop-generation', 'managed_install');
     await expect(host).toHaveAttribute(
@@ -147,7 +147,7 @@ test.describe('Desktop host parity lane', () => {
 
     await expect(page.locator('body')).toHaveAttribute('data-openclaw-host-surface', 'desktop');
     await expect(page.locator('body')).toHaveAttribute('data-openclaw-desktop-host', 'true');
-    await expect(page.locator('body')).toHaveAttribute('data-openclaw-reference-frontend', '1.57.0');
+    await expect(page.locator('body')).toHaveAttribute('data-openclaw-reference-frontend', '1.60.0');
     await expect(page.locator('body')).toHaveAttribute(
       'data-openclaw-current-desktop-version',
       '1.0.32-rc.1',

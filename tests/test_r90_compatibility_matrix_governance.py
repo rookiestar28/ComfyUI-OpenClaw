@@ -24,8 +24,8 @@ from services.operator_doctor import DoctorReport, check_compatibility_matrix_go
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_CURRENT_ANCHORS = {
-    "comfyui": "8010b48d (v0.39.0-49-g8010b48d2 / pyproject 0.39.0)",
-    "comfyui_frontend": "1.57.0 (0e1a2fbbe4 / v1.57.0-309-g0e1a2fbbe4)",
+    "comfyui": "7c4390a6 (v0.43.0-21-g7c4390a6f / pyproject 0.43.0)",
+    "comfyui_frontend": "1.60.0 (aa4e48c08d / v1.60.0-209-gaa4e48c08d)",
     "desktop": "0.9.4 (core 0.22.3 / frontend 1.43.18)",
     "comfy_desktop": "1.0.32-rc.1 (85e28b7a / v1.0.32-rc.1-3-g85e28b7)",
 }
@@ -68,20 +68,20 @@ STALE_ACTIVE_REFERENCE_TOKENS = (
 )
 EXPECTED_REFERENCE_BASELINES = {
     "comfyui": {
-        "bundled_frontend_version": "1.55.14",
-        "project_version": "0.39.0",
-        "source_describe": "v0.39.0-49-g8010b48d2",
-        "source_head": "8010b48d2c1be986613f8e8c761527d205bd756f",
-        "tag": "v0.39.0",
-        "tag_commit": "b0b743566f65daafc423b4fea8a2fbda94b3384a",
+        "bundled_frontend_version": "1.57.6",
+        "project_version": "0.43.0",
+        "source_describe": "v0.43.0-21-g7c4390a6f",
+        "source_head": "7c4390a6f70cd8eb41014d6af52969397a752fc4",
+        "tag": "v0.43.0",
+        "tag_commit": "426f5eea52a7ece1dd599fff4cb6cd1f352ddd24",
     },
     "comfyui_frontend": {
-        "package_version": "1.57.0",
-        "release_tag": "v1.57.0",
-        "release_tag_commit": "cdc18a92d227a965810b08928963124959951908",
-        "release_version": "1.57.0",
-        "source_describe": "v1.57.0-309-g0e1a2fbbe4",
-        "source_head": "0e1a2fbbe4d5ed1eeefb70a3fd6f0d805331d3e8",
+        "package_version": "1.60.0",
+        "release_tag": "v1.60.0",
+        "release_tag_commit": "5cb2899fc4bc5034513fbafae72b39265c4a213e",
+        "release_version": "1.60.0",
+        "source_describe": "v1.60.0-209-gaa4e48c08d",
+        "source_head": "aa4e48c08d364dcd36071131455a7aec40b852ac",
     },
 }
 
@@ -94,7 +94,7 @@ class TestR90CompatMatrixGovernance(unittest.TestCase):
         self.assertTrue(doc["has_meta"], msg=doc["issues"])
         validation = validate_metadata(doc["metadata"])
         self.assertTrue(validation["ok"], msg=validation)
-        self.assertIn(validation["status"], ("fresh", "warning", "stale"))
+        self.assertIn(validation["status"], ("fresh", "warning", "stale", "pending"))
 
     def test_repo_matrix_tracks_current_reference_anchors(self):
         doc = read_matrix_document(
@@ -108,7 +108,7 @@ class TestR90CompatMatrixGovernance(unittest.TestCase):
         )
 
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("standalone frontend release `1.57.0`", readme)
+        self.assertIn("standalone frontend release `1.60.0`", readme)
         self.assertIn("Both historical frontend subjects", readme)
 
     def test_active_current_reference_files_reject_stale_anchors(self):
@@ -430,6 +430,19 @@ class TestR90CompatMatrixGovernance(unittest.TestCase):
             "installation_specific",
         )
 
+    def test_operator_doctor_warns_for_unknown_current_host_validation(self):
+        report = DoctorReport()
+        check_compatibility_matrix_governance(report, REPO_ROOT)
+        check = next(
+            c for c in report.checks if c.name == "compatibility_matrix_governance"
+        )
+        self.assertEqual(check.severity, "warn")
+        self.assertIn("pending", check.message)
+        self.assertNotIn("fresh", check.message)
+        self.assertEqual(
+            report.environment["compat_matrix_validation_code"], "R90_MATRIX_PENDING"
+        )
+
     def test_r166_desktop_runtime_lane_matches_recorded_desktop_anchor_contract(self):
         doc = read_matrix_document(
             REPO_ROOT / "docs" / "release" / "compatibility_matrix.md"
@@ -524,32 +537,72 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
         validation = validate_metadata(metadata, today=date(2026, 9, 6))
         return validation, {entry["code"] for entry in validation["violations"]}
 
-    def test_repo_matrix_names_the_refreshed_real_host_campaign(self):
-        # CRITICAL: only a campaign on the refreshed subjects may validate them.
-        doc = read_matrix_document(
-            REPO_ROOT / "docs" / "release" / "compatibility_matrix.md"
-        )
-        metadata = doc["metadata"]
+    def test_repo_matrix_keeps_refreshed_subjects_pending_and_history_scoped(self):
+        metadata = read_matrix_document(
+            REPO_ROOT / "docs/release/compatibility_matrix.md"
+        )["metadata"]
         states = metadata["evidence_states"]
         self.assertEqual(states["source_review"]["state"], "reviewed")
         self.assertEqual(
-            states["source_review"]["evidence_id"], "source-review-20261013"
+            states["source_review"]["evidence_id"], "source-review-20261101"
         )
-        self.assertEqual(states["real_host"]["state"], "validated")
-        self.assertEqual(states["real_host"]["run_id"], "host-pair-20261013-01")
+        for key in ("real_host", "repository_validation"):
+            self.assertEqual(
+                states[key], {"state": "pending", "run_id": None, "evidence_id": None}
+            )
+        self.assertIsNone(metadata["last_validated_date"])
+        historical = metadata["historical_evidence"][0]
+        self.assertEqual(historical["last_validated_date"], "2026-10-13")
         self.assertEqual(
-            states["real_host"]["evidence_id"], "host-evidence-20261013-01"
-        )
-        self.assertEqual(states["repository_validation"]["state"], "validated")
-        self.assertEqual(
-            states["repository_validation"]["run_id"],
-            "windows-full-gate-20261013-host-requalification",
+            historical["reference_baselines"]["comfyui"]["project_version"], "0.39.0"
         )
         self.assertEqual(
-            states["repository_validation"]["evidence_id"],
-            "repo-validation-20261013-host-requalification",
+            historical["evidence_states"]["real_host"]["run_id"],
+            "host-pair-20261013-01",
         )
-        self.assertEqual(metadata["last_validated_date"], "2026-10-13")
+
+    def test_explicit_unknown_date_is_pending_only_for_schema3_pending_host(self):
+        metadata = self._schema3(last_validated_date=None)
+        validation, codes = self._codes(metadata)
+        self.assertTrue(validation["ok"], msg=codes)
+        self.assertEqual(validation["status"], "pending")
+        self.assertIsNone(validation["age_days"])
+        for state in ("validated", "failed"):
+            metadata["evidence_states"]["real_host"] = {
+                "state": state,
+                "run_id": "campaign-1",
+                "evidence_id": "evidence-1",
+            }
+            self.assertIn("R90_META_LAST_VALIDATED_DATE", self._codes(metadata)[1])
+
+    def test_missing_invalid_and_legacy_unknown_dates_still_fail(self):
+        for invalid in ("", "unknown", 123):
+            self.assertIn(
+                "R90_META_LAST_VALIDATED_DATE",
+                self._codes(self._schema3(last_validated_date=invalid))[1],
+            )
+        missing = self._schema3()
+        del missing["last_validated_date"]
+        self.assertIn("R90_META_LAST_VALIDATED_DATE", self._codes(missing)[1])
+        self.assertIn(
+            "R90_META_LAST_VALIDATED_DATE",
+            self._codes(self._schema3(schema_version=2, last_validated_date=None))[1],
+        )
+
+    def test_pending_matrix_refresh_cannot_invent_a_validation_date(self):
+        source = REPO_ROOT / "docs/release/compatibility_matrix.md"
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "matrix.md"
+            target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            result = run_refresh_workflow(
+                matrix_path=target,
+                observed_anchors=dict(EXPECTED_CURRENT_ANCHORS),
+                apply=True,
+            )
+            self.assertTrue(result.ok)
+            self.assertIsNone(
+                read_matrix_document(target)["metadata"]["last_validated_date"]
+            )
 
     def test_repo_matrix_separates_frontend_source_head_from_release(self):
         doc = read_matrix_document(
@@ -557,11 +610,11 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
         )
         frontend = doc["metadata"]["reference_baselines"]["comfyui_frontend"]
         self.assertNotEqual(frontend["source_head"], frontend["release_tag_commit"])
-        self.assertEqual(frontend["release_version"], "1.57.0")
-        self.assertEqual(frontend["package_version"], "1.57.0")
+        self.assertEqual(frontend["release_version"], "1.60.0")
+        self.assertEqual(frontend["package_version"], "1.60.0")
         core = doc["metadata"]["reference_baselines"]["comfyui"]
         self.assertNotEqual(core["source_head"], core["tag_commit"])
-        self.assertEqual(core["bundled_frontend_version"], "1.55.14")
+        self.assertEqual(core["bundled_frontend_version"], "1.57.6")
 
     def test_schema_v3_metadata_validates(self):
         validation, codes = self._codes(self._schema3())

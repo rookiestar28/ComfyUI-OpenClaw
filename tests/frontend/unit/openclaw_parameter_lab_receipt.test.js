@@ -11,7 +11,7 @@ class FakeApi extends EventTarget {
   }
 }
 
-function createHostFixture() {
+function createHostFixture({ updateUi = () => Promise.resolve() } = {}) {
   const api = new FakeApi();
   const submissions = [];
   const beforeQueuedSpy = vi.fn();
@@ -59,6 +59,7 @@ function createHostFixture() {
               marker: marker || null,
             });
             widget.afterQueued?.({ isPartialExecution: false });
+            void updateUi();
             queuedCount += 1;
           }
           api.emit("promptQueued", {
@@ -85,6 +86,30 @@ function createHostFixture() {
 }
 
 describe("Parameter Lab authoritative queue receipt", () => {
+  it("settles the matching native receipt while a detached host queue UI refresh remains pending", async () => {
+    let uiSettled = false;
+    let finishUi;
+    const uiRefresh = new Promise((resolve) => { finishUi = resolve; })
+      .then(() => { uiSettled = true; });
+    const updateUi = vi.fn(() => uiRefresh);
+    const fixture = createHostFixture({ updateUi });
+    const id = "44444444-4444-4444-8444-444444444444";
+    const coordinator = createParameterLabReceiptCoordinator({
+      app: fixture.app, api: fixture.api, uuidFactory: () => id, timeoutMs: 1000,
+    });
+    const receipt = await coordinator.queue({ experimentId: "exp-delayed-ui", runId: "0", widget: fixture.widget });
+    expect(receipt.promptId).toBe(id);
+    expect(fixture.submissions).toHaveLength(1);
+    expect(fixture.beforeQueuedSpy).toHaveBeenCalledTimes(1);
+    expect(fixture.afterQueuedSpy).toHaveBeenCalledTimes(1);
+    expect(updateUi).toHaveBeenCalledTimes(1);
+    expect(uiSettled).toBe(false);
+    receipt.release();
+    coordinator.dispose();
+    finishUi();
+    await uiRefresh;
+  });
+
   it("correlates two overlapping runs across LIFO host work without tagging unrelated submission", async () => {
     const fixture = createHostFixture();
     const ids = [

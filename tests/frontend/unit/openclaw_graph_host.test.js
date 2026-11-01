@@ -7,6 +7,25 @@ import {
     resolveGraphWidget,
 } from "../../../web/openclaw_graph_host.js";
 
+describe("host store-backed widget values", () => {
+    it("reads and writes a prototype accessor without copying an obsolete own value", () => {
+        const store = new Map([["value", "base.ckpt"]]);
+        class StoreWidget {
+            get value() { return store.get("value"); }
+            set value(value) { store.set("value", value); }
+        }
+        const widget = Object.assign(new StoreWidget(), { name: "ckpt_name", type: "combo" });
+        const graph = { _nodes: [{ id: 7, widgets: [widget] }] };
+        const resolved = resolveGraphWidget(graph, "7", "ckpt_name");
+        expect(Object.hasOwn(widget, "value")).toBe(false);
+        expect(resolved.widget.value).toBe("base.ckpt");
+        store.set("value", "updated.ckpt");
+        expect(resolved.widget.value).toBe("updated.ckpt");
+        resolved.widget.value = "selected.ckpt";
+        expect(store.get("value")).toBe("selected.ckpt");
+    });
+});
+
 function createGraphFixture() {
     const nestedLoader = {
         id: 7,

@@ -503,7 +503,19 @@ def validate_metadata(
     parsed_last = (
         _parse_date(last_validated) if isinstance(last_validated, str) else None
     )
-    if parsed_last is None:
+    # IMPORTANT: refreshed subjects have no validation date until a host run.
+    # Only an explicit schema-3 null with pending host evidence is unknown;
+    # missing/invalid dates and validated evidence must still fail validation.
+    pending_date = (
+        schema_version == 3
+        and "last_validated_date" in metadata
+        and last_validated is None
+        and _mapping_field(
+            _mapping_field(metadata, "evidence_states"), "real_host"
+        ).get("state")
+        == "pending"
+    )
+    if parsed_last is None and not pending_date:
         violations.append(
             {
                 "code": "R90_META_LAST_VALIDATED_DATE",
@@ -668,6 +680,9 @@ def validate_metadata(
     if violations:
         status = "invalid"
         code = "R90_META_INVALID"
+    elif pending_date:
+        status = "pending"
+        code = "R90_MATRIX_PENDING"
     else:
         assert age_days is not None
         if age_days > max_age_days:
@@ -999,7 +1014,9 @@ def run_refresh_workflow(
     metadata_after.setdefault("anchors", {})
     metadata_after.setdefault("evidence", {})
     metadata_after["host_surfaces"] = copy.deepcopy(DEFAULT_HOST_SURFACES)
-    metadata_after["last_validated_date"] = today.isoformat()
+    # A metadata refresh is not a host validation; retain an explicitly unknown date.
+    if metadata.get("last_validated_date", "missing") is not None:
+        metadata_after["last_validated_date"] = today.isoformat()
     for key in ANCHOR_KEYS:
         metadata_after["anchors"][key] = observed.get(key, "unknown")
     metadata_after["evidence"]["updated_by"] = updated_by

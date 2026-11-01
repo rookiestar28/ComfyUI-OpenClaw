@@ -9,6 +9,21 @@ import {
 } from "../../../web/openclaw_asset_refs.js";
 
 describe("openclaw asset refs", () => {
+    it("keeps additive preview IDs and stripped host previews outside the view contract", () => {
+        const base = { filename: "result.png", subfolder: "session", type: "temp" };
+        const expected = normalizeComfyOutputRef(base);
+        for (const metadata of [
+            { preview_id: "preview-7" },
+            { preview_id: "preview-7", asset_preview: "https://example.invalid/preview" },
+        ]) {
+            const actual = normalizeComfyOutputRef({ ...base, ...metadata });
+            expect(actual).toEqual(expected);
+            expect(actual).not.toHaveProperty("asset_preview");
+            expect(actual).not.toHaveProperty("preview_id");
+            expect(actual.viewParams).toEqual(base);
+        }
+    });
+
     it("keeps classic history refs on the /view filename+type contract", () => {
         expect(
             normalizeComfyOutputRef({

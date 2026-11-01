@@ -423,15 +423,19 @@ def check_compatibility_matrix_governance(
 
     age_days = validation.get("age_days")
     status = validation.get("status")
-    if status in ("warning", "stale"):
+    if status in ("pending", "warning", "stale"):
         report.add(
             CheckResult(
                 name="compatibility_matrix_governance",
                 severity=Severity.WARN.value,
                 message=(
-                    "Compatibility matrix age exceeds warning policy"
-                    if status == "warning"
-                    else "Compatibility matrix is stale"
+                    "Compatibility matrix host validation is pending"
+                    if status == "pending"
+                    else (
+                        "Compatibility matrix age exceeds warning policy"
+                        if status == "warning"
+                        else "Compatibility matrix is stale"
+                    )
                 ),
                 detail=json.dumps(
                     {

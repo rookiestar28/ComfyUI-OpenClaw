@@ -132,13 +132,13 @@ Deployment profiles and hardening references:
 
 <details>
 
-<summary><strong>Host qualification refreshed for ComfyUI 0.39.0 and frontend 1.57.0</strong></summary>
+<summary><strong>Host references refreshed for ComfyUI 0.43.0 and frontend 1.60.0</strong></summary>
 
-- Reference anchors now follow ComfyUI `0.39.0` (source head `8010b48d`, bundled frontend
-  `1.55.14`) and the standalone frontend release `1.57.0`.
-- Both frontend subjects passed the real-host browser checks with no skipped cases, and the
-  compatibility matrix records them as validated. The later frontend source checkout and both
-  Desktop surfaces remain unexecuted.
+- Current source review follows ComfyUI `0.43.0` at `7c4390a6` (bundle `1.57.6`)
+  and standalone frontend release `1.60.0`. These new host subjects are pending live qualification.
+- The 2026-10-13 browser campaign remains historical evidence for core `0.39.0`, bundle
+  `1.55.14` and release `1.57.0`. It does not validate the refreshed subjects, the later
+  frontend source checkout or either Desktop surface.
 - Switching from OpenClaw to another sidebar tab no longer snaps the sidebar back to its
   earlier width: OpenClaw releases only the sizing it applied and keeps widths the host
   splitter wrote, now covered by a real-host check.
@@ -490,7 +490,7 @@ Canonical DOM/class ownership is now centered on `openclaw-*`; legacy `moltbot-*
 
 The sidebar now also resolves and stamps its active host surface (`standalone_frontend`, legacy
 `desktop`, or current managed-install `comfy_desktop`) and reference metadata at mount time, so
-Desktop `0.9.4` embedded-frontend lag against standalone frontend release `1.57.0` is explicit and
+Desktop `0.9.4` embedded-frontend lag against standalone frontend release `1.60.0` is explicit and
 testable. The current Comfy-Desktop `1.0.32-rc.1` reference keeps hosted component versions
 installation-specific and recognizes `window.__comfyDesktop2` as presence metadata only; bridge
 detection does not authorize privileged capability calls.

@@ -8,6 +8,13 @@ import {
 } from "../../../web/openclaw_fetch_wrappers.js";
 
 describe("openclaw_fetch_wrappers", () => {
+    it.each([429, 502, 503, 504])("does not add a product retry to a host HTTP %i response", async (status) => {
+        const fetchFn = vi.fn().mockResolvedValue({ ok: false, status });
+        const wrapped = composeFetchWrappersOnce(fetchFn, [withGetRetry({ retries: 1 })]);
+        expect(await wrapped("/health", { method: "GET" })).toEqual({ ok: false, status });
+        expect(fetchFn).toHaveBeenCalledTimes(1);
+    });
+
     beforeEach(() => {
         document.head.innerHTML = "";
     });

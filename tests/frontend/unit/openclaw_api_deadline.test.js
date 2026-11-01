@@ -28,6 +28,29 @@ function untilAbort(_route, options) {
 }
 
 describe("OpenClawAPI host deadline contract", () => {
+    it("bounds mixed host status attempts and product network retry by one deadline", async () => {
+        vi.useFakeTimers();
+        const wireStatuses = [];
+        hostFetch.mockImplementationOnce(async (_route, options) => {
+            // Target-authored boundary simulation: source-only host GET status
+            // retries can precede a network exception. No reference code runs.
+            for (const status of [503, 502, 429]) {
+                expect(options.signal.aborted).toBe(false);
+                wireStatuses.push(status);
+            }
+            throw new TypeError("network failure after host status attempts");
+        }).mockImplementation(untilAbort);
+        const resultPromise = new OpenClawAPI().fetch("/openclaw/health", { timeout: 1000 });
+        await vi.advanceTimersByTimeAsync(1000);
+        expect((await resultPromise).error).toBe("timeout");
+        expect(wireStatuses).toEqual([503, 502, 429]);
+        expect(hostFetch).toHaveBeenCalledTimes(2);
+        expect(hostFetch.mock.calls[0][1].signal).toBe(hostFetch.mock.calls[1][1].signal);
+        expect(hostFetch.mock.calls.every(([, options]) => options.timeoutMs === null)).toBe(true);
+        expect(nativeFetch).not.toHaveBeenCalled();
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
     beforeEach(async () => {
         nativeFetch = vi.fn();
         vi.stubGlobal("fetch", nativeFetch);

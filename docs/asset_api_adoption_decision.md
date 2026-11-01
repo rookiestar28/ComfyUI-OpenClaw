@@ -1,6 +1,12 @@
 # ComfyUI Asset API Adoption Decision (2026-04-16)
 
-## 2026-10-13 source review
+## 2026-11-01 source review
+
+- Current source is `7c4390a6` (`v0.43.0-21-g7c4390a6f`, project `0.43.0`), bundle `1.57.6`. Tag `v0.43.0` instead pins `1.57.4`.
+- Additive `preview_id` is ignored by the bounded output-ref contract. Host-only `asset_preview` is stripped before client/history/cache output; it never authorizes a URL fetch or a new directory type.
+- The no-go decision stays in effect. New subjects remain pending live qualification.
+
+## Historical 2026-10-13 source review
 
 - The supplied ComfyUI source is `8010b48d` (`v0.39.0-49-g8010b48d2`, project version `0.39.0`) and pins bundled frontend `1.55.14`. The `v0.39.0` tag instead pins `1.53.10`; these are distinct subjects.
 - The asset system stays off unless `--enable-assets` is given, and `--disable-assets` overrides it. The Windows standalone build (`--windows-standalone-build`) now turns the asset system on, so hash-backed output metadata is more likely on those installs.
@@ -49,7 +55,7 @@
   - optional asset-hash-backed refs that still resolve through `/view?filename=blake3:...` when host metadata is present
   - media-aware output groups (`images`, `video`, `audio`, `3d`, and bounded `text`)
   - HDR `.exr` / `.hdr` image refs as explicit `/view` source-preview fallback links, not normal thumbnails
-- Current ComfyUI `8010b48d` / `v0.39.0-49-g8010b48d2` / pyproject `0.39.0` reference facts:
+- Current ComfyUI `7c4390a6` / `v0.43.0-21-g7c4390a6f` / pyproject `0.43.0` reference facts:
   - `/api/assets*` routes exist, but the asset system is off unless `--enable-assets` is given or the Windows standalone build turns it on; `--disable-assets` always wins
   - content hashing is opt-in through `--enable-asset-hashing`, so normal filename-backed refs may omit `asset_hash` / `hash`
   - `/features` exposes the `assets` capability flag so hosts can report whether the asset system is enabled

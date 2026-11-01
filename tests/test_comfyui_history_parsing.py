@@ -12,6 +12,29 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 class TestComfyUIHistoryParsing(unittest.TestCase):
     """Test extract_images parses history correctly."""
 
+    def test_additive_preview_metadata_does_not_change_client_or_cached_refs(self):
+        from services.comfyui_history import extract_output_refs
+
+        base = {"filename": "result.png", "subfolder": "session", "type": "temp"}
+        expected = extract_output_refs({"outputs": {"7": {"images": [base]}}})
+        # Client/cache output has asset_preview stripped by the host. Incoming
+        # metadata is still untrusted if an older adapter happens to retain it.
+        for extra in (
+            {"preview_id": "preview-7"},
+            {
+                "preview_id": "preview-7",
+                "asset_preview": "https://example.invalid/preview",
+            },
+        ):
+            with self.subTest(extra=extra):
+                actual = extract_output_refs(
+                    {"outputs": {"7": {"images": [{**base, **extra}]}}}
+                )
+                self.assertEqual(actual, expected)
+                self.assertNotIn("asset_preview", actual[0])
+                self.assertNotIn("preview_id", actual[0])
+                self.assertIn("type=temp", actual[0]["view_url"])
+
     def test_extract_images_basic(self):
         from services.comfyui_history import extract_images
 
