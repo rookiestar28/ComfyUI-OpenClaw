@@ -22,7 +22,8 @@
  * already up at the configured loopback origin.
  */
 
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { expect, test } from '@playwright/test';
@@ -191,6 +192,81 @@ async function openOpenClawSidebar(page) {
   await page.waitForSelector(OPENCLAW_ROOT, { timeout: 60_000 });
 }
 
+async function loadIdentityFixture(page, mode) {
+  const base = await resolveOpenClawExtensionBase(page);
+  return page.evaluate(async ({ base, mode }) => {
+    const app = window.app;
+    const previous = app.graph.serialize();
+    window.__openclawIdentity = { previous };
+    const leafId = mode === 'root' ? 'insert:operation-1:root:node:7' : 'child:opaque';
+    const workflow = {
+      last_node_id: 2, last_link_id: 0,
+      nodes: [
+        { id: leafId, type: 'CheckpointLoaderSimple', pos: [100, 100], size: [300, 120],
+          flags: {}, order: 0, mode: 0, inputs: [],
+          outputs: ['MODEL', 'CLIP', 'VAE'].map((type, slot_index) => ({ name: type, type, links: null, slot_index })),
+          properties: {}, widgets_values: ['base.ckpt'] },
+        { id: 'control', type: 'EmptyLatentImage', pos: [500, 100], size: [300, 120],
+          flags: {}, order: 1, mode: 0, inputs: [],
+          outputs: [{ name: 'LATENT', type: 'LATENT', links: null, slot_index: 0 }],
+          properties: {}, widgets_values: [512, 512, 1] },
+      ], links: [], groups: [], config: {}, extra: {}, version: 0.4,
+    };
+    if (await app.loadGraphData(workflow, true, true, null, { skipAssetScans: true }) === false) {
+      throw new Error('host refused the synthetic identity workflow');
+    }
+    const graph = app.graph;
+    const leaf = graph._nodes.find((node) => node.type === 'CheckpointLoaderSimple');
+    const widget = leaf?.widgets?.find((item) => item.name === 'ckpt_name');
+    const control = graph._nodes.find((node) => String(node.id) === 'control').widgets.find((item) => item.name === 'width');
+    if (!widget || String(leaf.id) !== leafId) throw new Error('host did not preserve the colon-bearing node ID');
+    // Only the fixture choices are synthetic; the graph, nodes and widgets stay host-owned.
+    widget.options.values = ['base.ckpt', 'xl.ckpt'];
+    widget.value = 'base.ckpt';
+    let executionId = leafId;
+    let firstId = null;
+    let collision = null;
+    if (mode !== 'root') {
+      const { subgraph, node: first } = graph.convertToSubgraph(new Set([leaf]));
+      if (subgraph._nodes.find((node) => node === leaf) !== leaf) throw new Error('host conversion replaced the fixture leaf');
+      const second = first.clone();
+      if (!second || second.subgraph !== subgraph) throw new Error('host clone did not reuse the real definition');
+      second.id = 'later:instance';
+      graph.add(second);
+      firstId = `${first.id}:${leaf.id}`;
+      executionId = `${second.id}:${leaf.id}`;
+      if (mode === 'collision') {
+        collision = leaf.clone();
+        if (!collision) throw new Error('host could not clone the collision control');
+        collision.id = executionId;
+        graph.add(collision);
+      }
+    }
+    const { tabManager } = await import(`${base}/openclaw_tabs.js`);
+    const tab = tabManager.tabs.find((item) => item.id === 'parameter-lab');
+    const graphHost = await import(`${base}/openclaw_graph_host.js`);
+    Object.assign(window.__openclawIdentity, { leaf, widget, control, collision, executionId, firstId, tab, graphHost });
+    tab.dimensions = [];
+    tab.renderDimensions();
+    return { executionId, firstId,
+      catalogCount: graphHost.getGraphNodeCatalog(graph).filter((entry) => entry.node === leaf).length,
+      objectAmbiguous: graphHost.getGraphNodeEntryByObject(graph, leaf) === null,
+      rawAmbiguous: graphHost.getGraphNodeEntry(graph, leaf.id) === null };
+  }, { base, mode });
+}
+
+async function restoreIdentityFixture(page) {
+  return page.evaluate(async () => {
+    const previous = window.__openclawIdentity?.previous;
+    if (!previous) throw new Error('identity fixture has no restoration snapshot');
+    const loaded = await window.app.loadGraphData(previous, true, true, null, { skipAssetScans: true });
+    const comparable = (graph) => ({ nodes: graph.nodes, links: graph.links, groups: graph.groups });
+    const restored = loaded !== false && JSON.stringify(comparable(window.app.graph.serialize())) === JSON.stringify(comparable(previous));
+    delete window.__openclawIdentity;
+    return restored;
+  });
+}
+
 test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
   const consoleErrors = [];
   const pageErrors = [];
@@ -235,7 +311,7 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
     });
   });
 
-  test('the host served the requested frontend subject and not a fallback', async ({ page }) => {
+  test('the host served the requested frontend subject and not a fallback', async ({ page, request }, testInfo) => {
     await page.goto('/');
     const reportedFrontendVersion = await page.evaluate(async (budgetMs) => {
       // The frontend assigns this global when its Vue application mounts, which
@@ -265,6 +341,23 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
     });
 
     expect(failures, failures.join('\n')).toEqual([]);
+    const webRoot = parseHostWebRoot(hostLogText);
+    expect(webRoot).toBeTruthy();
+    const index = await request.get('/');
+    expect(index.ok()).toBe(true);
+    const bytes = await index.body();
+    const digest = (value) => createHash('sha256').update(value).digest('hex');
+    expect(digest(bytes)).toBe(digest(readFileSync(path.join(webRoot, 'index.html'))));
+    const script = bytes.toString('utf8').match(/<script[^>]+src="([^"]+\.js)"/);
+    expect(script, 'served index has no JavaScript entry').not.toBeNull();
+    const url = new URL(script[1], 'http://127.0.0.1');
+    expect(url.hostname).toBe('127.0.0.1');
+    const asset = await request.get(url.pathname);
+    expect(asset.ok()).toBe(true);
+    const assetBytes = await asset.body();
+    expect(digest(assetBytes)).toBe(digest(readFileSync(path.join(webRoot, url.pathname.replace(/^\//, '')))));
+    await testInfo.attach('served-identity', { body: JSON.stringify({ frontend: reportedFrontendVersion,
+      indexSha256: digest(bytes), entryPath: url.pathname, entrySha256: digest(assetBytes) }), contentType: 'application/json' });
   });
 
   test('evidence never names the reviewed frontend source head as executed', async () => {
@@ -507,6 +600,141 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
     const failures = evaluatePromotedWidget(widget);
     expect(failures, failures.join('\n')).toEqual([]);
     expect(widget.restored).toBe(true);
+  });
+
+  for (const placement of ['root', 'shared-nested']) {
+    test(`colon-bearing ${placement} IDs select, compare and replay on the real graph`, async ({ page }) => {
+      await openOpenClawSidebar(page);
+      await page.click('.openclaw-tabs .openclaw-tab:has-text("Parameter Lab")');
+      page.on('dialog', (dialog) => dialog.accept());
+      try {
+        const fixture = await loadIdentityFixture(page, placement);
+        expect(fixture.catalogCount).toBe(placement === 'root' ? 1 : 2);
+        if (placement !== 'root') {
+          expect(fixture.objectAmbiguous).toBe(true);
+          expect(fixture.rawAmbiguous).toBe(true);
+          await expect.poll(() => page.evaluate(() => {
+            const { graphHost, firstId } = window.__openclawIdentity;
+            return graphHost.getGraphNodeEntry(window.app.graph, firstId)?.node === window.__openclawIdentity.leaf;
+          })).toBe(true);
+        }
+        await page.click('#lab-add-dim');
+        await expect(page.locator(`.dim-node-select option[value="${fixture.executionId}"]`)).toHaveCount(1);
+        await page.selectOption('.dim-node-select', fixture.executionId);
+        await page.selectOption('.dim-widget-select', 'ckpt_name');
+        await page.selectOption('.dim-candidate-select', 'xl.ckpt');
+        await page.evaluate(() => {
+          const { tab, executionId } = window.__openclawIdentity;
+          tab.showCompareWizard(executionId);
+        });
+        await expect(page.locator('.dim-node-select')).toHaveValue(fixture.executionId);
+        await expect(page.locator('.dim-widget-select')).toHaveValue('ckpt_name');
+        if (placement !== 'root') {
+          await page.evaluate(() => {
+            const { tab, leaf } = window.__openclawIdentity;
+            tab.showCompareWizard(leaf);
+          });
+          await expect(page.locator('.openclaw-banner')).toContainText('Select a unique loader');
+          await expect(page.locator('.dim-node-select')).toHaveValue(fixture.executionId);
+        }
+        await page.evaluate(() => {
+          const { tab, executionId } = window.__openclawIdentity;
+          tab.experimentId = 'host-identity';
+          tab.plan = { dimensions: [], runs: [{ [`${executionId}.ckpt_name`]: 'xl.ckpt' }] };
+          tab.renderPlan();
+        });
+        await page.click('.replay-run');
+        await expect(page.locator('.openclaw-banner')).toContainText('Values applied');
+        const edited = await page.evaluate(async () => {
+          const { widget, control, executionId, firstId } = window.__openclawIdentity;
+          const prompt = await window.app.graphToPrompt();
+          return { value: widget.value, control: control.value,
+            promptValue: prompt.output?.[executionId]?.inputs?.ckpt_name,
+            firstPromptValue: firstId ? prompt.output?.[firstId]?.inputs?.ckpt_name : null };
+        });
+        expect(edited).toMatchObject({ value: 'xl.ckpt', control: 512, promptValue: 'xl.ckpt' });
+        if (placement !== 'root') expect(edited.firstPromptValue).toBe('xl.ckpt');
+      } finally {
+        expect(await restoreIdentityFixture(page), 'host workflow restoration failed').toBe(true);
+      }
+    });
+  }
+
+  test('a collision with a later shared instance rejects replay before every write', async ({ page }) => {
+    await openOpenClawSidebar(page);
+    await page.click('.openclaw-tabs .openclaw-tab:has-text("Parameter Lab")');
+    try {
+      await loadIdentityFixture(page, 'collision');
+      const before = await page.evaluate(() => {
+        const { tab, executionId, widget, control, collision, graphHost } = window.__openclawIdentity;
+        const values = [widget.value, control.value, collision.widgets.find((entry) => entry.name === 'ckpt_name').value];
+        tab.experimentId = 'host-collision';
+        tab.plan = { dimensions: [], runs: [{ 'control.width': 513, [`${executionId}.ckpt_name`]: 'xl.ckpt' }] };
+        tab.renderPlan();
+        return { values, ambiguous: graphHost.getGraphNodeEntry(window.app.graph, executionId) === null };
+      });
+      expect(before.ambiguous).toBe(true);
+      await page.click('.replay-run');
+      await expect(page.locator('.openclaw-banner')).toContainText('Cannot apply values');
+      await expect(page.locator('.openclaw-banner')).not.toContainText('Values applied');
+      expect(await page.evaluate(() => {
+        const { widget, control, collision } = window.__openclawIdentity;
+        return [widget.value, control.value, collision.widgets.find((entry) => entry.name === 'ckpt_name').value];
+      })).toEqual(before.values);
+    } finally {
+      expect(await restoreIdentityFixture(page), 'host workflow restoration failed').toBe(true);
+    }
+  });
+
+  test('left and right sidebars contain controls at both desktop viewports', async ({ page }, testInfo) => {
+    await openOpenClawSidebar(page);
+    const originalViewport = page.viewportSize();
+    const originalLocation = await page.evaluate(() => window.app.ui.settings.getSettingValue('Comfy.Sidebar.Location'));
+    const measurements = [];
+    try {
+      for (const viewport of [{ width: 1440, height: 1000 }, { width: 1920, height: 1080 }]) {
+        await page.setViewportSize(viewport);
+        for (const location of ['left', 'right']) {
+          await page.evaluate(async (value) => {
+            const settings = window.app.ui.settings;
+            if (typeof settings.setSettingValueAsync !== 'function') throw new Error('host has no async setting setter');
+            await settings.setSettingValueAsync('Comfy.Sidebar.Location', value);
+          }, location);
+          await activateSidebarTab(page, PEER_TAB_ID);
+          await page.waitForSelector(PEER_CONTENT);
+          await settleFrames(page);
+          await page.screenshot({ path: testInfo.outputPath(`${location}-${viewport.width}-peer.png`) });
+          await activateSidebarTab(page, OPENCLAW_TAB_ID);
+          await page.waitForSelector(OPENCLAW_ROOT);
+          await settleFrames(page);
+          const geometry = await page.evaluate(() => {
+            const rect = (selector) => {
+              const box = document.querySelector(selector)?.getBoundingClientRect();
+              return box ? { left: box.left, right: box.right, width: box.width } : null;
+            };
+            const controls = [...document.querySelectorAll('.openclaw-tabs .openclaw-tab')].map((node) => node.getBoundingClientRect());
+            return { panel: rect('.side-bar-panel'), content: rect('.sidebar-content-container'),
+              mount: rect('[data-openclaw-host-surface]'),
+              rightmostControl: controls.length ? { right: Math.max(...controls.map((box) => box.right)) } : null };
+          });
+          expect(evaluateSidebarGeometry(geometry, POLICY.geometry.sidebar_min_width_px)).toEqual([]);
+          expect(geometry.panel.left).toBeGreaterThanOrEqual(0);
+          expect(geometry.panel.right).toBeLessThanOrEqual(viewport.width);
+          expect((geometry.panel.left + geometry.panel.right) / 2 < viewport.width / 2).toBe(location === 'left');
+          await page.screenshot({ path: testInfo.outputPath(`${location}-${viewport.width}-openclaw.png`) });
+          await activateSidebarTab(page, PEER_TAB_ID);
+          await page.waitForSelector(PEER_CONTENT);
+          await expect(page.locator(OPENCLAW_ROOT)).toHaveCount(0);
+          await activateSidebarTab(page, OPENCLAW_TAB_ID);
+          await expect(page.locator(OPENCLAW_ROOT)).toBeVisible();
+          measurements.push({ location, viewport, geometry });
+        }
+      }
+      writeFileSync(testInfo.outputPath('sidebar-geometry.json'), JSON.stringify(measurements, null, 2));
+    } finally {
+      await page.evaluate(async (value) => window.app.ui.settings.setSettingValueAsync('Comfy.Sidebar.Location', value), originalLocation);
+      await page.setViewportSize(originalViewport);
+    }
   });
 
   test('an annotated temporary result stays visible and is fetched from the temp directory', async ({
