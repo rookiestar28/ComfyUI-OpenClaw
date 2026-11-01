@@ -59,8 +59,9 @@ class TestR61WebhookAdoption(unittest.IsolatedAsyncioTestCase):
             ):
                 request = MagicMock()
                 request.headers.get.return_value = "application/json"
-                # Mock content read
-                request.content.read = AsyncMock(return_value=b"{}")
+                # A finite request body ends at EOF; repeating bytes forever is not
+                # an HTTP stream and would correctly exceed the ingestion limit.
+                request.content.read = AsyncMock(side_effect=[b"{}", b""])
 
                 # Mock MAX_BODY_SIZE if needed during read?
                 # Real module is imported, so it uses real Int. That's fine.

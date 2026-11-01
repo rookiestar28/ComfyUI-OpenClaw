@@ -34,11 +34,11 @@ else:
     "models.schemas",
     ("MAX_BODY_SIZE", "WebhookJobRequest"),
 )
-(import_aiohttp_web,) = import_attrs_dual(
+(import_aiohttp_web, read_bounded_body) = import_attrs_dual(
     __package__,
     "..services.aiohttp_compat",
     "services.aiohttp_compat",
-    ("import_aiohttp_web",),
+    ("import_aiohttp_web", "read_bounded_body"),
 )
 (metrics,) = import_attrs_dual(
     __package__,
@@ -120,7 +120,7 @@ async def webhook_handler(request: web.Request) -> web.Response:
 
         # Read raw body with size limit
         try:
-            raw_body = await request.content.read(MAX_BODY_SIZE + 1)
+            raw_body = await read_bounded_body(request.content, MAX_BODY_SIZE)
             if len(raw_body) > MAX_BODY_SIZE:
                 metrics.inc("webhook_denied")
                 return create_error_response(

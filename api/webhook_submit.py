@@ -15,7 +15,7 @@ import logging
 # import another pack's top-level `services` module and break allowlists/auth in surprising ways.
 if __package__ and "." in __package__:
     from ..models.schemas import MAX_BODY_SIZE, WebhookJobRequest
-    from ..services.aiohttp_compat import import_aiohttp_web
+    from ..services.aiohttp_compat import import_aiohttp_web, read_bounded_body
     from ..services.callback_delivery import start_callback_watch
     from ..services.execution_budgets import BudgetExceededError
     from ..services.idempotency_store import IdempotencyStore
@@ -34,7 +34,10 @@ if __package__ and "." in __package__:
     )
 else:  # pragma: no cover (test-only import mode)
     from models.schemas import MAX_BODY_SIZE, WebhookJobRequest
-    from services.aiohttp_compat import import_aiohttp_web  # type: ignore
+    from services.aiohttp_compat import (  # type: ignore
+        import_aiohttp_web,
+        read_bounded_body,
+    )
     from services.callback_delivery import start_callback_watch  # type: ignore
     from services.execution_budgets import BudgetExceededError  # type: ignore
     from services.idempotency_store import IdempotencyStore  # type: ignore
@@ -130,7 +133,7 @@ async def webhook_submit_handler(request: web.Request) -> web.Response:
             return safe_error_response(415, "unsupported_media_type")
 
         try:
-            raw_body = await request.content.read(MAX_BODY_SIZE + 1)
+            raw_body = await read_bounded_body(request.content, MAX_BODY_SIZE)
             if len(raw_body) > MAX_BODY_SIZE:
                 metrics.inc("webhook_denied")
                 return safe_error_response(413, "payload_too_large")

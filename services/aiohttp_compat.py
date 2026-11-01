@@ -8,7 +8,26 @@ actually invoked.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
+
+
+class _AsyncByteStream(Protocol):
+    async def read(self, n: int) -> bytes: ...
+
+
+async def read_bounded_body(stream: _AsyncByteStream, limit: int) -> bytes:
+    """Read to EOF or one overflow byte, without retaining an unbounded body."""
+    if limit < 0:
+        raise ValueError("body limit must be non-negative")
+    body = bytearray()
+    # CRITICAL: read(n) may return a short chunk before EOF. Parsing/authenticating
+    # that prefix causes false JSON/HMAC failures and misses oversized bodies.
+    while len(body) <= limit:
+        chunk = await stream.read(limit + 1 - len(body))
+        if not chunk:
+            break
+        body.extend(chunk)
+    return bytes(body)
 
 
 def _missing_aiohttp(*_args: Any, **_kwargs: Any) -> Any:

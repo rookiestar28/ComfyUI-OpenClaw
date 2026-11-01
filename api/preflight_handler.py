@@ -18,6 +18,7 @@ except ImportError:
 if __package__ and "." in __package__:
     from ..models.schemas import MAX_BODY_SIZE
     from ..services.access_control import is_loopback, require_admin_token
+    from ..services.aiohttp_compat import read_bounded_body
     from ..services.env_aliases import get_env_value
     from ..services.preflight import (
         _get_node_class_mappings,
@@ -30,6 +31,7 @@ if __package__ and "." in __package__:
 else:  # pragma: no cover (test-only import mode)
     from models.schemas import MAX_BODY_SIZE  # type: ignore
     from services.access_control import is_loopback, require_admin_token  # type: ignore
+    from services.aiohttp_compat import read_bounded_body
     from services.env_aliases import get_env_value
     from services.preflight import (  # type: ignore
         _get_node_class_mappings,
@@ -120,7 +122,7 @@ async def preflight_handler(request: web.Request) -> web.Response:
         )
 
     try:
-        raw_body = await request.content.read(MAX_BODY_SIZE + 1)
+        raw_body = await read_bounded_body(request.content, MAX_BODY_SIZE)
         if len(raw_body) > MAX_BODY_SIZE:
             return web.json_response(
                 {"ok": False, "error": "payload_too_large"}, status=413

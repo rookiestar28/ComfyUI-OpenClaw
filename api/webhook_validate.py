@@ -37,6 +37,7 @@ except ModuleNotFoundError:  # pragma: no cover
 # import another pack's top-level `services` module and break allowlists/auth in surprising ways.
 if __package__ and "." in __package__:
     from ..models.schemas import MAX_BODY_SIZE, WebhookJobRequest
+    from ..services.aiohttp_compat import read_bounded_body
     from ..services.execution_budgets import BudgetExceededError, check_render_size
     from ..services.metrics import metrics
     from ..services.rate_limit import build_rate_limit_response, check_rate_limit
@@ -46,6 +47,7 @@ if __package__ and "." in __package__:
     from ..services.webhook_mapping import apply_mapping, resolve_profile  # F40
 else:  # pragma: no cover (test-only import mode)
     from models.schemas import MAX_BODY_SIZE, WebhookJobRequest
+    from services.aiohttp_compat import read_bounded_body
     from services.execution_budgets import (  # type: ignore
         BudgetExceededError,
         check_render_size,
@@ -124,7 +126,7 @@ async def webhook_validate_handler(request: web.Request) -> web.Response:
         return _safe_error_response(415, "unsupported_media_type")
 
     try:
-        raw_body = await request.content.read(MAX_BODY_SIZE + 1)
+        raw_body = await read_bounded_body(request.content, MAX_BODY_SIZE)
         if len(raw_body) > MAX_BODY_SIZE:
             metrics.inc("webhook_denied")
             return _safe_error_response(
