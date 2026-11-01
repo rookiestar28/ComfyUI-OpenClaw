@@ -1243,3 +1243,23 @@
     max-width: 100%;
     box-sizing: border-box;
 }
+
+/* Keep reserved status width from collapsing model editing in native sidebars. */
+[data-openclaw-layout="host"] .openclaw-model-controls {
+    flex-wrap: wrap;
+}
+
+[data-openclaw-layout="host"] .openclaw-model-controls > .openclaw-input {
+    min-width: min(100%, 120px);
+    max-width: 100%;
+}
+
+[data-openclaw-layout="host"] .openclaw-model-controls > .openclaw-status {
+    flex-basis: 100%;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+}
+
+[data-openclaw-layout="host"] .openclaw-model-controls > .openclaw-status:empty {
+    display: none;
+}

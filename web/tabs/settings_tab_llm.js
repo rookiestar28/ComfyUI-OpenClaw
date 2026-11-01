@@ -46,6 +46,7 @@ export function renderSettingsLlm({ scroll, configRes, api, session, getAdminErr
         // Model input
         const modelRow = createFormRow("Model", sources.model === "env");
         const modelWrap = document.createElement("div");
+        modelWrap.className = "openclaw-model-controls";
         modelWrap.style.display = "flex";
         modelWrap.style.gap = "8px";
         modelWrap.style.alignItems = "center";

@@ -502,6 +502,34 @@ test.describe('OpenClaw sidebar layout ownership', () => {
       expect(allocation.baseline).toBeCloseTo(width, 0);
       expect(allocation.mounted).toBeCloseTo(width, 0);
       expect(Math.abs(allocation.mounted - allocation.baseline)).toBeLessThanOrEqual(2);
+      const modelInput = page.locator('input[list="openclaw-model-list"]');
+      const modelSelect = modelInput.locator('..').locator('select');
+      expect((await modelInput.boundingBox()).width).toBeGreaterThanOrEqual(120);
+      await page.route('**/llm/models**', (route) => route.fulfill({
+        status: 200, contentType: 'application/json', body: JSON.stringify({ models: ['native-model', 'native-model-2'] }),
+      }));
+      await modelInput.fill('native-model');
+      await page.getByRole('button', { name: 'Load Models', exact: true }).click();
+      await expect(modelSelect).toBeVisible();
+      await expect(modelSelect).toHaveValue('native-model');
+      await expect(modelInput).toBeHidden();
+      await modelSelect.selectOption('native-model-2');
+      await expect(modelInput).toHaveValue('native-model-2');
+      await modelSelect.selectOption('__custom__');
+      await expect(modelInput).toBeVisible();
+      expect((await modelInput.boundingBox()).width).toBeGreaterThanOrEqual(120);
+      expect((await modelSelect.boundingBox()).width).toBeGreaterThanOrEqual(120);
+      await modelInput.fill('custom-native-model');
+      await expect(modelInput).toHaveValue('custom-native-model');
+      await expect(modelInput.locator('..')).toContainText('2 models');
+      const modelOverflow = await modelInput.locator('..').evaluate((row) => {
+        const panel = row.closest('.side-bar-panel').getBoundingClientRect();
+        return [...row.children].filter((node) => node.getClientRects().length).some((node) => {
+          const box = node.getBoundingClientRect(); return box.left < panel.left - 1 || box.right > panel.right + 1;
+        });
+      });
+      expect(modelOverflow).toBe(false);
+      await captureSidebarEvidence(page, testInfo, `native-sidebar-${width}-model-controls`);
       await page.evaluate(() => {
         window.app.graph = {
           _nodes: [{ id: 10, type: 'KSampler', title: 'Sampler', widgets: [{ name: 'seed', type: 'number', value: 1, options: {} }] }],
