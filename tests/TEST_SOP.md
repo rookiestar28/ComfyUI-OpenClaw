@@ -128,6 +128,18 @@ Failed preflight checks must be resolved before proceeding with full test suites
 
 ## Hosted Python Compatibility Evidence
 
+- Push and pull-request CI also run a focused Ubuntu Python 3.12/3.13 ingress
+  regression matrix. It runs `tests.test_request_body_streaming` and the original
+  `tests.connector.test_ingress_transactions`, with zero allowed skips. This small
+  lane catches fragmented-body failures before the full scheduled matrix runs.
+- The Windows/Linux Full Gate already discovers these modules. The streaming
+  regression uses forced short reads and event-coordinated real chunked HTTP,
+  including authenticated outcomes; eager bytes uploads alone can hide partial
+  reads through platform-dependent socket buffering. Keep this deterministic
+  coverage in normal discovery rather than relying on retries or network timing.
+- A passing local gate or focused ingress job is evidence for its executed scope.
+  It does not establish full backend compatibility on every Python version.
+
 - Hosted CI runs a scheduled/manual Python 3.10-3.13 matrix on Ubuntu; it is not added to
   pull-request or push cost.
 - Each matrix lane emits evidence only after the exact interpreter and complete backend

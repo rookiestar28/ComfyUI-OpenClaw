@@ -28,6 +28,12 @@ Scope note:
 - The pinned real-host frontend smoke lane (`playwright.real-host.config.js`, `tests/real_host/`) is a separate, non-blocking compatibility lane. It runs a real ComfyUI host at the pinned anchor and is never part of repository acceptance; executing it requires separate authorization. Its repository-side contracts are enforced by `tests/test_real_host_smoke_contract.py`, which does run in the standard gate.
 
 For public/admin/webhook/connector or other user-facing transaction changes, acceptance evidence must include at least one transaction-level probe that verifies the actual submitted outcome; route load or redirect-only evidence is not sufficient on its own.
+
+For request-body changes, retain deterministic fragmentation and authenticated
+transaction probes in `tests.test_request_body_streaming`. The standard backend
+discovery and focused hosted ingress matrix execute them; they are separate from
+the frontend Playwright harness. A single eager HTTP upload is insufficient to
+prove correct streaming ingestion across operating systems and Python versions.
 <!-- ROOKIEUI-GLOBAL-E2E-NOTICE:START -->
 ## RookieUI-Derived Global E2E Notice
 

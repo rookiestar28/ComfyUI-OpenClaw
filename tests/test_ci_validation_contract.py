@@ -37,6 +37,76 @@ def _push_branches(text: str) -> list[str]:
     return [line.strip()[2:] for line in match.group("items").splitlines()]
 
 
+def _assert_ingress_regression_job(text: str) -> None:
+    block = _job_block(text, "ingress-regressions")
+    required = (
+        "runs-on: ubuntu-latest",
+        "timeout-minutes: 10",
+        "fail-fast: false",
+        "max-parallel: 2",
+        "python-version: ['3.12', '3.13']",
+        "python-version: ${{ matrix.python-version }}",
+        "python scripts/bootstrap_project_venv.py",
+        "python -m pip install -r requirements.txt",
+        "python -m pip install aiohttp",
+    )
+    for value in required:
+        if value not in block:
+            raise AssertionError(f"ingress coverage missing: {value}")
+    for module in (
+        "tests.test_request_body_streaming",
+        "tests.connector.test_ingress_transactions",
+    ):
+        command = (
+            f"python scripts/run_unittests.py --module {module} "
+            "--enforce-skip-policy tests/skip_policy.json --max-skipped 0"
+        )
+        if command not in block:
+            raise AssertionError(f"required no-skip ingress command missing: {module}")
+    if re.search(r"^\s+(?:if|continue-on-error):", block, flags=re.MULTILINE):
+        raise AssertionError(
+            "ingress coverage must run on every CI event and fail closed"
+        )
+    if "||" in block:
+        raise AssertionError("ingress failures must not be suppressed")
+
+
+class IngressWorkflowContractTests(unittest.TestCase):
+    def test_push_and_pr_run_focused_versions_before_nightly(self):
+        _assert_ingress_regression_job(CI_PATH.read_text(encoding="utf-8"))
+
+    def test_missing_interpreter_suite_or_enforcement_is_rejected(self):
+        text = CI_PATH.read_text(encoding="utf-8")
+        for old, new in (
+            ("  ingress-regressions:", "  removed-ingress-regressions:"),
+            ("python-version: ['3.12', '3.13']", "python-version: ['3.10']"),
+            (
+                "--module tests.test_request_body_streaming",
+                "--module tests.test_webhook_auth",
+            ),
+            ("--max-skipped 0", "--max-skipped 1"),
+        ):
+            with self.subTest(mutation=old):
+                with self.assertRaises(AssertionError):
+                    _assert_ingress_regression_job(text.replace(old, new))
+
+    def test_schedule_only_and_failure_bypass_are_rejected(self):
+        text = CI_PATH.read_text(encoding="utf-8")
+        for addition in (
+            "    if: github.event_name == 'schedule'\n",
+            "    continue-on-error: true\n",
+            "    # ignored error || true\n",
+        ):
+            with self.subTest(bypass=addition):
+                with self.assertRaises(AssertionError):
+                    _assert_ingress_regression_job(
+                        text.replace(
+                            "  ingress-regressions:\n",
+                            "  ingress-regressions:\n" + addition,
+                        )
+                    )
+
+
 def _load_evidence_helper():
     if not EVIDENCE_HELPER_PATH.is_file():
         raise AssertionError(
@@ -91,6 +161,7 @@ class HostedValidationWorkflowContractTests(unittest.TestCase):
             "adversarial-smoke": 20,
             "adversarial-extended": 45,
             "python-compatibility": 45,
+            "ingress-regressions": 10,
         }
         for job_id, timeout in expected.items():
             with self.subTest(job=job_id):
@@ -105,7 +176,7 @@ class HostedValidationWorkflowContractTests(unittest.TestCase):
             r"        with:\n(?P<body>(?:          [^\n]*\n)+)",
             self.workflow,
         )
-        self.assertEqual(len(python_blocks), 9)
+        self.assertEqual(len(python_blocks), 10)
         for block in python_blocks:
             self.assertIn("cache: 'pip'", block)
             self.assertIn("cache-dependency-path: |", block)

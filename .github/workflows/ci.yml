@@ -367,6 +367,47 @@ jobs:
           path: .tmp/adversarial-extended/
           retention-days: 90
 
+  ingress-regressions:
+    name: Ingress Regression (${{ matrix.python-version }})
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    # CRITICAL: run on push/PR too. Eager-body tests on Python 3.10 alone missed
+    # fragmented ingress failures that the scheduled 3.12/3.13 lanes exposed.
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        python-version: ['3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-quality.txt
+      - name: Bootstrap project-local Python
+        run: python scripts/bootstrap_project_venv.py
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+      - name: Supply-chain hardening check
+        run: python scripts/check_supply_chain_hardening.py
+      - name: Install ingress test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install aiohttp numpy pillow
+      - name: R120 preflight
+        run: python scripts/preflight_check.py --strict
+      - name: Fragmented ingress and original transactions
+        env:
+          OPENCLAW_STATE_DIR: ${{ github.workspace }}/.tmp/test-state/ingress-${{ matrix.python-version }}
+        run: |
+          python scripts/run_unittests.py --module tests.test_request_body_streaming --enforce-skip-policy tests/skip_policy.json --max-skipped 0
+          python scripts/run_unittests.py --module tests.connector.test_ingress_transactions --enforce-skip-policy tests/skip_policy.json --max-skipped 0
+
   python-compatibility:
     name: Python Compatibility (${{ matrix.python-version }})
     timeout-minutes: 45
