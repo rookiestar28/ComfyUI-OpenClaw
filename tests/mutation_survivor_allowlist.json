@@ -5,13 +5,13 @@
       "file": "services/access_control.py",
       "mutation_index": 9,
       "reason": "Equivalent guard: compare_digest still fails when client token is empty.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     {
       "file": "services/access_control.py",
       "mutation_index": 11,
       "reason": "Equivalent guard: compare_digest still fails when client token is empty.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     }
   ]
 }

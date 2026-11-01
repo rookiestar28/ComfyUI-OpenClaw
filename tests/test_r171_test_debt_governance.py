@@ -3,10 +3,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import date, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "verify_test_debt_governance.py"
+# IMPORTANT: valid fixtures need relative future dates; a fixed deadline makes
+# unrelated governance tests fail as soon as that date expires.
+VALID_REVIEW_DATE = (date.today() + timedelta(days=30)).isoformat()
 
 
 def _write_repo_fixture(tmp: Path) -> dict[str, Path]:
@@ -29,7 +33,7 @@ def _write_repo_fixture(tmp: Path) -> dict[str, Path]:
                 "no_skip_module_metadata": {
                     "tests.test_guarded_lane": {
                         "reason": "Guarded lane must stay no-skip in CI parity.",
-                        "review_after": "2026-10-31",
+                        "review_after": VALID_REVIEW_DATE,
                     }
                 },
             },
@@ -49,7 +53,7 @@ def _write_repo_fixture(tmp: Path) -> dict[str, Path]:
                         "file": "services/access_control.py",
                         "mutation_index": 9,
                         "reason": "Equivalent compare_digest branch with empty token.",
-                        "review_after": "2026-10-31",
+                        "review_after": VALID_REVIEW_DATE,
                     }
                 ],
             },
@@ -80,6 +84,20 @@ class TestR171TestDebtGovernance(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
         self.assertIn("TEST-DEBT-GOVERNANCE-PASS", result.stdout)
 
+    def test_valid_fixture_passes_without_an_absolute_calendar_deadline(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fixture = _write_repo_fixture(Path(tmpdir))
+            result = self._run_script(
+                "--repo-root",
+                str(fixture["repo_root"]),
+                "--skip-policy",
+                str(fixture["skip_policy"]),
+                "--mutation-survivor-allowlist",
+                str(fixture["mutation_allowlist"]),
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+            self.assertIn("TEST-DEBT-GOVERNANCE-PASS", result.stdout)
+
     def test_duplicate_no_skip_modules_are_rejected(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             fixture = _write_repo_fixture(Path(tmpdir))
@@ -94,7 +112,7 @@ class TestR171TestDebtGovernance(unittest.TestCase):
                         "no_skip_module_metadata": {
                             "tests.test_guarded_lane": {
                                 "reason": "Guarded lane must stay no-skip in CI parity.",
-                                "review_after": "2026-10-31",
+                                "review_after": VALID_REVIEW_DATE,
                             }
                         },
                     },
@@ -152,13 +170,13 @@ class TestR171TestDebtGovernance(unittest.TestCase):
                                 "file": "services/access_control.py",
                                 "mutation_index": 9,
                                 "reason": "Equivalent compare_digest branch with empty token.",
-                                "review_after": "2026-10-31",
+                                "review_after": VALID_REVIEW_DATE,
                             },
                             {
                                 "file": "services/access_control.py",
                                 "mutation_index": 9,
                                 "reason": "Duplicate entry for regression coverage.",
-                                "review_after": "2026-10-31",
+                                "review_after": VALID_REVIEW_DATE,
                             },
                         ],
                     },
@@ -190,7 +208,7 @@ class TestR171TestDebtGovernance(unittest.TestCase):
                                 "file": "services/missing.py",
                                 "mutation_index": 9,
                                 "reason": "Stale path should fail closed.",
-                                "review_after": "2026-10-31",
+                                "review_after": VALID_REVIEW_DATE,
                             }
                         ],
                     },

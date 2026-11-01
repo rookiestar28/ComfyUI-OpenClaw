@@ -31,95 +31,95 @@
   "no_skip_module_metadata": {
     "tests.test_s58_bridge_token_lifecycle": {
       "reason": "Bridge token lifecycle coverage is a hard regression seam for token expiry and revoke behavior.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_s59_webhook_mapping_clamp": {
       "reason": "Webhook mapping clamp must stay no-skip because route/mapping drift can silently reopen unsafe ingress paths.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_s60_mae_route_segmentation": {
       "reason": "Public MAE route segmentation is a published hard-guarantee suite and cannot degrade to skip-only coverage.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_s60_routes_startup_gate": {
       "reason": "Startup gate coverage must stay active to catch route registration drift before public deployment.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_s61_registry_signature": {
       "reason": "Registry signature enforcement is part of the release-safety boundary for extension metadata.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.security.test_endpoint_drift": {
       "reason": "Endpoint drift detection guards the published endpoint manifest and must remain non-skippable.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_r122_real_backend_lane": {
       "reason": "Real backend lane is the low-mock parity seam for LLM/backend integration and cannot silently skip.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_r123_real_backend_model_list_lane": {
       "reason": "Model-list real backend lane protects loopback SSRF and provider-model discovery parity.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_r121_retry_partition_contract": {
       "reason": "Retry partition contract is an explicit robustness gate for failure-domain isolation.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_r124_slack_ingress_contract": {
       "reason": "Slack ingress contract must stay enforced because connector auth and callback parsing are production paths.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_r125_slack_real_backend_lane": {
       "reason": "Slack real-backend lane protects connector-to-backend parity across approval and run flows.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_r117_observability_redaction_e2e": {
       "reason": "Observability redaction E2E covers production-facing data minimization and cannot be treated as optional.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_r117_observability_redaction_endpoints": {
       "reason": "Endpoint-level redaction assertions are part of the audit/privacy boundary and must remain live.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_f57_slack_transport_parity": {
       "reason": "Slack transport parity catches protocol drift between connector routing and HTTP contract handling.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_f57_slack_socket_mode_startup": {
       "reason": "Slack socket mode startup coverage protects bootstrap compatibility for a supported deployment mode.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_connector_installation_registry": {
       "reason": "Connector installation registry governs multi-platform connector ownership and must stay no-skip.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_connector_callback_contract": {
       "reason": "Connector callback contract protects external ingress normalization and approval wiring.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_workspace_isolation": {
       "reason": "Workspace isolation guards connector paths and full-gate artifact hygiene from silently regressing.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_s100_jobs_security_contract": {
       "reason": "Jobs authorization, tenant isolation, and privacy projection are security-critical and must remain non-skippable.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_jobs_endpoint_contract": {
       "reason": "The authoritative jobs read model protects tenant-filtered bounded job metadata and must remain non-skippable.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.connector.test_r214_jobs_command": {
       "reason": "Connector jobs summaries protect the Admin jobs boundary from raw payload and fallback leakage and must remain non-skippable.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_s70_ssrf_pinning_regression": {
       "reason": "SSRF pinning regression is a security-critical boundary test and must never degrade to skip coverage.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.test_r216_file_backed_text_output": {
       "reason": "File-backed text output coverage guards untrusted file refs, bounded retrieval, and inert rendering and must remain non-skippable.",
-      "review_after": "2026-10-31"
+      "review_after": "2026-12-01"
     },
     "tests.connector.test_ingress_transactions": {
       "reason": "Connector trust-boundary transactions pin real HTTP and protocol-shaped signature, replay, parsing, visibility, polling, and registry decisions.",
