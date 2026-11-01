@@ -216,8 +216,8 @@ async function loadIdentityFixture(page, mode) {
       throw new Error('host refused the synthetic identity workflow');
     }
     const graph = app.graph;
-    const leaf = graph._nodes.find((node) => node.type === 'CheckpointLoaderSimple');
-    const widget = leaf?.widgets?.find((item) => item.name === 'ckpt_name');
+    let leaf = graph._nodes.find((node) => node.type === 'CheckpointLoaderSimple');
+    let widget = leaf?.widgets?.find((item) => item.name === 'ckpt_name');
     const control = graph._nodes.find((node) => String(node.id) === 'control').widgets.find((item) => item.name === 'width');
     if (!widget || String(leaf.id) !== leafId) throw new Error('host did not preserve the colon-bearing node ID');
     // Only the fixture choices are synthetic; the graph, nodes and widgets stay host-owned.
@@ -228,7 +228,14 @@ async function loadIdentityFixture(page, mode) {
     let collision = null;
     if (mode !== 'root') {
       const { subgraph, node: first } = graph.convertToSubgraph(new Set([leaf]));
-      if (subgraph._nodes.find((node) => node === leaf) !== leaf) throw new Error('host conversion replaced the fixture leaf');
+      // HOTSPOT: conversion reconstructs nodes; stale pre-conversion widgets never reach the prompt.
+      const matches = subgraph._nodes.filter((node) => String(node.id) === leafId);
+      if (matches.length !== 1) throw new Error('host conversion lost the unique fixture leaf ID');
+      [leaf] = matches;
+      widget = leaf.widgets?.find((item) => item.name === 'ckpt_name');
+      if (!widget) throw new Error('host conversion lost the fixture widget');
+      widget.options.values = ['base.ckpt', 'xl.ckpt'];
+      widget.value = 'base.ckpt';
       const second = first.clone();
       if (!second || second.subgraph !== subgraph) throw new Error('host clone did not reuse the real definition');
       second.id = 'later:instance';
@@ -280,6 +287,25 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
   const declaredProbes = [];
 
   test.beforeEach(async ({ page }) => {
+    // Restore an empty real workflow instead of probing models from the host's default example.
+    await page.addInitScript(() => {
+      const workflowPath = 'workflows/OpenClaw smoke.json';
+      const clientId = 'openclaw-smoke-fixture';
+      let hash = 2166136261;
+      for (const character of workflowPath) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+      const key = (hash >>> 0).toString(16).padStart(8, '0');
+      const updatedAt = Date.now();
+      const blank = { last_node_id: 0, last_link_id: 0, nodes: [], links: [], groups: [], config: {}, extra: {}, version: 0.4 };
+      localStorage.setItem('Comfy.Workflow.DraftIndex.v2:personal', JSON.stringify({
+        v: 2, updatedAt, order: [key], entries: {
+          [key]: { path: workflowPath, name: 'OpenClaw smoke', isTemporary: true, updatedAt },
+        },
+      }));
+      localStorage.setItem(`Comfy.Workflow.Draft.v2:personal:${key}`, JSON.stringify({ data: JSON.stringify(blank), updatedAt }));
+      sessionStorage.setItem('clientId', clientId);
+      sessionStorage.setItem(`Comfy.Workflow.ActivePath:${clientId}`, JSON.stringify({ workspaceId: 'personal', path: workflowPath }));
+      sessionStorage.setItem(`Comfy.Workflow.OpenPaths:${clientId}`, JSON.stringify({ workspaceId: 'personal', paths: [workflowPath], activeIndex: 0 }));
+    });
     consoleErrors.length = 0;
     pageErrors.length = 0;
     failedRequests.length = 0;
@@ -475,7 +501,7 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
       const panel = document.querySelector('.side-bar-panel');
       const sibling =
         location === 'right' ? panel?.previousElementSibling : panel?.nextElementSibling;
-      if (!sibling?.classList.contains('p-splitter-gutter')) {
+      if (!sibling?.matches('[role="separator"][data-orientation="horizontal"]')) {
         return null;
       }
       const box = sibling.getBoundingClientRect();
