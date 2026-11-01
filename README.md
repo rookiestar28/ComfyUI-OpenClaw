@@ -91,6 +91,24 @@ Deployment profiles and hardening references:
 
 <details>
 
+<summary><strong>Host compatibility updated in v1.3.2</strong></summary>
+
+- ComfyUI `0.43.0` at `7c4390a6`, with bundled frontend `1.57.6` or standalone
+  frontend release `1.60.0`, passed fifteen browser checks per frontend in an isolated
+  CPU host on 2026-11-01. Desktop and the later frontend source checkout remain unverified.
+- The sidebar follows the host's native width controls and keeps the selected width when
+  switching tabs. Settings model controls wrap and remain usable in narrow panels; older
+  sidebar hosts retain their existing layout fallback.
+- Parameter Lab preserves complete node IDs, including IDs containing colons, and resolves
+  shared subgraphs through their instance paths. Ambiguous targets stop before any values
+  are changed, preventing edits or replays from reaching the wrong node.
+- Development and test commands now check the locked tools' Node.js requirement
+  (`^20.19.0 || ^22.12.0 || >=24.0.0`) before starting. Node.js 24 is recommended.
+
+</details>
+
+<details>
+
 <summary><strong>Trigger callbacks and scheduled chat results are now delivered</strong></summary>
 
 - Trigger requests and approval-gated runs that name a callback now deliver their result to
@@ -127,26 +145,6 @@ Deployment profiles and hardening references:
   modules that start processes.
 - A high-severity advisory in a frontend development dependency (`source-map-js`) is patched
   in the lockfile.
-
-</details>
-
-<details>
-
-<summary><strong>Host references refreshed for ComfyUI 0.43.0 and frontend 1.60.0</strong></summary>
-
-- Current source review follows ComfyUI `0.43.0` at `7c4390a6` (bundle `1.57.6`)
-  and standalone frontend release `1.60.0`. Both passed fifteen browser cases in the 2026-11-01 paired isolated CPU host campaign.
-- The 2026-10-13 browser campaign remains historical evidence for core `0.39.0`, bundle
-  `1.55.14` and release `1.57.0`. It does not validate the refreshed subjects, the later
-  frontend source checkout or either Desktop surface.
-- Switching from OpenClaw to another sidebar tab no longer snaps the sidebar back to its
-  earlier width: OpenClaw releases only the sizing it applied and keeps widths the host
-  splitter wrote, now covered by a real-host check.
-- Current 3D output shapes (`3d` items with camera and model information, Preview3D's legacy
-  `result` item, and optional per-file metadata) are pinned in both the Python and browser
-  parsers.
-- The backend test gate now also runs the suites kept in test subdirectories, including the
-  connector, security, and contract suites.
 
 </details>
 
@@ -497,6 +495,10 @@ detection does not authorize privileged capability calls.
 
 Sidebar registration prefers ComfyUI's current sidebar store API and falls back to the deprecated frontend facade when running on older host bundles. Hosts without either sidebar API use the legacy menu fallback instead of failing extension setup.
 
+On current native sidebar hosts, ComfyUI owns panel sizing and splitter behavior. OpenClaw
+adapts to that width, keeps the host's chosen width when switching tabs, and wraps Settings
+model controls for narrow panels. Older sidebar hosts retain the legacy sizing fallback.
+
 ### Sidebar Modules
 
 ![OpenClaw /sidebar ui example](assets/sidebar_modules.png)
@@ -555,7 +557,9 @@ Parameter Lab now supports experiment history and run replay:
 
 - `History` lists saved experiments from local state.
 - `Load` opens stored experiment details and run statuses.
-- `Replay` applies a selected run's parameter values back into the active workflow graph without coercing string or non-numeric host node IDs.
+- `Replay` applies a selected run's parameter values back into the active workflow graph while
+  preserving complete node IDs, including IDs containing colons. Shared subgraph definitions
+  are resolved through their instance paths; ambiguous IDs or targets fail before any write.
 - Sweep and compare inputs accept bounded strings, booleans, and finite numbers; structured values
   and unsupported sweep strategies fail validation instead of being guessed or silently coerced.
 - Queued runs use request-ID-correlated receipts to bind the exact host prompt ID. Unsupported,
@@ -814,6 +818,8 @@ runtime package without them.
 
 Quick entry points:
 
+- frontend development/test runtime: Node.js `^20.19.0 || ^22.12.0 || >=24.0.0`
+  (Node.js 24 recommended); this tooling requirement does not apply to using the installed nodes
 - full acceptance workflow: [tests/TEST_SOP.md](tests/TEST_SOP.md)
 - E2E-specific procedure: [tests/E2E_TESTING_SOP.md](tests/E2E_TESTING_SOP.md)
 - verification-governance policy/details: [docs/release/verification_governance.md](docs/release/verification_governance.md)

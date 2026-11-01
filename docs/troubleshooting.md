@@ -47,6 +47,26 @@ Notes:
 - Muted or bypassed root nodes and subgraph branches are separated into suppressed diagnostics when the workflow payload includes enough frontend metadata. Plain API prompt JSON remains deterministic, but it may not contain frontend ancestry needed to identify inactive subgraph context.
 - If no portability guidance is present and the pack itself is loaded correctly, treat that as a real contract gap rather than assuming the workflow can be repaired by arbitrary JSON edits.
 
+## Sidebar width or Settings controls look wrong
+
+On current native sidebar hosts, use ComfyUI's splitter to set the panel width. OpenClaw
+follows that width and keeps it when switching sidebar tabs. Settings model controls wrap
+in narrow panels, and selecting a custom model keeps the custom input available.
+
+If a native panel remains unusually wide or its controls overlap, update OpenClaw, restart
+ComfyUI, and reload the browser to replace cached scripts and styles. Older sidebar hosts
+use the legacy sizing fallback. Check the [compatibility matrix](release/compatibility_matrix.md)
+for the exact qualified frontend versions; Desktop has separate, unexecuted runtime anchors.
+
+## Parameter Lab rejects an ambiguous replay target
+
+Complete node IDs are preserved, including IDs containing colons. A shared subgraph
+definition may occur in multiple workflow instances, so its definition alone cannot identify
+which instance should receive a value. Ambiguous edits and replays stop before changing
+widget values. Select the intended instance from the current graph and create a new run
+when an older saved target no longer identifies one instance; do not shorten or numerically
+coerce its node ID to force a match.
+
 ## Operator Doctor
 
 Run the built-in diagnostic tool to verify environment readiness (libraries, permissions, contract files):

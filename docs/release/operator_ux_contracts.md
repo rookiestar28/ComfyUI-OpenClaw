@@ -151,7 +151,12 @@ Contracts for bounded parameter sweeps and experiment orchestration.
 
 Contract notes:
 
-- `node_id` is a string-preserving host graph identifier. It may be numeric text such as `"10"` or a non-numeric host ID, and clients must not coerce it to a number when storing, comparing, or replaying experiment parameters.
+- `node_id` preserves the complete host graph identifier. Numeric text such as `"10"`,
+  non-numeric IDs, and IDs containing colons must not be coerced or split when an exact node
+  exists. Path interpretation is used only after exact-ID resolution.
+- Shared subgraph definitions require an unambiguous instance path. Definition-object identity
+  alone cannot select an execution instance. Duplicate IDs or unresolved target collisions
+  reject an edit or replay before widget values are written.
 - Experiment parameter keys such as `"10.cfg"` are display/storage keys derived from the original `node_id` plus `widget_name`; they are not a separate numeric node contract.
 - Sweep values are limited to bounded strings, booleans, integers, and finite numbers. Null,
   arrays, objects, non-finite numbers, overlong strings, presentation-ambiguous duplicates, and

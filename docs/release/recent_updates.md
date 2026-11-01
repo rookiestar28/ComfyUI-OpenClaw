@@ -5,7 +5,29 @@ The README now keeps only the most recent 3-5 update summaries and links here fo
 
 Newest entries appear first.
 
-Current release notes: [v1.3.0](v1.3.0.md). Previous: [v1.2.0](v1.2.0.md), [v1.1.0](v1.1.0.md).
+Current release notes: [v1.3.2](v1.3.2.md). Previous: [v1.3.0](v1.3.0.md),
+[v1.2.0](v1.2.0.md), [v1.1.0](v1.1.0.md).
+
+These entries describe behavior at the time of each update. For current runtime requirements
+and host qualification, use the [compatibility matrix](compatibility_matrix.md).
+
+<details>
+
+<summary><strong>Host compatibility updated in v1.3.2</strong></summary>
+
+- ComfyUI `0.43.0` at `7c4390a6`, with bundled frontend `1.57.6` or standalone
+  frontend release `1.60.0`, passed fifteen browser checks per frontend in an isolated
+  CPU host on 2026-11-01. Desktop and the later frontend source checkout remain unverified.
+- The sidebar follows the host's native width controls and keeps the selected width when
+  switching tabs. Settings model controls wrap and remain usable in narrow panels; older
+  sidebar hosts retain their existing layout fallback.
+- Parameter Lab preserves complete node IDs, including IDs containing colons, and resolves
+  shared subgraphs through their instance paths. Ambiguous targets stop before any values
+  are changed, preventing edits or replays from reaching the wrong node.
+- Development and test commands now check the locked tools' Node.js requirement
+  (`^20.19.0 || ^22.12.0 || >=24.0.0`) before starting. Node.js 24 is recommended.
+
+</details>
 
 <details>
 

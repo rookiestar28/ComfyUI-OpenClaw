@@ -4,7 +4,11 @@
 
 - Current source is `7c4390a6` (`v0.43.0-21-g7c4390a6f`, project `0.43.0`), bundle `1.57.6`. Tag `v0.43.0` instead pins `1.57.4`.
 - Additive `preview_id` is ignored by the bounded output-ref contract. Host-only `asset_preview` is stripped before client/history/cache output; it never authorizes a URL fetch or a new directory type.
-- The no-go decision stays in effect. New subjects remain pending live qualification.
+- The no-go decision stays in effect: OpenClaw continues to use `/history` and bounded
+  `/view` refs rather than direct `/api/assets` access. The core source with bundled frontend
+  `1.57.6` and standalone frontend release `1.60.0` passed paired isolated CPU host browser
+  qualification on 2026-11-01. This does not qualify direct Asset API adoption, either Desktop
+  surface, or the later frontend source checkout.
 
 ## Historical 2026-10-13 source review
 

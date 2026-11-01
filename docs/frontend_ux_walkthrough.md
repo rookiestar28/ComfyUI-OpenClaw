@@ -24,6 +24,10 @@ This document summarizes the current OpenClaw sidebar UI structure and how to ve
 - Host surface: `web/openclaw_host_surface.js` resolves standalone frontend, legacy fixed-bundle
   Desktop, and current managed-install Comfy-Desktop separately, then stamps explicit metadata so
   generation-specific behavior stays testable.
+- Sidebar layout: `web/openclaw_sidebar_layout.js` recognizes the complete native host panel
+  contract and leaves its sizing to ComfyUI. Legacy hosts retain the owned sizing fallback.
+  Native panel styles let headers, tabs, Parameter Lab, and Settings model controls wrap at
+  narrow widths without imposing the legacy width floor.
 - Output refs: `web/openclaw_asset_refs.js` normalizes classic history refs, optional `asset_hash`/`hash` refs and top-level output-entry `id` metadata when the host provides them, and current previewable media groups (`images`, `video`, `audio`, `3d`, bounded inline or file-backed `text`) onto one media-aware contract. A saved 3D output represented by both `3d` and legacy `result` appears once, while distinct outputs stay separate. Allowlisted text files under the host `files` key stay on same-origin `/view` and use a 5-second, 64-KiB streaming, strict textual-MIME/UTF-8 reader with a 4,096-character display cap. HDR `.exr` / `.hdr` image refs show source-preview fallback links instead of normal thumbnails, text reaches the DOM only as literal text, and asset-service-only refs remain explicit fallback states instead of silently auto-fetching `/api/assets`.
 - Styles: `web/openclaw.css` provides shared design tokens and component classes.
 - Errors and compatibility helpers: `web/openclaw_utils.js` provides `showError()` / `clearError()` plus runtime legacy-class alias helpers used to keep canonical `openclaw-*` markup compatible with existing `moltbot-*` selectors.
@@ -38,7 +42,10 @@ Refactor note:
 - New tab markup should use canonical `openclaw-*` classes; legacy `moltbot-*` aliases are generated centrally at runtime instead of being duplicated in each template.
 - New host sidebar registration changes should stay in `web/openclaw_sidebar_registration.js` rather than duplicating ComfyUI frontend API detection inside the extension entrypoint.
 - Host-sensitive behaviors should consume the shared host-surface helper rather than inferring desktop vs standalone frontend from ad-hoc globals.
-- Graph/widget flows should preserve host-shaped promoted-widget source metadata and non-numeric node IDs, including Parameter Lab replay/apply paths.
+- Graph/widget flows preserve complete host node IDs, including colons, and promoted-widget
+  source metadata. Exact IDs take precedence over path interpretation. Shared subgraph
+  definitions require an instance path; duplicate IDs or unresolved instance collisions must
+  fail before an edit or replay writes any widget values.
 - Parameter Lab flows should keep scalar/count/byte validation aligned with the backend policy and
   use exact request-ID queue receipts; they must not infer prompt ownership from a globally recent
   prompt when the host request boundary is unsupported or ambiguous.
@@ -103,14 +110,16 @@ If `assist_streaming` is unavailable or the stream transport degrades, Planner/R
 ## Quick Manual Checks
 
 1. Open ComfyUI and confirm OpenClaw appears in the sidebar.
-2. Switch between all visible tabs multiple times (and reopen the sidebar if possible) and ensure panes do not go blank. Drag the host sidebar splitter wider while OpenClaw is open, switch to another sidebar tab, and confirm the width is kept.
+2. Switch between all visible tabs multiple times (and reopen the sidebar if possible) and ensure panes do not go blank. Drag the host sidebar splitter wider while OpenClaw is open, switch to another sidebar tab, and confirm the width is kept. On native panel hosts, also check Settings at narrow widths: the model selector and refresh button wrap, custom-model input stays editable, and switching between a listed model and a custom value keeps the controls synchronized.
 3. Confirm the sidebar host-surface metadata resolves correctly for the current environment instead of defaulting silently.
 4. Planner: click **Plan Generation** with minimal input and confirm either live preview/stage updates appear (when streaming is supported) or a readable fallback result/error appears.
 5. Refiner: click **Refine Prompts** (with or without image) and confirm either live preview/stage updates appear (when streaming is supported) or a readable fallback result/error appears.
 6. Jobs: verify output previews still resolve for classic history refs, optional hash-backed refs when host metadata is present, and supported media-aware refs (`images`, `video`, `audio`, `3d`, bounded inline/file-backed `text`); current hosts report Load3D-family and Save3D outputs as `3d` items and Preview3D as a legacy `result` item, and on older hosts a saved 3D file exposed in both `3d` and `result` should appear once; allowlisted text files should show literal bounded content or a deterministic source-link fallback, HDR `.exr` / `.hdr` image refs should render as explicit source-preview fallback links, asset-service-only refs should stay explicit as a bounded fallback state, and repeated polls should not duplicate rows after reconnect/resume.
 7. Parameter Lab: verify bounded scalar sweep/compare values queue with an exact request receipt,
    and verify unsupported structured values or unknown host queue-event shapes fail visibly without
-   assigning another prompt's lifecycle.
+   assigning another prompt's lifecycle. With colon-containing IDs and repeated instances of a
+   shared subgraph, verify edits and replay affect only the selected instance; ambiguous targets
+   must leave all widget values unchanged.
 8. Explorer: verify preflight inventory can show `refreshing` / `stale` / `error` state without freezing the tab while deep scan work continues, and verify inactive-branch suppressed findings render separately from actionable failures.
 9. Library/Approvals: if backend endpoints are not enabled, confirm the UI shows a clear error state (no crashes).
 10. If you simulate/fake a stream failure in dev tools, confirm Planner/Refiner retry through the classic non-stream path without duplicate submits or broken loading state.
