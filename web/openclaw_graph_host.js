@@ -137,13 +137,15 @@ function resolvePromotedWidget(entry, widget) {
 
 export function getGraphNodeCatalog(graph) {
     const entries = [];
-    const visitedGraphs = new WeakSet();
+    const ancestorGraphs = new WeakSet();
 
     function visit(currentGraph, parentExecutionId = "", parentPathTitles = []) {
-        if (!currentGraph || typeof currentGraph !== "object" || visitedGraphs.has(currentGraph)) {
+        if (!currentGraph || typeof currentGraph !== "object" || ancestorGraphs.has(currentGraph)) {
             return;
         }
-        visitedGraphs.add(currentGraph);
+        // IMPORTANT: instances share definition graphs. Stop ancestor cycles only;
+        // global deduplication hides later identities and can allow a wrong-node write.
+        ancestorGraphs.add(currentGraph);
 
         for (const node of getDirectGraphNodes(currentGraph)) {
             const rawId = normalizeNodeId(node?.id);
@@ -161,6 +163,7 @@ export function getGraphNodeCatalog(graph) {
                 visit(subgraph, executionId, pathTitles);
             }
         }
+        ancestorGraphs.delete(currentGraph);
     }
 
     visit(graph);

@@ -603,15 +603,18 @@ test.describe('Parameter Lab - Opaque Identities', () => {
         await clickTab(page, 'Parameter Lab');
     });
 
-    for (const nested of [false, true]) {
-        test(`selects, compares and replays ${nested ? 'nested' : 'root'} colon IDs`, async ({ page }) => {
+    for (const placement of ['root', 'nested', 'shared']) {
+        const nested = placement !== 'root';
+        const shared = placement === 'shared';
+        test(`selects, compares and replays ${placement} colon IDs`, async ({ page }) => {
             const executionId = nested ? 'pack:root:child:opaque' : 'insert:operation-1:root:node:7';
-            await page.evaluate(async ({ nested, executionId }) => {
+            await page.evaluate(async ({ nested, shared, executionId }) => {
                 const loader = { id: nested ? 'child:opaque' : executionId, type: 'CheckpointLoaderSimple', title: 'Opaque Loader',
                     widgets: [{ name: 'ckpt_name', type: 'combo', value: 'base.ckpt', options: { values: ['base.ckpt', 'xl.ckpt'] } }] };
                 const direct = { _nodes: [loader] };
                 window.app.graph = { _nodes: nested ? [{ id: 'pack:root', type: 'SubgraphNode', widgets: [], subgraph: direct }] : [loader],
                     serialize: () => ({ synthetic: true }), getNodeById(id) { return this._nodes.find((node) => String(node.id) === String(id)); } };
+                if (shared) window.app.graph._nodes.unshift({ id: 'earlier', type: 'SubgraphNode', widgets: [], subgraph: direct });
                 window.__identityTarget = loader;
                 window.confirm = () => true;
                 const { openclawApi } = await import('/web/openclaw_api.js');
@@ -624,8 +627,9 @@ test.describe('Parameter Lab - Opaque Identities', () => {
                     }
                     return original(url, options);
                 };
-            }, { nested, executionId });
+            }, { nested, shared, executionId });
             await page.click('#lab-add-dim');
+            await expect(page.locator(`.dim-node-select option[value="${executionId}"]`)).toHaveCount(1);
             await page.selectOption('.dim-node-select', executionId);
             await expect(page.locator('.dim-widget-select option[value="ckpt_name"]')).toHaveCount(1);
             await page.selectOption('.dim-widget-select', 'ckpt_name');
@@ -637,12 +641,20 @@ test.describe('Parameter Lab - Opaque Identities', () => {
             await expect.poll(() => page.evaluate(() => window.__identityTarget.widgets[0].value)).toBe('xl.ckpt');
             await expect(page.locator('.openclaw-banner')).toContainText('Values applied');
             await page.click('#lab-compare-models');
-            await expect(page.locator('.dim-node-select')).toHaveValue(executionId);
+            await expect(page.locator('.dim-node-select')).toHaveValue(shared ? 'earlier:child:opaque' : executionId);
             await expect(page.locator('.dim-widget-select')).toHaveValue('ckpt_name');
+            if (shared) {
+                await page.evaluate(async () => {
+                    const { tabManager } = await import('/web/openclaw_tabs.js');
+                    tabManager.tabs.find((entry) => entry.id === 'parameter-lab').showCompareWizard(window.__identityTarget);
+                });
+                await expect(page.locator('.openclaw-banner')).toContainText('Select a unique loader');
+                await expect(page.locator('.dim-node-select')).toHaveValue('earlier:child:opaque');
+            }
         });
     }
 
-    for (const failure of ['ambiguous', 'missing', 'invalid']) {
+    for (const failure of ['ambiguous', 'missing', 'invalid', 'shared-collision', 'shared-alias']) {
         test(`rejects ${failure} replay before any override or direct lookup`, async ({ page }) => {
             await page.evaluate(async (failure) => {
                 const make = (id) => ({ id, widgets: [{ name: 'seed', value: 1 }] });
@@ -653,7 +665,11 @@ test.describe('Parameter Lab - Opaque Identities', () => {
                 window.__directLookups = 0;
                 window.app.graph = { _nodes: [control, direct, { id: 'a', widgets: [], subgraph: { _nodes: [child] } }],
                     getNodeById(id) { window.__directLookups += 1; return this._nodes.find((node) => node.id === id); } };
-                const bad = failure === 'ambiguous' ? 'a:b.seed' : failure === 'missing' ? 'absent.seed' : 'malformed';
+                if (failure.startsWith('shared-')) {
+                    const shared = window.app.graph._nodes[2].subgraph;
+                    window.app.graph._nodes.splice(2, 0, { id: 'earlier', widgets: [], subgraph: shared });
+                }
+                const bad = failure === 'ambiguous' || failure === 'shared-collision' ? 'a:b.seed' : failure === 'shared-alias' ? 'b.seed' : failure === 'missing' ? 'absent.seed' : 'malformed';
                 const { tabManager } = await import('/web/openclaw_tabs.js');
                 const tab = tabManager.tabs.find((entry) => entry.id === 'parameter-lab');
                 tab.experimentId = 'identity-reject';

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
     findComparableWidget,
     getGraphNodeEntry,
+    getGraphNodeEntryByObject,
     getGraphNodeCatalog,
     getGraphWidgetCatalog,
     getGraphWidgetValueCandidates,
@@ -395,6 +396,57 @@ describe("opaque graph execution identities", () => {
         expect(getGraphNodeEntry(graph, "duplicate")).toBeNull();
         expect(getGraphNodeEntry(graph, "missing")).toBeNull();
         expect(resolveGraphWidget(graph, "missing", "ckpt_name")).toBeNull();
+    });
+
+    function sharedDefinitionFixture() {
+        const target = fixture("leaf:part");
+        const shared = target.graph;
+        const graph = { _nodes: [
+            { id: "first", subgraph: shared, widgets: [] },
+            { id: "second", subgraph: shared, widgets: [] },
+        ] };
+        return { ...target, graph, shared };
+    }
+
+    it("catalogs every shared-definition instance with its complete identity", () => {
+        const { graph, node, widget } = sharedDefinitionFixture();
+        expect(getGraphNodeCatalog(graph).map((entry) => entry.id)).toEqual([
+            "first", "first:leaf:part", "second", "second:leaf:part",
+        ]);
+        for (const id of ["first:leaf:part", "second:leaf:part"]) {
+            expect(getGraphNodeEntry(graph, id)?.node).toBe(node);
+            expect(resolveGraphWidget(graph, id, "ckpt_name")?.widget).toBe(widget);
+            expect(getGraphWidgetValueCandidates(graph, id, "ckpt_name")).toEqual(["base.ckpt", "xl.ckpt"]);
+            expect(findComparableWidget(graph, id)?.nodeId).toBe(id);
+        }
+    });
+
+    it("rejects shared-definition raw aliases and context-free object lookups", () => {
+        const { graph, node } = sharedDefinitionFixture();
+        expect(getGraphNodeEntry(graph, "leaf:part")).toBeNull();
+        expect(getGraphNodeEntryByObject(graph, node)).toBeNull();
+        expect(resolveGraphWidget(graph, node, "ckpt_name")).toBeNull();
+        expect(findComparableWidget(graph, node)).toBeNull();
+    });
+
+    it("detects root collisions with a later shared-definition instance", () => {
+        const { graph, widget } = sharedDefinitionFixture();
+        const direct = fixture("second:leaf:part");
+        graph._nodes.push(direct.node);
+        expect(getGraphNodeCatalog(graph).filter((entry) => entry.id === "second:leaf:part")).toHaveLength(2);
+        expect(getGraphNodeEntry(graph, "second:leaf:part")).toBeNull();
+        expect(resolveGraphWidget(graph, direct.node, "ckpt_name")).toBeNull();
+        expect(direct.widget.value).toBe("base.ckpt");
+        expect(widget.value).toBe("base.ckpt");
+    });
+
+    it("stops ancestor cycles while retaining later instances of a reused definition", () => {
+        const { graph, shared } = sharedDefinitionFixture();
+        shared._nodes.push({ id: "loop", subgraph: graph, widgets: [] });
+        expect(getGraphNodeCatalog(graph).map((entry) => entry.id)).toEqual([
+            "first", "first:leaf:part", "first:loop",
+            "second", "second:leaf:part", "second:loop",
+        ]);
     });
 
     it("resolves promoted child colon IDs, but never falls back from a broken binding", () => {

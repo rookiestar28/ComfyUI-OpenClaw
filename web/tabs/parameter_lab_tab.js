@@ -551,6 +551,11 @@ export const ParameterLabTab = {
     showCompareWizard(targetNode = null) {
         // 1. Scan for loader nodes if no target provided
         let target = targetNode ? findComparableWidget(app.graph, targetNode) : null;
+        // An explicit ambiguous object must not retarget another execution instance.
+        if (targetNode && !target) {
+            openclawUI.showBanner("warning", "Select a unique loader instance to compare models.");
+            return;
+        }
         if (!target) {
             const compareTargets = getGraphNodeCatalog(app.graph)
                 .filter((entry) =>
@@ -558,7 +563,9 @@ export const ParameterLabTab = {
                     entry.node?.type === "LORALoader" ||
                     entry.node?.type === "UNETLoader"
                 )
-                .map((entry) => findComparableWidget(app.graph, entry.node))
+                // Shared definition objects are ambiguous across instances; retain
+                // the catalog's unique execution context when scanning candidates.
+                .map((entry) => findComparableWidget(app.graph, entry.id))
                 .filter(Boolean);
             if (compareTargets.length === 0) {
                 openclawUI.showBanner("warning", "No Checkpoint/LoRA loaders found in workflow.");
