@@ -36,6 +36,29 @@ async function readSidebarGeometry(page) {
   });
 }
 
+async function mountNativeSidebar(page, width) {
+  return page.evaluate(async (width) => {
+    const panel = document.querySelector('.side-bar-panel');
+    const mount = document.querySelector('#sidebar-tab-comfyui-openclaw');
+    const tab = window.__openclawMockSidebarTab;
+    tab.destroy();
+    const parent = panel.parentElement;
+    parent.style.cssText = 'display:flex; width:1200px; height:720px';
+    panel.style.cssText = `flex:${width} 1 0px; overflow:hidden`;
+    panel.setAttribute('data-panel', '');
+    panel.setAttribute('data-panel-id', 'sidebar');
+    panel.setAttribute('data-panel-group-id', 'canvas');
+    const canvas = document.createElement('div');
+    canvas.id = 'native-canvas';
+    canvas.style.cssText = `flex:${1200 - width} 1 0px; min-width:0`;
+    parent.appendChild(canvas);
+    const baseline = panel.getBoundingClientRect().width;
+    tab.render();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    return { baseline, mounted: panel.getBoundingClientRect().width, marker: mount.getAttribute('data-openclaw-layout') };
+  }, width);
+}
+
 test.describe('OpenClaw sidebar layout ownership', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 });
@@ -438,4 +461,57 @@ test.describe('OpenClaw sidebar layout ownership', () => {
       });
     }
   });
+  test('preserves native flex allocation and the latest host resize on release', async ({ page }, testInfo) => {
+    const widths = await mountNativeSidebar(page, 336);
+    await captureSidebarEvidence(page, testInfo, 'native-sidebar-mounted');
+    expect(widths.marker).toBe('host');
+    expect(Math.abs(widths.mounted - widths.baseline)).toBeLessThanOrEqual(2);
+    const resized = await page.evaluate(async () => {
+      const panel = document.querySelector('.side-bar-panel');
+      panel.style.flexGrow = '480';
+      document.querySelector('#native-canvas').style.flexGrow = '720';
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const dragged = panel.getBoundingClientRect().width;
+      window.__openclawMockSidebarTab.destroy();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      return { dragged, released: panel.getBoundingClientRect().width, basis: panel.style.flexBasis };
+    });
+    expect(resized.dragged).toBeCloseTo(480, 0);
+    expect(resized.released).toBeCloseTo(resized.dragged, 0);
+    expect(resized.basis).toBe('0px');
+  });
+
+  for (const width of [312, 400, 560]) {
+    test(`keeps native controls contained and keyboard-operable at ${width}px`, async ({ page }, testInfo) => {
+      const allocation = await mountNativeSidebar(page, width);
+      await captureSidebarEvidence(page, testInfo, `native-sidebar-${width}-shell`);
+      expect(Math.abs(allocation.mounted - allocation.baseline)).toBeLessThanOrEqual(2);
+      await page.evaluate(() => {
+        window.app.graph = {
+          _nodes: [{ id: 10, type: 'KSampler', title: 'Sampler', widgets: [{ name: 'seed', type: 'number', value: 1, options: {} }] }],
+          getNodeById(id) { return this._nodes.find((node) => String(node.id) === String(id)); },
+          serialize() { return { version: 0.4, nodes: [] }; },
+        };
+      });
+      await page.locator('.openclaw-tab').filter({ hasText: 'Parameter Lab' }).click();
+      await page.locator('#lab-add-dim').focus();
+      await page.keyboard.press('Enter');
+      await expect(page.locator('.openclaw-lab-dim-row.dynamic')).toHaveCount(1);
+      await page.selectOption('.dim-node-select', '10');
+      await page.selectOption('.dim-widget-select', 'seed');
+      await page.locator('.dim-manual-input').fill('7');
+      await page.locator('.dim-manual-input').press('Enter');
+      await expect(page.locator('.openclaw-chip')).toContainText('7');
+      const overflow = await page.evaluate(() => {
+        const panel = document.querySelector('.side-bar-panel').getBoundingClientRect();
+        return [...document.querySelectorAll('.openclaw-header button, .openclaw-tab, .openclaw-lab-actions button, .openclaw-lab-dim-row input, .openclaw-lab-dim-row select, .openclaw-lab-dim-row button')]
+          .filter((element) => element.getClientRects().length && getComputedStyle(element).visibility !== 'hidden')
+          .filter((element) => { const rect = element.getBoundingClientRect(); return rect.left < panel.left - 1 || rect.right > panel.right + 1; })
+          .map((element) => element.id || element.className);
+      });
+      await captureSidebarEvidence(page, testInfo, `native-sidebar-${width}-lab`);
+      expect(overflow).toEqual([]);
+    });
+  }
+
 });

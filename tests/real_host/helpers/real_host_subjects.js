@@ -210,7 +210,7 @@ export function detectSubjectMismatch({
  * boundary. A host or user width already wider than the floor must be preserved,
  * never reduced to it, so the check is a lower bound rather than an equality.
  */
-export function evaluateSidebarGeometry(geometry, minWidthPx) {
+export function evaluateSidebarGeometry(geometry, minWidthPx, tolerancePx = 0) {
     const failures = [];
     for (const part of ["panel", "content", "mount"]) {
         const box = geometry?.[part];
@@ -218,7 +218,7 @@ export function evaluateSidebarGeometry(geometry, minWidthPx) {
             failures.push(`sidebar ${part} geometry was not measurable`);
             continue;
         }
-        if (box.width < minWidthPx) {
+        if (box.width < minWidthPx - tolerancePx) {
             failures.push(`sidebar ${part} measured ${box.width}px, below the ${minWidthPx}px floor`);
         }
     }
@@ -248,7 +248,7 @@ export const HOST_WIDTH_TOLERANCE_PX = 2;
  * to its pre-OpenClaw width, so the release has to be compared against the
  * host's own write, not against the captured value.
  */
-export function evaluateHostWidthOwnership(evidence, minWidthPx) {
+export function evaluateHostWidthOwnership(evidence, minWidthPx, tolerancePx = 0) {
     const failures = [];
     const widthOf = (stage) => evidence?.[stage]?.width;
     for (const stage of ["hostOnly", "mounted", "dragged", "released"]) {
@@ -260,7 +260,7 @@ export function evaluateHostWidthOwnership(evidence, minWidthPx) {
         return failures;
     }
 
-    if (widthOf("mounted") < minWidthPx) {
+    if (widthOf("mounted") < minWidthPx - tolerancePx) {
         failures.push(
             `sidebar measured ${widthOf("mounted")}px while OpenClaw was mounted, below the ` +
                 `${minWidthPx}px floor`,

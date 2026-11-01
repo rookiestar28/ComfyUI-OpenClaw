@@ -233,6 +233,68 @@ describe("OpenClaw sidebar layout ownership", () => {
         expect([panel.style.cssText, content.style.cssText, mount.style.cssText]).toEqual(["", "", ""]);
     });
 
+    it("leaves complete native percentage allocation untouched throughout mount and release", () => {
+        const { content, mount, panel } = buildHost({ panelWidth: 312 });
+        panel.setAttribute("data-panel", "");
+        panel.setAttribute("data-panel-id", "sidebar");
+        panel.setAttribute("data-panel-group-id", "canvas");
+        panel.style.cssText = "flex: 28 1 0px; overflow: hidden";
+        const originals = [panel, content, mount].map((node) => node.style.cssText);
+        const writes = [panel, content, mount].map((node) => vi.spyOn(node.style, "setProperty"));
+        const dispose = acquireOpenClawSidebarLayout(mount);
+        expect(mount.getAttribute("data-openclaw-layout")).toBe("host");
+        expect([panel, content, mount].map((node) => node.style.cssText)).toEqual(originals);
+        expect(deferred.size).toBe(0);
+        for (const write of writes) expect(write).not.toHaveBeenCalled();
+        panel.style.flexGrow = "40";
+        dispose();
+        dispose();
+        expect(panel.style.flexGrow).toBe("40");
+        expect(panel.style.flexBasis).toBe("0px");
+        expect(mount.hasAttribute("data-openclaw-layout")).toBe(false);
+    });
+
+    it.each([null, "", "previous"])("restores the exact previous native marker %s", (previous) => {
+        const { mount, panel } = buildHost();
+        panel.setAttribute("data-panel", "");
+        panel.setAttribute("data-panel-id", "sidebar");
+        panel.setAttribute("data-panel-group-id", "canvas");
+        if (previous !== null) mount.setAttribute("data-openclaw-layout", previous);
+        const dispose = acquireOpenClawSidebarLayout(mount);
+        expect(mount.getAttribute("data-openclaw-layout")).toBe("host");
+        dispose();
+        expect(mount.getAttribute("data-openclaw-layout")).toBe(previous);
+    });
+
+    it("preserves a native marker overwritten by the incoming owner", () => {
+        const { mount, panel } = buildHost();
+        panel.setAttribute("data-panel", "");
+        panel.setAttribute("data-panel-id", "sidebar");
+        panel.setAttribute("data-panel-group-id", "canvas");
+        const dispose = acquireOpenClawSidebarLayout(mount);
+        mount.setAttribute("data-openclaw-layout", "next-owner");
+        dispose();
+        expect(mount.getAttribute("data-openclaw-layout")).toBe("next-owner");
+    });
+
+    it.each(["data-panel", "data-panel-id", "data-panel-group-id"])("keeps legacy allocation when %s is absent or empty", (missing) => {
+        const { mount, panel } = buildHost();
+        panel.setAttribute("data-panel", "");
+        panel.setAttribute("data-panel-id", "sidebar");
+        panel.setAttribute("data-panel-group-id", "canvas");
+        panel.removeAttribute(missing);
+        const dispose = acquireOpenClawSidebarLayout(mount);
+        expect(panel.style.flexBasis).toBe("560px");
+        expect(mount.hasAttribute("data-openclaw-layout")).toBe(false);
+        dispose();
+        if (missing !== "data-panel") {
+            panel.setAttribute(missing, "");
+            const release = acquireOpenClawSidebarLayout(mount);
+            expect(panel.style.flexBasis).toBe("560px");
+            release();
+        }
+    });
+
     it("keeps the JavaScript floor aligned with canonical and legacy CSS", () => {
         const webRoot = resolve(process.cwd(), "web");
         const canonical = readFileSync(`${webRoot}/styles/openclaw_core.css`, "utf8");

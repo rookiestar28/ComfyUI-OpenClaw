@@ -120,6 +120,19 @@ class TestPinsAgreeWithTrackedAnchors(unittest.TestCase):
             layout,
         )
 
+    def test_native_sidebar_floor_is_distinct_and_requires_host_owned_allocation(self):
+        self.assertEqual(POLICY["geometry"]["native_sidebar_min_width_px"], 312)
+        spec = (REPO_ROOT / "tests/real_host/specs/real_host_smoke.spec.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("expect(mounted.native).toBe(true)", spec)
+        self.assertIn("expect(mounted.layoutMode).toBe('host')", spec)
+        self.assertIn("Math.abs(mounted.width - baseline.width)", spec)
+        self.assertIn("Math.abs(mounted.width - hostOnly.width)", spec)
+        self.assertIn(
+            "POLICY.geometry.native_sidebar_min_width_px, HOST_WIDTH_TOLERANCE_PX", spec
+        )
+
 
 class TestUnverifiedReleaseArtifactCannotRun(unittest.TestCase):
     """An artifact nobody verified must never be able to produce release evidence."""

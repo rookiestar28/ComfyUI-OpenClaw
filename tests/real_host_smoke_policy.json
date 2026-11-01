@@ -71,7 +71,8 @@
     "health_path": "/openclaw/health"
   },
   "geometry": {
-    "sidebar_min_width_px": 560
+    "sidebar_min_width_px": 560,
+    "native_sidebar_min_width_px": 312
   },
   "evidence": {
     "matrix_path": "docs/release/compatibility_matrix.md",

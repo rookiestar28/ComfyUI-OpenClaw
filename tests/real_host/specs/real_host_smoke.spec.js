@@ -36,6 +36,7 @@ import {
   evaluateHostWidthOwnership,
   evaluatePromotedWidget,
   evaluateSidebarGeometry,
+  HOST_WIDTH_TOLERANCE_PX,
   parseHostBindOrigin,
   parseHostWebRoot,
   partitionBrowserErrors,
@@ -165,6 +166,9 @@ async function readSidebarPanel(page) {
       return null;
     }
     return {
+      native: panel.matches('[data-panel][data-panel-id][data-panel-group-id]') &&
+        Boolean(panel.getAttribute('data-panel-id')) && Boolean(panel.getAttribute('data-panel-group-id')),
+      layoutMode: document.querySelector('[data-openclaw-host-surface]')?.getAttribute('data-openclaw-layout') ?? null,
       width: panel.getBoundingClientRect().width,
       inlineMinWidth: panel.style.getPropertyValue('min-width'),
       inlineFlexBasis: panel.style.getPropertyValue('flex-basis'),
@@ -429,7 +433,18 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
   test('the sidebar reaches its floor and keeps every control inside the boundary', async ({
     page,
   }) => {
-    await openOpenClawSidebar(page);
+    await page.goto('/');
+    await activateSidebarTab(page, PEER_TAB_ID);
+    await page.waitForSelector(PEER_CONTENT);
+    await settleFrames(page);
+    const baseline = await readSidebarPanel(page);
+    await activateSidebarTab(page, OPENCLAW_TAB_ID);
+    await page.waitForSelector(OPENCLAW_ROOT);
+    await settleFrames(page);
+    const mounted = await readSidebarPanel(page);
+    expect(mounted.native).toBe(true);
+    expect(mounted.layoutMode).toBe('host');
+    expect(Math.abs(mounted.width - baseline.width)).toBeLessThanOrEqual(HOST_WIDTH_TOLERANCE_PX);
 
     const geometry = await page.evaluate(() => {
       const rect = (element) => {
@@ -461,7 +476,7 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
     });
 
     expect(geometry.tabCount).toBeGreaterThan(0);
-    const failures = evaluateSidebarGeometry(geometry, POLICY.geometry.sidebar_min_width_px);
+    const failures = evaluateSidebarGeometry(geometry, POLICY.geometry.native_sidebar_min_width_px, HOST_WIDTH_TOLERANCE_PX);
     expect(failures, failures.join('\n')).toEqual([]);
   });
 
@@ -494,6 +509,9 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
     await page.waitForSelector(OPENCLAW_ROOT, { timeout: 60_000 });
     await settleFrames(page);
     const mounted = await readSidebarPanel(page);
+    expect(mounted.native).toBe(true);
+    expect(mounted.layoutMode).toBe('host');
+    expect(Math.abs(mounted.width - hostOnly.width)).toBeLessThanOrEqual(HOST_WIDTH_TOLERANCE_PX);
 
     // Drag the host's own gutter, so the width is written by the host's splitter
     // code rather than by this test assigning a style.
@@ -540,7 +558,7 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
       dragged,
       released,
     };
-    const failures = evaluateHostWidthOwnership(evidence, POLICY.geometry.sidebar_min_width_px);
+    const failures = evaluateHostWidthOwnership(evidence, POLICY.geometry.native_sidebar_min_width_px, HOST_WIDTH_TOLERANCE_PX);
     expect(failures, `${failures.join('\n')}\n${JSON.stringify(evidence)}`).toEqual([]);
   });
 
@@ -687,6 +705,7 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
   }
 
   test('a collision with a later shared instance rejects replay before every write', async ({ page }) => {
+    page.on('dialog', (dialog) => dialog.accept());
     await openOpenClawSidebar(page);
     await page.click('.openclaw-tabs .openclaw-tab:has-text("Parameter Lab")');
     try {
@@ -729,10 +748,15 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
           await activateSidebarTab(page, PEER_TAB_ID);
           await page.waitForSelector(PEER_CONTENT);
           await settleFrames(page);
+          const baseline = await readSidebarPanel(page);
           await page.screenshot({ path: testInfo.outputPath(`${location}-${viewport.width}-peer.png`) });
           await activateSidebarTab(page, OPENCLAW_TAB_ID);
           await page.waitForSelector(OPENCLAW_ROOT);
           await settleFrames(page);
+          const mounted = await readSidebarPanel(page);
+          expect(mounted.native).toBe(true);
+          expect(mounted.layoutMode).toBe('host');
+          expect(Math.abs(mounted.width - baseline.width)).toBeLessThanOrEqual(HOST_WIDTH_TOLERANCE_PX);
           const geometry = await page.evaluate(() => {
             const rect = (selector) => {
               const box = document.querySelector(selector)?.getBoundingClientRect();
@@ -743,7 +767,7 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
               mount: rect('[data-openclaw-host-surface]'),
               rightmostControl: controls.length ? { right: Math.max(...controls.map((box) => box.right)) } : null };
           });
-          expect(evaluateSidebarGeometry(geometry, POLICY.geometry.sidebar_min_width_px)).toEqual([]);
+          expect(evaluateSidebarGeometry(geometry, POLICY.geometry.native_sidebar_min_width_px, HOST_WIDTH_TOLERANCE_PX)).toEqual([]);
           expect(geometry.panel.left).toBeGreaterThanOrEqual(0);
           expect(geometry.panel.right).toBeLessThanOrEqual(viewport.width);
           expect((geometry.panel.left + geometry.panel.right) / 2 < viewport.width / 2).toBe(location === 'left');
@@ -753,7 +777,7 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
           await expect(page.locator(OPENCLAW_ROOT)).toHaveCount(0);
           await activateSidebarTab(page, OPENCLAW_TAB_ID);
           await expect(page.locator(OPENCLAW_ROOT)).toBeVisible();
-          measurements.push({ location, viewport, geometry });
+          measurements.push({ location, viewport, baseline, mounted, geometry });
         }
       }
       writeFileSync(testInfo.outputPath('sidebar-geometry.json'), JSON.stringify(measurements, null, 2));

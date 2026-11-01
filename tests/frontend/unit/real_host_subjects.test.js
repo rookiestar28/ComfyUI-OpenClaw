@@ -311,6 +311,18 @@ describe("real host sidebar geometry", () => {
         }
     });
 
+    it("applies an explicit native rounding tolerance without relaxing legacy floors", () => {
+        const nativeFloor = POLICY.geometry.native_sidebar_min_width_px;
+        expect(nativeFloor).toBe(312);
+        const geometry = {
+            panel: box(0, 311.859375), content: box(0, 311.859375),
+            mount: box(0, 311.859375), rightmostControl: box(0, 300),
+        };
+        expect(evaluateSidebarGeometry(geometry, nativeFloor, 2)).toEqual([]);
+        expect(evaluateSidebarGeometry(geometry, nativeFloor)).toHaveLength(3);
+        expect(evaluateSidebarGeometry({ ...geometry, panel: box(0, 309) }, nativeFloor, 2)).toHaveLength(1);
+    });
+
     it("fails each element that falls below the floor", () => {
         const failures = evaluateSidebarGeometry(
             {
@@ -400,6 +412,17 @@ describe("real host sidebar width ownership", () => {
         expect(evaluateHostWidthOwnership(evidence, floor)).toEqual([
             `OpenClaw left min-width "${floor}px" on the panel after release; the host had ""`,
         ]);
+    });
+
+    it("keeps real drag and release requirements in native mode with fractional rounding", () => {
+        const evidence = kept();
+        evidence.mounted.width = 311.859375;
+        evidence.dragged.width = 431.71875;
+        evidence.released.width = 431.71875;
+        expect(evaluateHostWidthOwnership(evidence, 312, 2)).toEqual([]);
+        expect(evaluateHostWidthOwnership(evidence, 312)).toHaveLength(1);
+        evidence.dragged.width = evidence.mounted.width;
+        expect(evaluateHostWidthOwnership(evidence, 312, 2)[0]).toContain("did not widen");
     });
 
     it("fails a mounted width below the floor", () => {

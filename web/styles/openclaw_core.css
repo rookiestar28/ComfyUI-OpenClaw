@@ -43,9 +43,9 @@
 }
 
 /* Scoped fallback for supported host wrappers; JavaScript owns reversible actual allocation. */
-.side-bar-panel:has(.openclaw-sidebar-container),
-.p-splitterpanel:has(.openclaw-sidebar-container),
-.sidebar-content-container:has(.openclaw-sidebar-container) {
+.side-bar-panel:has(.openclaw-sidebar-container):not([data-openclaw-layout="host"]):not(:has([data-openclaw-layout="host"])),
+.p-splitterpanel:has(.openclaw-sidebar-container):not([data-openclaw-layout="host"]):not(:has([data-openclaw-layout="host"])),
+.sidebar-content-container:has(.openclaw-sidebar-container):not([data-openclaw-layout="host"]):not(:has([data-openclaw-layout="host"])) {
     min-width: var(--openclaw-sidebar-min-width) !important;
 }
 
@@ -1199,4 +1199,47 @@
     .openclaw-lab-actions {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+}
+
+/* Native splitter allocation belongs to the host; adapt only OpenClaw descendants. */
+[data-openclaw-layout="host"] .openclaw-sidebar-container {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+[data-openclaw-layout="host"] :is(.openclaw-header, .openclaw-badges) {
+    flex-wrap: wrap;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+[data-openclaw-layout="host"] :is(.openclaw-tabs, .openclaw-lab-actions) {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 120px), 1fr));
+}
+
+[data-openclaw-layout="host"] :is(.openclaw-scroll-area, .openclaw-lab-header, .openclaw-lab-main, .openclaw-lab-card, .openclaw-lab-dim-row, .openclaw-form-group) {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+[data-openclaw-layout="host"] :is(.openclaw-lab-card-head, .openclaw-lab-plan-header) {
+    flex-wrap: wrap;
+}
+
+[data-openclaw-layout="host"] .openclaw-lab-dim-row {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+}
+
+[data-openclaw-layout="host"] .openclaw-lab-run-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+}
+
+[data-openclaw-layout="host"] :is(.openclaw-lab-dim-row input, .openclaw-lab-dim-row select) {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
 }

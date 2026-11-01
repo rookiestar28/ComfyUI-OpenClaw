@@ -63,6 +63,24 @@ export function acquireOpenClawSidebarLayout(container) {
         throw new TypeError("OpenClaw sidebar layout requires an element container");
     }
 
+    const nativePanel = container.closest(".side-bar-panel[data-panel][data-panel-id][data-panel-group-id]");
+    if (nativePanel?.getAttribute("data-panel-id")?.trim() &&
+        nativePanel.getAttribute("data-panel-group-id")?.trim()) {
+        // CRITICAL: native panels couple flex-grow state with a zero flex-basis. A fixed
+        // basis desynchronizes drag allocation, then snaps width on tab handoff. Let the
+        // host own sizing and make only our mounted content responsive.
+        const previous = container.getAttribute("data-openclaw-layout");
+        container.setAttribute("data-openclaw-layout", "host");
+        let released = false;
+        return () => {
+            if (released) return;
+            released = true;
+            if (container.getAttribute("data-openclaw-layout") !== "host") return;
+            if (previous === null) container.removeAttribute("data-openclaw-layout");
+            else container.setAttribute("data-openclaw-layout", previous);
+        };
+    }
+
     const captured = new Map();
     let disposed = false;
     let cancelDeferred = null;
