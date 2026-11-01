@@ -593,3 +593,79 @@ test.describe('Parameter Lab - Dynamic Dimensions', () => {
         });
     });
 });
+
+
+test.describe('Parameter Lab - Opaque Identities', () => {
+    test.beforeEach(async ({ page }) => {
+        await mockComfyUiCore(page);
+        await page.goto('test-harness.html');
+        await waitForOpenClawReady(page);
+        await clickTab(page, 'Parameter Lab');
+    });
+
+    for (const nested of [false, true]) {
+        test(`selects, compares and replays ${nested ? 'nested' : 'root'} colon IDs`, async ({ page }) => {
+            const executionId = nested ? 'pack:root:child:opaque' : 'insert:operation-1:root:node:7';
+            await page.evaluate(async ({ nested, executionId }) => {
+                const loader = { id: nested ? 'child:opaque' : executionId, type: 'CheckpointLoaderSimple', title: 'Opaque Loader',
+                    widgets: [{ name: 'ckpt_name', type: 'combo', value: 'base.ckpt', options: { values: ['base.ckpt', 'xl.ckpt'] } }] };
+                const direct = { _nodes: [loader] };
+                window.app.graph = { _nodes: nested ? [{ id: 'pack:root', type: 'SubgraphNode', widgets: [], subgraph: direct }] : [loader],
+                    serialize: () => ({ synthetic: true }), getNodeById(id) { return this._nodes.find((node) => String(node.id) === String(id)); } };
+                window.__identityTarget = loader;
+                window.confirm = () => true;
+                const { openclawApi } = await import('/web/openclaw_api.js');
+                const original = openclawApi.fetch.bind(openclawApi);
+                openclawApi.fetch = async (url, options = {}) => {
+                    if (String(url).endsWith('/lab/sweep')) {
+                        const payload = JSON.parse(options.body);
+                        window.__identityPayload = payload;
+                        return { ok: true, data: { plan: { experiment_id: 'identity-plan', dimensions: payload.params, runs: [{ [`${executionId}.ckpt_name`]: 'xl.ckpt' }] } } };
+                    }
+                    return original(url, options);
+                };
+            }, { nested, executionId });
+            await page.click('#lab-add-dim');
+            await page.selectOption('.dim-node-select', executionId);
+            await expect(page.locator('.dim-widget-select option[value="ckpt_name"]')).toHaveCount(1);
+            await page.selectOption('.dim-widget-select', 'ckpt_name');
+            await page.selectOption('.dim-candidate-select', 'xl.ckpt');
+            await page.click('#lab-generate');
+            await expect(page.locator('.replay-run')).toBeVisible();
+            expect(await page.evaluate(() => window.__identityPayload.params[0])).toMatchObject({ node_id: executionId, widget_name: 'ckpt_name', values: ['xl.ckpt'] });
+            await page.click('.replay-run');
+            await expect.poll(() => page.evaluate(() => window.__identityTarget.widgets[0].value)).toBe('xl.ckpt');
+            await expect(page.locator('.openclaw-banner')).toContainText('Values applied');
+            await page.click('#lab-compare-models');
+            await expect(page.locator('.dim-node-select')).toHaveValue(executionId);
+            await expect(page.locator('.dim-widget-select')).toHaveValue('ckpt_name');
+        });
+    }
+
+    for (const failure of ['ambiguous', 'missing', 'invalid']) {
+        test(`rejects ${failure} replay before any override or direct lookup`, async ({ page }) => {
+            await page.evaluate(async (failure) => {
+                const make = (id) => ({ id, widgets: [{ name: 'seed', value: 1 }] });
+                const control = make('control');
+                const direct = make('a:b');
+                const child = make('b');
+                window.__identityNodes = [control, direct, child];
+                window.__directLookups = 0;
+                window.app.graph = { _nodes: [control, direct, { id: 'a', widgets: [], subgraph: { _nodes: [child] } }],
+                    getNodeById(id) { window.__directLookups += 1; return this._nodes.find((node) => node.id === id); } };
+                const bad = failure === 'ambiguous' ? 'a:b.seed' : failure === 'missing' ? 'absent.seed' : 'malformed';
+                const { tabManager } = await import('/web/openclaw_tabs.js');
+                const tab = tabManager.tabs.find((entry) => entry.id === 'parameter-lab');
+                tab.experimentId = 'identity-reject';
+                tab.plan = { dimensions: [], runs: [{ 'control.seed': 99, [bad]: 77 }] };
+                tab.renderPlan();
+                window.confirm = () => true;
+            }, failure);
+            await page.click('.replay-run');
+            await expect(page.locator('.openclaw-banner')).toContainText('Cannot apply values');
+            await expect(page.locator('.openclaw-banner')).not.toContainText('Values applied');
+            expect(await page.evaluate(() => window.__identityNodes.map((node) => node.widgets[0].value))).toEqual([1, 1, 1]);
+            expect(await page.evaluate(() => window.__directLookups)).toBe(0);
+        });
+    }
+});

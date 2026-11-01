@@ -893,35 +893,39 @@ export const ParameterLabTab = {
 
     replayRun(run) {
         if (confirm("Apply these parameter values to the current workflow?")) {
-            this.applyOverrides(run);
-            openclawUI.showBanner("success", "Values applied to nodes.");
+            try {
+                this.applyOverrides(run);
+                openclawUI.showBanner("success", "Values applied to nodes.");
+            } catch {
+                openclawUI.showBanner(
+                    "error",
+                    "Cannot apply values: a target node or widget is missing, invalid or ambiguous. Rebuild the plan from the current workflow."
+                );
+            }
         }
     },
 
     applyOverrides(run) {
-        let receiptWidget = null;
-        Object.entries(run).forEach(([key, value]) => {
-            if (key === "prompt_id" || key === "status") return;
+        const unavailable = () => Object.assign(new Error("override_target_unavailable"), { code: "override_target_unavailable" });
+        if (!run || typeof run !== "object" || Array.isArray(run)) {
+            throw unavailable();
+        }
+        // IMPORTANT: resolve the entire run before writes. Per-key writes or a
+        // getNodeById fallback can partially apply a stale or ambiguous plan.
+        const updates = Object.entries(run).filter(([key]) => key !== "prompt_id" && key !== "status").map(([key, value]) => {
             const separatorIndex = key.indexOf(".");
-            if (separatorIndex <= 0) return;
+            if (separatorIndex <= 0) throw unavailable();
             const nodeId = key.slice(0, separatorIndex);
             const widgetName = key.slice(separatorIndex + 1);
+            if (!validateParameterLabDimensions([{ node_id: nodeId, widget_name: widgetName, values: [value] }]).ok) {
+                throw unavailable();
+            }
             const resolved = resolveGraphWidget(app.graph, nodeId, widgetName);
-            const fallbackNode = app.graph.getNodeById?.(this._coerceSelectedNodeId(nodeId));
-            const node = resolved?.node || fallbackNode;
-            if (!node) {
-                return;
-            }
-            const widget =
-                resolved?.widget ||
-                (Array.isArray(node.widgets)
-                    ? node.widgets.find((entry) => entry.name === widgetName)
-                    : null);
-            if (widget) {
-                widget.value = value;
-                receiptWidget ||= widget;
-            }
+            if (!resolved?.widget) throw unavailable();
+            return { widget: resolved.widget, value };
         });
-        return receiptWidget;
+        if (updates.length === 0) throw unavailable();
+        updates.forEach(({ widget, value }) => { widget.value = value; });
+        return updates[0].widget;
     }
 };

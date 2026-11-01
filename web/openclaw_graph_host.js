@@ -60,7 +60,8 @@ function findDirectNodeByRawId(graph, rawId) {
     if (!normalized) {
         return null;
     }
-    return getDirectGraphNodes(graph).find((node) => normalizeNodeId(node?.id) === normalized) || null;
+    const matches = getDirectGraphNodes(graph).filter((node) => normalizeNodeId(node?.id) === normalized);
+    return matches.length === 1 ? matches[0] : null;
 }
 
 function getChildNodeEntry(hostEntry, rawChildId) {
@@ -172,51 +173,27 @@ export function getGraphNodeEntry(graph, nodeId) {
         return null;
     }
 
-    const segments = normalized.split(":");
-    let currentGraph = graph;
-    let currentEntry = null;
-    let currentExecutionId = "";
-    let pathTitles = [];
-
-    for (let idx = 0; idx < segments.length; idx += 1) {
-        const segment = segments[idx];
-        const node = findDirectNodeByRawId(currentGraph, segment);
-        if (!node) {
-            currentEntry = null;
-            break;
-        }
-
-        currentExecutionId = currentExecutionId ? `${currentExecutionId}:${segment}` : segment;
-        pathTitles = [...pathTitles, getNodeTitle(node, segment)];
-        currentEntry = buildNodeEntry(node, currentGraph, currentExecutionId, pathTitles);
-
-        if (idx < segments.length - 1) {
-            currentGraph = getNodeSubgraph(node);
-            if (!currentGraph) {
-                return null;
-            }
-        }
+    // IMPORTANT: legal local IDs contain colons. Match actual complete identities;
+    // splitting or falling back after a collision can write to the wrong node.
+    const catalog = getGraphNodeCatalog(graph);
+    const exact = catalog.filter((entry) => entry.id === normalized);
+    if (exact.length > 0) {
+        return exact.length === 1 ? exact[0] : null;
     }
-
-    if (currentEntry) {
-        return currentEntry;
-    }
-
-    if (segments.length === 1) {
-        const matches = getGraphNodeCatalog(graph).filter((entry) => entry.rawId === normalized);
-        if (matches.length === 1) {
-            return matches[0];
-        }
-    }
-
-    return null;
+    const raw = catalog.filter((entry) => entry.rawId === normalized);
+    return raw.length === 1 ? raw[0] : null;
 }
 
 export function getGraphNodeEntryByObject(graph, targetNode) {
     if (!targetNode || typeof targetNode !== "object") {
         return null;
     }
-    return getGraphNodeCatalog(graph).find((entry) => entry.node === targetNode) || null;
+    const catalog = getGraphNodeCatalog(graph);
+    const matches = catalog.filter((entry) => entry.node === targetNode);
+    if (matches.length !== 1 || catalog.filter((entry) => entry.id === matches[0].id).length !== 1) {
+        return null;
+    }
+    return matches[0];
 }
 
 export function resolveGraphWidget(graph, nodeRefOrId, widgetName, sourceNodeId = null) {
@@ -235,18 +212,9 @@ export function resolveGraphWidget(graph, nodeRefOrId, widgetName, sourceNodeId 
         return null;
     }
 
-    const resolved = resolvePromotedWidget(entry, widget);
-    if (!resolved) {
-        return {
-            hostEntry: entry,
-            nodeEntry: entry,
-            node: entry.node,
-            widget,
-            promotedDepth: 0,
-        };
-    }
-
-    return resolved;
+    // IMPORTANT: a broken/cyclic promoted binding must fail closed; editing the
+    // outer view instead can claim success without changing the execution value.
+    return resolvePromotedWidget(entry, widget);
 }
 
 export function getGraphWidgetCatalog(graph, nodeId) {
