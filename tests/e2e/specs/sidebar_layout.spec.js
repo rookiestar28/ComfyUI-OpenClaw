@@ -42,9 +42,13 @@ async function mountNativeSidebar(page, width) {
     const mount = document.querySelector('#sidebar-tab-comfyui-openclaw');
     const tab = window.__openclawMockSidebarTab;
     tab.destroy();
+    mount.replaceChildren();
     const parent = panel.parentElement;
+    // Use native host allocation without the legacy harness important min-width overrides.
+    parent.id = 'native-sidebar-panels';
     parent.style.cssText = 'display:flex; width:1200px; height:720px';
-    panel.style.cssText = `flex:${width} 1 0px; overflow:hidden`;
+    panel.style.cssText = `flex:${width} 1 0px; min-width:0; overflow:hidden`;
+    panel.querySelector('.sidebar-content-container').style.cssText = 'width:100%; height:100%; min-width:0; overflow:hidden';
     panel.setAttribute('data-panel', '');
     panel.setAttribute('data-panel-id', 'sidebar');
     panel.setAttribute('data-panel-group-id', 'canvas');
@@ -461,9 +465,10 @@ test.describe('OpenClaw sidebar layout ownership', () => {
       });
     }
   });
-  test('preserves native flex allocation and the latest host resize on release', async ({ page }, testInfo) => {
+  test('preserves native flex allocation and the latest host resize on peer handoff', async ({ page }, testInfo) => {
     const widths = await mountNativeSidebar(page, 336);
     await captureSidebarEvidence(page, testInfo, 'native-sidebar-mounted');
+    expect(widths.baseline).toBeCloseTo(336, 0);
     expect(widths.marker).toBe('host');
     expect(Math.abs(widths.mounted - widths.baseline)).toBeLessThanOrEqual(2);
     const resized = await page.evaluate(async () => {
@@ -473,18 +478,29 @@ test.describe('OpenClaw sidebar layout ownership', () => {
       await new Promise((resolve) => requestAnimationFrame(resolve));
       const dragged = panel.getBoundingClientRect().width;
       window.__openclawMockSidebarTab.destroy();
+      const mount = document.querySelector('#sidebar-tab-comfyui-openclaw');
+      const peer = document.createElement('section');
+      peer.id = 'native-peer';
+      mount.replaceChildren(peer);
       await new Promise((resolve) => requestAnimationFrame(resolve));
-      return { dragged, released: panel.getBoundingClientRect().width, basis: panel.style.flexBasis };
+      return { dragged, released: panel.getBoundingClientRect().width, basis: panel.style.flexBasis,
+        peerPreserved: mount.firstElementChild === peer, rootRemoved: !mount.querySelector('.openclaw-sidebar-container'),
+        marker: mount.getAttribute('data-openclaw-layout') };
     });
     expect(resized.dragged).toBeCloseTo(480, 0);
     expect(resized.released).toBeCloseTo(resized.dragged, 0);
     expect(resized.basis).toBe('0px');
+    expect(resized.peerPreserved).toBe(true);
+    expect(resized.rootRemoved).toBe(true);
+    expect(resized.marker).toBeNull();
   });
 
   for (const width of [312, 400, 560]) {
     test(`keeps native controls contained and keyboard-operable at ${width}px`, async ({ page }, testInfo) => {
       const allocation = await mountNativeSidebar(page, width);
       await captureSidebarEvidence(page, testInfo, `native-sidebar-${width}-shell`);
+      expect(allocation.baseline).toBeCloseTo(width, 0);
+      expect(allocation.mounted).toBeCloseTo(width, 0);
       expect(Math.abs(allocation.mounted - allocation.baseline)).toBeLessThanOrEqual(2);
       await page.evaluate(() => {
         window.app.graph = {

@@ -46,10 +46,10 @@
     font-size: var(--moltbot-font-md);
 }
 
-/* Scoped fallback for supported host wrappers; JavaScript owns reversible actual allocation. */
-.side-bar-panel:has(.moltbot-sidebar-container),
-.p-splitterpanel:has(.moltbot-sidebar-container),
-.sidebar-content-container:has(.moltbot-sidebar-container) {
+/* CRITICAL: dual-class roots also match these aliases; native panels must not inherit the legacy floor. */
+.side-bar-panel:has(.moltbot-sidebar-container):not([data-openclaw-layout="host"]):not(:has([data-openclaw-layout="host"])),
+.p-splitterpanel:has(.moltbot-sidebar-container):not([data-openclaw-layout="host"]):not(:has([data-openclaw-layout="host"])),
+.sidebar-content-container:has(.moltbot-sidebar-container):not([data-openclaw-layout="host"]):not(:has([data-openclaw-layout="host"])) {
     min-width: var(--moltbot-sidebar-min-width) !important;
 }
 
