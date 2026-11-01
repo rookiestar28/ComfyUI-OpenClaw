@@ -35,7 +35,7 @@
       "release_asset_name": "dist.zip",
       "release_asset_sha256": "3b802ce095609a80e62e2557a5a18551070ba51f614839eb89c7314bed4dd5a2",
       "release_asset_size_bytes": 29336742,
-      "release_asset_digest_source": "GitHub release API, tag v1.60.0, asset dist.zip; publisher-reported on 2026-11-01 and not independently downloaded here. The lane hashes downloaded bytes and refuses a mismatch.",
+      "release_asset_digest_source": "GitHub release API, tag v1.60.0, asset dist.zip; publisher-reported and independently downloaded and hashed on 2026-11-01. The lane hashes downloaded bytes and refuses a mismatch.",
       "web_root_relative": "web_custom_versions/Comfy-Org_ComfyUI_frontend/1.60.0",
       "summary": "The reproducible standalone release. Its asset digest is pinned from published release metadata, so the lane verifies the artifact before the host sees it; the subject still refuses to run without explicit authorization."
     }
@@ -78,9 +78,9 @@
     "matrix_path": "docs/release/compatibility_matrix.md",
     "surface_module": "web/openclaw_host_surface.js",
     "evidence_key": "real_host",
-    "current_state": "pending",
-    "run_id": null,
-    "evidence_id": null,
+    "current_state": "validated",
+    "run_id": "host-pair-20261101-isolated-01",
+    "evidence_id": "host-evidence-20261101-isolated-01",
     "states_requiring_run_id": [
       "validated",
       "failed"

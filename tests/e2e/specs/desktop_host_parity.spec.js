@@ -47,8 +47,8 @@ test.describe('Desktop host parity lane', () => {
     await expect(host).toHaveAttribute('data-openclaw-frontend-source-revision', 'aa4e48c08d');
     await expect(host).toHaveAttribute('data-openclaw-frontend-release-version', '1.60.0');
     await expect(host).toHaveAttribute('data-openclaw-frontend-release-revision', '5cb2899f');
-    // Refreshed release subjects remain pending until their own paired host campaign.
-    await expect(host).toHaveAttribute('data-openclaw-real-host-validation', 'pending');
+    // The standalone pair is qualified; Desktop surfaces retain their separate pending state.
+    await expect(host).toHaveAttribute('data-openclaw-real-host-validation', 'validated');
 
     const stamped = await host.evaluate((node) => JSON.stringify({ ...node.dataset }));
     for (const forbidden of ['.planning', 'reference/docs', '/mnt/', '.tmp']) {

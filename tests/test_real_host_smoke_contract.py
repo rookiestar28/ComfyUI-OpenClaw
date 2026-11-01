@@ -302,11 +302,11 @@ class TestEvidenceCannotAdvanceWithoutARun(unittest.TestCase):
         states = _matrix_metadata()["evidence_states"]["real_host"]
 
         self.assertEqual(states["state"], POLICY["evidence"]["current_state"])
-        self.assertEqual(states["state"], "pending")
+        self.assertEqual(states["state"], "validated")
         self.assertEqual(states["run_id"], POLICY["evidence"]["run_id"])
         self.assertEqual(states["evidence_id"], POLICY["evidence"]["evidence_id"])
-        self.assertIsNone(states["run_id"])
-        self.assertIsNone(states["evidence_id"])
+        self.assertEqual(states["run_id"], "host-pair-20261101-isolated-01")
+        self.assertEqual(states["evidence_id"], "host-evidence-20261101-isolated-01")
         self.assertEqual(
             evidence_update_is_allowed(
                 POLICY, states["state"], states["run_id"], states["evidence_id"]
@@ -317,7 +317,7 @@ class TestEvidenceCannotAdvanceWithoutARun(unittest.TestCase):
     def test_the_frontend_module_reports_real_host_validation(self):
         surface = HOST_SURFACE_PATH.read_text(encoding="utf-8")
 
-        self.assertIn('HOST_REAL_VALIDATION_STATE = "pending"', surface)
+        self.assertIn('HOST_REAL_VALIDATION_STATE = "validated"', surface)
 
     def test_a_validated_state_requires_both_identifiers(self):
         self.assertEqual(

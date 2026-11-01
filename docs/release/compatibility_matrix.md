@@ -9,20 +9,20 @@
     "desktop": "0.9.4 (core 0.22.3 / frontend 1.43.18)"
   },
   "evidence": {
-    "evidence_id": "compat-matrix-source-review-20261101",
-    "updated_at": "2026-11-01T00:00:00+08:00",
-    "updated_by": "pinned-subject-source-review"
+    "evidence_id": "host-evidence-20261101-isolated-01",
+    "updated_at": "2026-11-01T16:39:15+08:00",
+    "updated_by": "paired-isolated-host-validation"
   },
   "evidence_states": {
     "real_host": {
-      "evidence_id": null,
-      "run_id": null,
-      "state": "pending"
+      "evidence_id": "host-evidence-20261101-isolated-01",
+      "run_id": "host-pair-20261101-isolated-01",
+      "state": "validated"
     },
     "repository_validation": {
-      "evidence_id": null,
-      "run_id": null,
-      "state": "pending"
+      "evidence_id": "repo-validation-20261101-host-alignment",
+      "run_id": "windows-full-gate-20261101-host-alignment",
+      "state": "validated"
     },
     "source_review": {
       "evidence_id": "source-review-20261101",
@@ -86,7 +86,7 @@
       "hosted_version_mode": "fixed"
     }
   },
-  "last_validated_date": null,
+  "last_validated_date": "2026-11-01",
   "matrix_version": "v0.3.1",
   "policy": {
     "max_age_days": 45,
@@ -120,19 +120,19 @@ This document tracks current reference anchors and separately records source, re
 
 | Component | Reference Subject | Best Effort / Experimental | Notes |
 | :--- | :--- | :--- | :--- |
-| **ComfyUI** | `7c4390a6` source-review anchor (`v0.43.0-21-g7c4390a6f`; project `0.43.0`) | Older tagged snapshots | Tag `v0.43.0` is `426f5eea`, 21 commits behind source, and pins frontend `1.57.4`; source pins `1.57.6`. Both new host subjects remain pending. |
+| **ComfyUI** | `7c4390a6` source-review anchor (`v0.43.0-21-g7c4390a6f`; project `0.43.0`) | Older tagged snapshots | Tag `v0.43.0` is `426f5eea`, 21 commits behind source, and pins frontend `1.57.4`; source pins `1.57.6`. The source core with bundle `1.57.6` and standalone release `1.60.0` passed paired isolated CPU host qualification; the older tag/bundle was not executed. |
 | **ComfyUI Frontend** | Release `1.60.0`, tag `v1.60.0` at `5cb2899f` | Source `aa4e48c08d` (`v1.60.0-209-gaa4e48c08d`), package `1.60.0` | Release and source are distinct. Publisher-reported `dist.zip` size/SHA256 are pinned; downloaded bytes and served files must be verified before live claims. Source-only queue UI refresh, status retries and extension-loader changes are not release behavior. |
 | **Legacy Desktop** | `0.9.4 (core 0.22.3 / frontend 1.43.18)` reference anchor | Legacy fixed bundle may lag standalone frontend | Preserve the recorded fixed-bundle contract for existing parity coverage |
 | **Current Comfy-Desktop** | `1.0.32-rc.1` reference anchor (`85e28b7a`; `v1.0.32-rc.1-3-g85e28b7`) | Hosted component versions vary by installation | Treat the managed-install generation separately; do not infer fixed core/frontend versions from the application release |
 | **Python** | 3.13 | 3.10-3.12 compatibility targets; 3.14 best effort | Current executed baseline is the local Windows Full Gate on Python 3.13. 3.10-3.12 are exercised by the scheduled exact-version matrix, and 3.10 also by the routine per-push backend job, so they are compatibility targets by support commitment rather than for want of testing. Only the matrix emits the dated, commit-bound artifact the 14-day currency rule reads, so its artifacts remain the sole promotion evidence; a passing push corroborates but does not promote. 3.10 requires reassessment on 2026-10-31; below 3.10 is unsupported |
-| **Torch** | 2.1.2+ | 1.13+ | CUDA 11.8/12.1 verified |
+| **Torch** | `2.10.0+cpu` in the isolated host campaign | Other CPU/CUDA combinations | Both frontend subjects were exercised without a GPU; this campaign makes no CUDA compatibility claim. |
 
 ## Host-Surface Notes
 
 - **ComfyUI host runtime**: current bootstrap assumptions remain aligned with upstream `PromptServer` startup and route registration flow, including `/api`-prefixed canonical API routing.
 - **Frontend host surface**: current sidebar integration contract remains compatible with the standalone frontend reference anchor, while inactive subgraph diagnostics and promoted-widget behavior remain regression-sensitive seams.
 - **Promoted-widget evidence scope**: early real-host runs exercised an ordinary widget with constructed source fields. The paired runs on the previous core `0.37.0` subjects and on the refreshed core `0.39.0` subjects exercised a host-created subgraph binding, an OpenClaw Parameter Lab edit, projected value readback and serialized inner prompt value on both frontend subjects of each pair. The raw inner widget seed need not change when the promoted host value owns execution.
-- **Evidence states**: new source subjects were reviewed on 2026-11-01. Repository validation and real-host qualification are pending with no current run identifiers or validation date. Source review and target-authored simulations do not establish live compatibility.
+- **Evidence states**: new source subjects were reviewed on 2026-11-01. The Windows repository gate and paired isolated real-host campaign are recorded separately, dated 2026-11-01. Campaign `host-pair-20261101-isolated-01` / `host-evidence-20261101-isolated-01` passed all fifteen browser cases on each frontend subject, with no skips or retries. The actual served index and entry module matched verified artifact files. The isolated host used Python `3.11.2` and CPU-only PyTorch `2.10.0+cpu`; this does not replace the exact-version backend matrix. No GPU or provider jobs were run. Source review and target-authored simulations do not establish live compatibility.
 - **Historical real-host evidence**: the 2026-10-13 campaign `host-pair-20261013-01` / `host-evidence-20261013-01` validated core `0.39.0` at `8010b48d`, bundled frontend `1.55.14` and standalone release `1.57.0`. Both passed eleven browser cases, including sidebar splitter width survival, on loopback with the bounded custom-node set. Its repository gate and date are scoped to those old subjects in `historical_evidence`; they do not qualify the new pins. The earlier core `0.37.0` pair remains historical too. Neither Desktop nor the later frontend source head has live qualification.
 - **Legacy Desktop host surface**: Desktop `0.9.4` embeds frontend `1.43.18`, which lags the standalone frontend `1.60.0` release reference. Validate this fixed bundle against its own anchor.
 - **Current Comfy-Desktop host surface**: application `1.0.32-rc.1` is a managed-install generation. Its hosted ComfyUI and frontend versions are `installation_specific`; the application anchor must not be cross-wired into fixed hosted-version claims.

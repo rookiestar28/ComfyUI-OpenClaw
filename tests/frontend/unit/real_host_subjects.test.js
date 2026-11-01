@@ -585,9 +585,9 @@ describe("real host evidence gating", () => {
                 evidenceId: POLICY.evidence.evidence_id,
             }).allowed,
         ).toBe(true);
-        expect(POLICY.evidence.current_state).toBe("pending");
-        expect(POLICY.evidence.run_id).toBeNull();
-        expect(POLICY.evidence.evidence_id).toBeNull();
+        expect(POLICY.evidence.current_state).toBe("validated");
+        expect(POLICY.evidence.run_id).toBe("host-pair-20261101-isolated-01");
+        expect(POLICY.evidence.evidence_id).toBe("host-evidence-20261101-isolated-01");
     });
 });
 

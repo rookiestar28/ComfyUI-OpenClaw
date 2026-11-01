@@ -86,6 +86,27 @@ EXPECTED_REFERENCE_BASELINES = {
 }
 
 
+def _write_pending_matrix(path: Path) -> None:
+    # Keep pending cases independent of the repository's current qualification state.
+    metadata = read_matrix_document(
+        REPO_ROOT / "docs" / "release" / "compatibility_matrix.md"
+    )["metadata"]
+    metadata["last_validated_date"] = None
+    for key in ("real_host", "repository_validation"):
+        metadata["evidence_states"][key] = {
+            "state": "pending",
+            "run_id": None,
+            "evidence_id": None,
+        }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "# Pending matrix fixture\n\n```openclaw-compat-matrix-meta\n"
+        + json.dumps(metadata)
+        + "\n```\n",
+        encoding="utf-8",
+    )
+
+
 class TestR90CompatMatrixGovernance(unittest.TestCase):
     def test_repo_matrix_has_valid_metadata(self):
         doc = read_matrix_document(
@@ -432,7 +453,10 @@ class TestR90CompatMatrixGovernance(unittest.TestCase):
 
     def test_operator_doctor_warns_for_unknown_current_host_validation(self):
         report = DoctorReport()
-        check_compatibility_matrix_governance(report, REPO_ROOT)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _write_pending_matrix(root / "docs" / "release" / "compatibility_matrix.md")
+            check_compatibility_matrix_governance(report, root)
         check = next(
             c for c in report.checks if c.name == "compatibility_matrix_governance"
         )
@@ -537,7 +561,7 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
         validation = validate_metadata(metadata, today=date(2026, 9, 6))
         return validation, {entry["code"] for entry in validation["violations"]}
 
-    def test_repo_matrix_keeps_refreshed_subjects_pending_and_history_scoped(self):
+    def test_repo_matrix_keeps_refreshed_pair_validated_and_history_scoped(self):
         metadata = read_matrix_document(
             REPO_ROOT / "docs/release/compatibility_matrix.md"
         )["metadata"]
@@ -546,11 +570,23 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
         self.assertEqual(
             states["source_review"]["evidence_id"], "source-review-20261101"
         )
-        for key in ("real_host", "repository_validation"):
-            self.assertEqual(
-                states[key], {"state": "pending", "run_id": None, "evidence_id": None}
-            )
-        self.assertIsNone(metadata["last_validated_date"])
+        self.assertEqual(
+            states["real_host"],
+            {
+                "state": "validated",
+                "run_id": "host-pair-20261101-isolated-01",
+                "evidence_id": "host-evidence-20261101-isolated-01",
+            },
+        )
+        self.assertEqual(
+            states["repository_validation"],
+            {
+                "state": "validated",
+                "run_id": "windows-full-gate-20261101-host-alignment",
+                "evidence_id": "repo-validation-20261101-host-alignment",
+            },
+        )
+        self.assertEqual(metadata["last_validated_date"], "2026-11-01")
         historical = metadata["historical_evidence"][0]
         self.assertEqual(historical["last_validated_date"], "2026-10-13")
         self.assertEqual(
@@ -590,10 +626,9 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
         )
 
     def test_pending_matrix_refresh_cannot_invent_a_validation_date(self):
-        source = REPO_ROOT / "docs/release/compatibility_matrix.md"
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "matrix.md"
-            target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            _write_pending_matrix(target)
             result = run_refresh_workflow(
                 matrix_path=target,
                 observed_anchors=dict(EXPECTED_CURRENT_ANCHORS),

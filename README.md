@@ -135,7 +135,7 @@ Deployment profiles and hardening references:
 <summary><strong>Host references refreshed for ComfyUI 0.43.0 and frontend 1.60.0</strong></summary>
 
 - Current source review follows ComfyUI `0.43.0` at `7c4390a6` (bundle `1.57.6`)
-  and standalone frontend release `1.60.0`. These new host subjects are pending live qualification.
+  and standalone frontend release `1.60.0`. Both passed fifteen browser cases in the 2026-11-01 paired isolated CPU host campaign.
 - The 2026-10-13 browser campaign remains historical evidence for core `0.39.0`, bundle
   `1.55.14` and release `1.57.0`. It does not validate the refreshed subjects, the later
   frontend source checkout or either Desktop surface.

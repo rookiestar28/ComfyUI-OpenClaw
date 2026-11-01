@@ -35,7 +35,7 @@ export const HOST_CORE_REFERENCE = Object.freeze({
  * frontend source head or Desktop surfaces, and reset it to `pending` whenever the
  * pinned subjects change.
  */
-export const HOST_REAL_VALIDATION_STATE = "pending";
+export const HOST_REAL_VALIDATION_STATE = "validated";
 
 export const HOST_SURFACE_REFERENCES = Object.freeze({
     [HOST_SURFACES.standaloneFrontend]: Object.freeze({
