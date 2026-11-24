@@ -654,7 +654,7 @@ export const ParameterLabTab = {
 
         try {
             // Serialize the very graph the plan will be bound to: one accessor path, never a second
-            // read of the host's graph alias, which can name a different graph than the root one.
+            // read of the host's graph alias, which is not guaranteed to be the root graph object.
             const binding = captureGraphBinding(app);
             const bound = binding ? verifyGraphBinding(binding, app) : null;
             if (!bound?.ok) {

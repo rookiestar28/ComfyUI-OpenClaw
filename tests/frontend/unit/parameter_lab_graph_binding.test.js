@@ -309,8 +309,9 @@ describe.each(["per-workflow", "shared-graph"])("Parameter Lab workflow binding 
     });
 
     it("builds the plan from the graph it is bound to, not from the deprecated graph alias", async () => {
-        // The alias can point at the graph being edited (for example a subgraph) while the
-        // binding is taken from the root graph; the plan must be serialized from the latter.
+        // Nothing guarantees that the deprecated graph alias is the same object as the one the
+        // root-graph accessor returns, and the binding is captured from the latter. The plan
+        // must be serialized from the bound graph, so a drifting alias cannot change its source.
         const decoy = makeGraph("decoy", 999);
         let decoySerializations = 0;
         decoy.serialize = () => {
