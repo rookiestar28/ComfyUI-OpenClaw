@@ -397,7 +397,17 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
     // Nothing this lane observes may be labelled with that commit.
     expect(SUBJECT.frontend_version).not.toBe(notExecuted);
     expect(readHostLog()).not.toContain(notExecuted);
-    expect(JSON.stringify(SUBJECT)).not.toContain(notExecuted);
+
+    // The head may be named by a subject only as that release's own tag commit, and only
+    // when the policy says the reviewed head IS the tagged release (its describe is
+    // exactly the release tag). Every other mention, and every mention when the head is
+    // ahead of its release, keeps the original rule: nothing may carry it.
+    const headIsTheRelease = SUBJECT.release_tag_commit === notExecuted;
+    if (headIsTheRelease) {
+      expect(POLICY.not_executed.frontend_source_describe).toBe(SUBJECT.release_tag);
+    }
+    const { release_tag_commit: _releaseTagCommit, ...otherFacts } = SUBJECT;
+    expect(JSON.stringify(headIsTheRelease ? otherFacts : SUBJECT)).not.toContain(notExecuted);
   });
 
   test('the host loads the plugin and stamps its sidebar surface', async ({ page }) => {

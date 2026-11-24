@@ -44,18 +44,36 @@ STALE_MARKERS = (
     "v1.55.11-104-g23559a8f86",
 )
 
-CURRENT_MARKERS = (
-    # Core tag and reviewed HEAD pin different bundled frontend versions.
+# Superseded by the 2026-11-24 source-review baseline. They are history, not stale
+# claims: the matrix keeps them in `historical_evidence` and the README in its released
+# v1.3.2 note, so only the files below, which must describe the current host
+# baseline alone, are checked for them.
+SUPERSEDED_2026_11_01_MARKERS = (
     "7c4390a6",
     "v0.43.0-21-g7c4390a6f",
     "426f5eea",
-    "1.57.4",
-    "1.57.6",
-    # Standalone frontend source head versus reproducible release.
     "aa4e48c08d",
     "v1.60.0-209-gaa4e48c08d",
     "5cb2899f",
-    "1.60.0",
+    "standalone frontend `1.60.0`",
+)
+CURRENT_BASELINE_ONLY_PATHS = (
+    REPO_ROOT / "docs" / "release" / "support_policy.md",
+    REPO_ROOT / "docs" / "frontend_ux_walkthrough.md",
+    REPO_ROOT / "web" / "openclaw_host_surface.js",
+)
+
+CURRENT_MARKERS = (
+    # Core tag and reviewed HEAD pin different bundled frontend versions.
+    "da8bd08e",
+    "v0.46.0-46-gda8bd08e4",
+    "a277b5bf",
+    "1.59.6",
+    "1.59.11",
+    # The reviewed standalone frontend head is the tagged release itself.
+    "388973ac",
+    "v1.61.8",
+    "1.61.8",
     # Desktop generations are unchanged and must stay published.
     "85e28b7a",
     "installation_specific",
@@ -84,6 +102,21 @@ class TestHostAnchorAlignment(unittest.TestCase):
         )
         missing = [marker for marker in CURRENT_MARKERS if marker not in combined]
         self.assertEqual(missing, [])
+
+    def test_current_baseline_files_do_not_keep_the_superseded_subjects(self):
+        hits: dict[str, list[str]] = {}
+        for path in CURRENT_BASELINE_ONLY_PATHS:
+            text = path.read_text(encoding="utf-8")
+            found = [m for m in SUPERSEDED_2026_11_01_MARKERS if m in text]
+            if found:
+                hits[str(path.relative_to(REPO_ROOT))] = found
+        self.assertEqual(hits, {})
+
+    def test_current_baseline_only_files_are_active_and_not_historical(self):
+        self.assertTrue(set(CURRENT_BASELINE_ONLY_PATHS) <= set(ACTIVE_PUBLIC_PATHS))
+        self.assertEqual(
+            set(CURRENT_BASELINE_ONLY_PATHS) & set(HISTORICAL_RECORD_PATHS), set()
+        )
 
     def test_historical_records_retain_their_original_anchors(self):
         # R254: the allowlist exists so history survives the refresh. Losing a

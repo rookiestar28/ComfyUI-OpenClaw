@@ -289,31 +289,54 @@ def _validate_reference_baselines(baselines: Any) -> list[dict[str, Any]]:
     if isinstance(frontend, dict):
         source_head = str(frontend.get("source_head", "")).strip()
         release_commit = str(frontend.get("release_tag_commit", "")).strip()
-        # CRITICAL: the reviewed source head is ahead of the release tag. If the
-        # two collapse into one value the matrix can no longer distinguish
-        # "reviewed" from "reproducible", which is the whole point of R254.
-        if source_head and source_head == release_commit:
+        describe = str(frontend.get("source_describe", "")).strip()
+        release_tag = str(frontend.get("release_tag", "")).strip()
+        # A describe that is exactly the release tag says the reviewed head IS the
+        # tagged release (git describe prints no commits-ahead suffix only then).
+        head_is_the_tagged_release = bool(release_tag) and describe == release_tag
+        same_commit = bool(source_head) and source_head == release_commit
+        # CRITICAL: the matrix must keep "reviewed" and "reproducible" distinguishable,
+        # which is what these baselines exist to guarantee. The two subjects may
+        # coincide ONLY when the describe is exactly the release tag: then the head is
+        # the release and nothing source-only can be claimed. Any other equal pair (a
+        # commits-ahead describe, or another tag's describe) is a collapse, and an
+        # exact-tag describe over two different commits is a lie in the other
+        # direction. Do not relax this to a bare `source_head == release_tag_commit`
+        # check in either direction.
+        if same_commit and not head_is_the_tagged_release:
             violations.append(
                 {
                     "code": "R254_BASELINE_SUBJECT_COLLAPSE",
                     "message": (
                         "comfyui_frontend source_head and release_tag_commit must "
-                        "stay distinct subjects"
+                        "stay distinct subjects unless source_describe is exactly "
+                        "the release_tag"
                     ),
                 }
             )
-        describe = str(frontend.get("source_describe", "")).strip()
-        release_tag = str(frontend.get("release_tag", "")).strip()
-        if describe and release_tag and not describe.startswith(f"{release_tag}-"):
-            violations.append(
-                {
-                    "code": "R254_BASELINE_DESCRIBE_MISMATCH",
-                    "message": (
-                        "comfyui_frontend source_describe must derive from its "
-                        "release_tag"
-                    ),
-                }
-            )
+        if describe and release_tag:
+            if head_is_the_tagged_release:
+                if not same_commit:
+                    violations.append(
+                        {
+                            "code": "R254_BASELINE_DESCRIBE_MISMATCH",
+                            "message": (
+                                "comfyui_frontend source_describe equals the "
+                                "release_tag, so source_head must equal "
+                                "release_tag_commit"
+                            ),
+                        }
+                    )
+            elif not describe.startswith(f"{release_tag}-"):
+                violations.append(
+                    {
+                        "code": "R254_BASELINE_DESCRIBE_MISMATCH",
+                        "message": (
+                            "comfyui_frontend source_describe must derive from its "
+                            "release_tag"
+                        ),
+                    }
+                )
     return violations
 
 

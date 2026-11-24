@@ -64,6 +64,31 @@ def _matrix_metadata() -> dict:
     return metadata
 
 
+def _subjects_naming_the_reviewed_frontend_head(policy: dict) -> list[str]:
+    """Runnable subjects that carry the reviewed frontend source head where they must not.
+
+    The head may appear in a subject only as the standalone release's own
+    `release_tag_commit`, and only when the policy says the reviewed head is the tagged
+    release (its describe is exactly the release tag). Everything else, including every
+    mention while the head is ahead of its release, is a leak.
+    """
+    not_executed = policy["not_executed"]
+    head = not_executed["frontend_source_head"]
+    leaks = []
+    for subject in policy["subjects"].values():
+        visible = dict(subject)
+        if (
+            subject.get("id") == "standalone_release"
+            and visible.get("release_tag_commit") == head
+            and not_executed.get("frontend_source_describe")
+            == visible.get("release_tag")
+        ):
+            del visible["release_tag_commit"]
+        if head in json.dumps(visible):
+            leaks.append(subject["id"])
+    return leaks
+
+
 class TestPinsAgreeWithTrackedAnchors(unittest.TestCase):
     """A lane pinned to different facts than the matrix would prove nothing."""
 
@@ -242,7 +267,7 @@ class TestHostStartupIsBoundedAndLoopbackOnly(unittest.TestCase):
         self.assertNotIn("--listen", release)
         self.assertNotIn("--front-end-version", bundled)
         self.assertEqual(
-            release[-2:], ["--front-end-version", "Comfy-Org/ComfyUI_frontend@v1.60.0"]
+            release[-2:], ["--front-end-version", "Comfy-Org/ComfyUI_frontend@v1.61.8"]
         )
         for args in (bundled, release):
             for forbidden in POLICY["runtime"]["forbidden_args"]:
@@ -298,15 +323,17 @@ class TestHostStartupIsBoundedAndLoopbackOnly(unittest.TestCase):
 
 
 class TestEvidenceCannotAdvanceWithoutARun(unittest.TestCase):
-    def test_the_matrix_reports_the_refreshed_two_subject_host_campaign(self):
+    def test_the_matrix_reports_the_refreshed_subjects_as_pending(self):
         states = _matrix_metadata()["evidence_states"]["real_host"]
 
+        # No campaign has run against the refreshed subjects, so the lane's recorded
+        # state, the matrix and the frontend module all stay pending with no identifiers.
         self.assertEqual(states["state"], POLICY["evidence"]["current_state"])
-        self.assertEqual(states["state"], "validated")
-        self.assertEqual(states["run_id"], POLICY["evidence"]["run_id"])
-        self.assertEqual(states["evidence_id"], POLICY["evidence"]["evidence_id"])
-        self.assertEqual(states["run_id"], "host-pair-20261101-isolated-01")
-        self.assertEqual(states["evidence_id"], "host-evidence-20261101-isolated-01")
+        self.assertEqual(states["state"], "pending")
+        self.assertIsNone(states["run_id"])
+        self.assertIsNone(states["evidence_id"])
+        self.assertIsNone(POLICY["evidence"]["run_id"])
+        self.assertIsNone(POLICY["evidence"]["evidence_id"])
         self.assertEqual(
             evidence_update_is_allowed(
                 POLICY, states["state"], states["run_id"], states["evidence_id"]
@@ -314,10 +341,37 @@ class TestEvidenceCannotAdvanceWithoutARun(unittest.TestCase):
             [],
         )
 
-    def test_the_frontend_module_reports_real_host_validation(self):
+    def test_the_previous_campaign_survives_only_as_scoped_history(self):
+        history = _matrix_metadata()["historical_evidence"][-1]
+
+        self.assertEqual(history["last_validated_date"], "2026-11-01")
+        self.assertEqual(
+            history["evidence_states"]["real_host"]["run_id"],
+            "host-pair-20261101-isolated-01",
+        )
+        self.assertNotEqual(
+            history["reference_baselines"]["comfyui"]["source_head"],
+            POLICY["core"]["source_head"],
+        )
+        # A pending state may not borrow the history's identifiers.
+        self.assertEqual(
+            evidence_update_is_allowed(
+                POLICY,
+                "pending",
+                history["evidence_states"]["real_host"]["run_id"],
+                history["evidence_states"]["real_host"]["evidence_id"],
+            ),
+            [
+                "evidence state pending must not name a run identifier",
+                "evidence state pending must not name an evidence identifier",
+            ],
+        )
+
+    def test_the_frontend_module_reports_pending_real_host_validation(self):
         surface = HOST_SURFACE_PATH.read_text(encoding="utf-8")
 
-        self.assertIn('HOST_REAL_VALIDATION_STATE = "validated"', surface)
+        self.assertIn('HOST_REAL_VALIDATION_STATE = "pending"', surface)
+        self.assertNotIn('HOST_REAL_VALIDATION_STATE = "validated"', surface)
 
     def test_a_validated_state_requires_both_identifiers(self):
         self.assertEqual(
@@ -470,10 +524,65 @@ class TestRuntimeEvidenceNeverNamesAnUnexecutedCommit(unittest.TestCase):
     def test_the_reviewed_source_head_is_not_offered_as_a_runnable_subject(self):
         not_executed = POLICY["not_executed"]["frontend_source_head"]
 
-        for subject in POLICY["subjects"].values():
-            with self.subTest(subject=subject["id"]):
-                self.assertNotIn(not_executed, json.dumps(subject))
+        self.assertEqual(_subjects_naming_the_reviewed_frontend_head(POLICY), [])
         self.assertNotIn(not_executed, WORKFLOW_PATH.read_text(encoding="utf-8"))
+
+    def test_the_head_equals_the_release_commit_only_for_an_exact_tag_describe(self):
+        not_executed = POLICY["not_executed"]
+        release = POLICY["subjects"]["standalone_release"]
+
+        same_commit = (
+            not_executed["frontend_source_head"] == release["release_tag_commit"]
+        )
+        exact_tag = not_executed["frontend_source_describe"] == release["release_tag"]
+        self.assertEqual(same_commit, exact_tag)
+        if not same_commit:
+            self.assertTrue(
+                not_executed["frontend_source_describe"].startswith(
+                    f"{release['release_tag']}-"
+                )
+            )
+
+    def test_the_head_guard_still_catches_a_head_the_policy_should_not_name(self):
+        distinct = "b" * 40
+
+        # A distinct head named anywhere in a runnable subject.
+        leaked = copy.deepcopy(POLICY)
+        leaked["not_executed"]["frontend_source_head"] = distinct
+        leaked["not_executed"]["frontend_source_describe"] = "v1.61.8-3-gbbbbbbb"
+        self.assertEqual(_subjects_naming_the_reviewed_frontend_head(leaked), [])
+        leaked["subjects"]["bundled"]["summary"] += f" {distinct}"
+        self.assertEqual(
+            _subjects_naming_the_reviewed_frontend_head(leaked), ["bundled"]
+        )
+
+        # A distinct head offered as the release's tag commit is a leak, not the exception.
+        as_release = copy.deepcopy(leaked)
+        as_release["subjects"]["bundled"]["summary"] = POLICY["subjects"]["bundled"][
+            "summary"
+        ]
+        as_release["subjects"]["standalone_release"]["release_tag_commit"] = distinct
+        self.assertEqual(
+            _subjects_naming_the_reviewed_frontend_head(as_release),
+            ["standalone_release"],
+        )
+
+        # The release's own commit is only exempt for an exact-tag describe.
+        ahead = copy.deepcopy(POLICY)
+        ahead["not_executed"]["frontend_source_describe"] = "v1.61.8-3-g388973a"
+        self.assertEqual(
+            _subjects_naming_the_reviewed_frontend_head(ahead), ["standalone_release"]
+        )
+
+        # The exception covers one field, not the rest of the subject.
+        other_field = copy.deepcopy(POLICY)
+        other_field["subjects"]["standalone_release"][
+            "summary"
+        ] += f" {POLICY['not_executed']['frontend_source_head']}"
+        self.assertEqual(
+            _subjects_naming_the_reviewed_frontend_head(other_field),
+            ["standalone_release"],
+        )
 
     def test_the_emitted_pins_expose_only_reproducible_facts(self):
         rendered = emit_pins(POLICY, None)
@@ -493,6 +602,102 @@ class TestRuntimeEvidenceNeverNamesAnUnexecutedCommit(unittest.TestCase):
                 changed["subjects"]["standalone_release"]["release_tag"] = tag
                 with self.assertRaises(SmokeError):
                     emit_pins(changed, None)
+
+
+class TestUnexecutedAlternativesStayApartFromThePinnedSubjects(unittest.TestCase):
+    """The published core release, its tag-only patch tags and a newer frontend patch.
+
+    They were reviewed and recorded, never run. Each one is a different subject from
+    what the lane pins, so none of them may be read as, or leak into, a runnable one.
+    """
+
+    def _alternative_commits(self) -> list[str]:
+        not_executed = POLICY["not_executed"]
+        return [
+            not_executed["core_published_release"]["tag_commit"],
+            *(
+                entry["tag_commit"]
+                for entry in not_executed["core_tag_only_patch_releases"]
+            ),
+        ]
+
+    def test_the_published_core_release_is_a_different_subject_from_the_pinned_source(
+        self,
+    ):
+        published = POLICY["not_executed"]["core_published_release"]
+        core = POLICY["core"]
+        baselines = _matrix_metadata()["reference_baselines"]["comfyui"]
+
+        self.assertNotEqual(published["tag_commit"], core["source_head"])
+        self.assertNotEqual(
+            published["bundled_frontend_version"], core["bundled_frontend_version"]
+        )
+        self.assertNotEqual(
+            published["package_wheel_sha256"],
+            POLICY["subjects"]["bundled"]["package_wheel_sha256"],
+        )
+        self.assertEqual(published["tag"], baselines["tag"])
+        self.assertEqual(published["tag_commit"], baselines["tag_commit"])
+        self.assertRegex(published["package_wheel_sha256"], r"^[0-9a-f]{64}$")
+
+    def test_tag_only_patch_releases_are_distinct_from_every_pinned_commit(self):
+        not_executed = POLICY["not_executed"]
+        patches = not_executed["core_tag_only_patch_releases"]
+        commits = [entry["tag_commit"] for entry in patches]
+
+        self.assertEqual(
+            [entry["tag"] for entry in patches], ["v0.46.1", "v0.46.2", "v0.46.3"]
+        )
+        self.assertEqual(len(set(commits)), len(commits))
+        for commit in commits:
+            with self.subTest(commit=commit):
+                self.assertRegex(commit, r"^[0-9a-f]{40}$")
+                self.assertNotEqual(commit, POLICY["core"]["source_head"])
+                self.assertNotEqual(
+                    commit, not_executed["core_published_release"]["tag_commit"]
+                )
+
+    def test_no_unexecuted_alternative_is_offered_as_a_runnable_subject(self):
+        newer = POLICY["not_executed"]["frontend_core_line_patch"]
+        rendered_subjects = json.dumps(POLICY["subjects"])
+        rendered_pins = emit_pins(POLICY, None)
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        published = POLICY["not_executed"]["core_published_release"]
+
+        # The newer patch of the bundle's line never replaces the bundle the core pins.
+        self.assertNotEqual(
+            POLICY["subjects"]["bundled"]["frontend_version"], newer["version"]
+        )
+        self.assertEqual(
+            POLICY["subjects"]["bundled"]["frontend_version"],
+            POLICY["core"]["bundled_frontend_version"],
+        )
+        for text_name, text in (
+            ("subjects", rendered_subjects),
+            ("emitted pins", rendered_pins),
+            ("workflow", workflow),
+        ):
+            for needle in (
+                *self._alternative_commits(),
+                published["package_wheel_sha256"],
+                newer["version"],
+            ):
+                with self.subTest(text=text_name, needle=needle):
+                    self.assertNotIn(needle, text)
+
+    def test_publisher_reported_digests_say_they_were_not_downloaded_here(self):
+        bundled = POLICY["subjects"]["bundled"]
+        release = POLICY["subjects"]["standalone_release"]
+
+        self.assertRegex(bundled["package_wheel_sha256"], r"^[0-9a-f]{64}$")
+        self.assertGreater(bundled["package_wheel_size_bytes"], 0)
+        for source in (
+            bundled["package_digest_source"],
+            release["release_asset_digest_source"],
+        ):
+            with self.subTest(source=source[:40]):
+                self.assertIn("publisher-reported on 2026-11-24", source)
+                self.assertIn("not independently downloaded here", source)
 
 
 class TestSpecUsesSurfacesThatExistOutsideTheMock(unittest.TestCase):

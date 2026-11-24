@@ -1,6 +1,12 @@
 # ComfyUI Asset API Adoption Decision (2026-04-16)
 
-## 2026-11-01 source review
+## 2026-11-24 source review
+
+- Current source is `da8bd08e` (`v0.46.0-46-gda8bd08e4`, project `0.46.0`), bundle `1.59.11`. Tag `v0.46.0` instead pins `1.59.6`.
+- The reviewed standalone frontend is release `1.61.8`, and its source head is that tagged release.
+- The no-go decision stays in effect: OpenClaw continues to use `/history` and bounded `/view` refs rather than direct `/api/assets` access. The refreshed subjects are pending live qualification, and the 2026-11-01 qualification below applies only to its own subjects.
+
+## Historical 2026-11-01 source review
 
 - Current source is `7c4390a6` (`v0.43.0-21-g7c4390a6f`, project `0.43.0`), bundle `1.57.6`. Tag `v0.43.0` instead pins `1.57.4`.
 - Additive `preview_id` is ignored by the bounded output-ref contract. Host-only `asset_preview` is stripped before client/history/cache output; it never authorizes a URL fetch or a new directory type.
@@ -59,7 +65,7 @@
   - optional asset-hash-backed refs that still resolve through `/view?filename=blake3:...` when host metadata is present
   - media-aware output groups (`images`, `video`, `audio`, `3d`, and bounded `text`)
   - HDR `.exr` / `.hdr` image refs as explicit `/view` source-preview fallback links, not normal thumbnails
-- Current ComfyUI `7c4390a6` / `v0.43.0-21-g7c4390a6f` / pyproject `0.43.0` reference facts:
+- Asset-system reference facts, verified against ComfyUI `7c4390a6` / `v0.43.0-21-g7c4390a6f` / pyproject `0.43.0` and not re-verified against the 2026-11-24 source (the only asset-service file that source changed is the asset scanner's SQLite retry):
   - `/api/assets*` routes exist, but the asset system is off unless `--enable-assets` is given or the Windows standalone build turns it on; `--disable-assets` always wins
   - content hashing is opt-in through `--enable-asset-hashing`, so normal filename-backed refs may omit `asset_hash` / `hash`
   - `/features` exposes the `assets` capability flag so hosts can report whether the asset system is enabled

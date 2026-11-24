@@ -18,12 +18,12 @@ export const HOST_SURFACES = Object.freeze({
  * core manifest pins. These are three different subjects; do not collapse them.
  */
 export const HOST_CORE_REFERENCE = Object.freeze({
-    sourceRevision: "7c4390a6",
-    sourceDescribe: "v0.43.0-21-g7c4390a6f",
-    version: "0.43.0",
-    tag: "v0.43.0",
-    tagRevision: "426f5eea",
-    bundledFrontendVersion: "1.57.6",
+    sourceRevision: "da8bd08e",
+    sourceDescribe: "v0.46.0-46-gda8bd08e4",
+    version: "0.46.0",
+    tag: "v0.46.0",
+    tagRevision: "a277b5bf",
+    bundledFrontendVersion: "1.59.11",
 });
 
 /**
@@ -31,27 +31,30 @@ export const HOST_CORE_REFERENCE = Object.freeze({
  *
  * CRITICAL: source review and repository validation are not runtime proof. This
  * state stays pending until a paired campaign on the current core and both
- * frontend subjects is recorded; do not reuse older evidence or extend it to the later
- * frontend source head or Desktop surfaces, and reset it to `pending` whenever the
- * pinned subjects change.
+ * frontend subjects is recorded; do not reuse older evidence or extend it to the
+ * unexecuted alternatives named in the real-host policy or to Desktop surfaces, and
+ * reset it to `pending` whenever the pinned subjects change.
  */
-export const HOST_REAL_VALIDATION_STATE = "validated";
+export const HOST_REAL_VALIDATION_STATE = "pending";
 
 export const HOST_SURFACE_REFERENCES = Object.freeze({
     [HOST_SURFACES.standaloneFrontend]: Object.freeze({
-        frontendVersion: "1.60.0",
-        sourceRevision: "aa4e48c08d",
-        sourceDescribe: "v1.60.0-209-gaa4e48c08d",
-        // The reproducible release, 209 commits behind the reviewed source head.
-        releaseVersion: "1.60.0",
-        releaseTag: "v1.60.0",
-        releaseRevision: "5cb2899f",
+        frontendVersion: "1.61.8",
+        sourceRevision: "388973acb5",
+        // CRITICAL: the reviewed source head is the tagged release itself, so the
+        // describe is exactly the tag and both revisions name one commit. They may
+        // coincide only for that exact-tag describe; a head ahead of its release
+        // must again carry a "<tag>-N-g<sha>" describe and a distinct revision.
+        sourceDescribe: "v1.61.8",
+        releaseVersion: "1.61.8",
+        releaseTag: "v1.61.8",
+        releaseRevision: "388973acb5",
     }),
     [HOST_SURFACES.desktop]: Object.freeze({
         desktopVersion: "0.9.4",
         coreVersion: "0.22.3",
         embeddedFrontendVersion: "1.43.18",
-        standaloneFrontendVersion: "1.60.0",
+        standaloneFrontendVersion: "1.61.8",
         frontendParity: "lagging",
         generation: "legacy_fixed_bundle",
         hostedVersionMode: "fixed",

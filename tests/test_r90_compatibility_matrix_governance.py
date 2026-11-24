@@ -24,8 +24,8 @@ from services.operator_doctor import DoctorReport, check_compatibility_matrix_go
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_CURRENT_ANCHORS = {
-    "comfyui": "7c4390a6 (v0.43.0-21-g7c4390a6f / pyproject 0.43.0)",
-    "comfyui_frontend": "1.60.0 (aa4e48c08d / v1.60.0-209-gaa4e48c08d)",
+    "comfyui": "da8bd08e (v0.46.0-46-gda8bd08e4 / pyproject 0.46.0)",
+    "comfyui_frontend": "1.61.8 (388973acb5 / v1.61.8)",
     "desktop": "0.9.4 (core 0.22.3 / frontend 1.43.18)",
     "comfy_desktop": "1.0.32-rc.1 (85e28b7a / v1.0.32-rc.1-3-g85e28b7)",
 }
@@ -68,21 +68,33 @@ STALE_ACTIVE_REFERENCE_TOKENS = (
 )
 EXPECTED_REFERENCE_BASELINES = {
     "comfyui": {
-        "bundled_frontend_version": "1.57.6",
-        "project_version": "0.43.0",
-        "source_describe": "v0.43.0-21-g7c4390a6f",
-        "source_head": "7c4390a6f70cd8eb41014d6af52969397a752fc4",
-        "tag": "v0.43.0",
-        "tag_commit": "426f5eea52a7ece1dd599fff4cb6cd1f352ddd24",
+        "bundled_frontend_version": "1.59.11",
+        "project_version": "0.46.0",
+        "source_describe": "v0.46.0-46-gda8bd08e4",
+        "source_head": "da8bd08e48deee74d9f6c3bc00aed365b00ec209",
+        "tag": "v0.46.0",
+        "tag_commit": "a277b5bf213e8a44fa34817b7770b54f86ef4cea",
     },
+    # The reviewed head is the tagged release itself: the describe is exactly the tag.
     "comfyui_frontend": {
-        "package_version": "1.60.0",
-        "release_tag": "v1.60.0",
-        "release_tag_commit": "5cb2899fc4bc5034513fbafae72b39265c4a213e",
-        "release_version": "1.60.0",
-        "source_describe": "v1.60.0-209-gaa4e48c08d",
-        "source_head": "aa4e48c08d364dcd36071131455a7aec40b852ac",
+        "package_version": "1.61.8",
+        "release_tag": "v1.61.8",
+        "release_tag_commit": "388973acb56af768df63749b90627ac767c31be0",
+        "release_version": "1.61.8",
+        "source_describe": "v1.61.8",
+        "source_head": "388973acb56af768df63749b90627ac767c31be0",
     },
+}
+# A reviewed head that is AHEAD of its release: the shape every earlier baseline had.
+# It stays a fixture so the distinct-head rules keep a test subject now that the
+# repository's own frontend baseline is the exact-tag case.
+AHEAD_OF_RELEASE_FRONTEND_BASELINE = {
+    "package_version": "1.60.0",
+    "release_tag": "v1.60.0",
+    "release_tag_commit": "5cb2899fc4bc5034513fbafae72b39265c4a213e",
+    "release_version": "1.60.0",
+    "source_describe": "v1.60.0-209-gaa4e48c08d",
+    "source_head": "aa4e48c08d364dcd36071131455a7aec40b852ac",
 }
 
 
@@ -129,7 +141,7 @@ class TestR90CompatMatrixGovernance(unittest.TestCase):
         )
 
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("standalone frontend release `1.60.0`", readme)
+        self.assertIn("standalone frontend release `1.61.8`", readme)
         self.assertIn("Both historical frontend subjects", readme)
 
     def test_active_current_reference_files_reject_stale_anchors(self):
@@ -561,17 +573,48 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
         validation = validate_metadata(metadata, today=date(2026, 9, 6))
         return validation, {entry["code"] for entry in validation["violations"]}
 
-    def test_repo_matrix_keeps_refreshed_pair_validated_and_history_scoped(self):
+    def test_repo_matrix_keeps_refreshed_pair_pending_and_history_scoped(self):
         metadata = read_matrix_document(
             REPO_ROOT / "docs/release/compatibility_matrix.md"
         )["metadata"]
         states = metadata["evidence_states"]
-        self.assertEqual(states["source_review"]["state"], "reviewed")
         self.assertEqual(
-            states["source_review"]["evidence_id"], "source-review-20261101"
+            states["source_review"],
+            {
+                "state": "reviewed",
+                "run_id": None,
+                "evidence_id": "source-review-20261124",
+            },
+        )
+        # Nothing validated the refreshed subjects yet: no run, no evidence id, no date.
+        pending = {"state": "pending", "run_id": None, "evidence_id": None}
+        self.assertEqual(states["real_host"], pending)
+        self.assertEqual(states["repository_validation"], pending)
+        self.assertIsNone(metadata["last_validated_date"])
+
+        history = metadata["historical_evidence"]
+        self.assertEqual(
+            [entry["last_validated_date"] for entry in history],
+            ["2026-10-13", "2026-11-01"],
+        )
+        first, second = history
+        self.assertEqual(
+            first["reference_baselines"]["comfyui"]["project_version"], "0.39.0"
         )
         self.assertEqual(
-            states["real_host"],
+            first["evidence_states"]["real_host"]["run_id"],
+            "host-pair-20261013-01",
+        )
+        # The 2026-11-01 subjects, date and ids survive as scoped history.
+        self.assertEqual(
+            second["reference_baselines"]["comfyui"]["project_version"], "0.43.0"
+        )
+        self.assertEqual(
+            second["reference_baselines"]["comfyui_frontend"]["release_version"],
+            "1.60.0",
+        )
+        self.assertEqual(
+            second["evidence_states"]["real_host"],
             {
                 "state": "validated",
                 "run_id": "host-pair-20261101-isolated-01",
@@ -579,22 +622,12 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
             },
         )
         self.assertEqual(
-            states["repository_validation"],
+            second["evidence_states"]["repository_validation"],
             {
                 "state": "validated",
                 "run_id": "windows-full-gate-20261101-host-alignment",
                 "evidence_id": "repo-validation-20261101-host-alignment",
             },
-        )
-        self.assertEqual(metadata["last_validated_date"], "2026-11-01")
-        historical = metadata["historical_evidence"][0]
-        self.assertEqual(historical["last_validated_date"], "2026-10-13")
-        self.assertEqual(
-            historical["reference_baselines"]["comfyui"]["project_version"], "0.39.0"
-        )
-        self.assertEqual(
-            historical["evidence_states"]["real_host"]["run_id"],
-            "host-pair-20261013-01",
         )
 
     def test_explicit_unknown_date_is_pending_only_for_schema3_pending_host(self):
@@ -639,17 +672,29 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
                 read_matrix_document(target)["metadata"]["last_validated_date"]
             )
 
-    def test_repo_matrix_separates_frontend_source_head_from_release(self):
+    def test_repo_matrix_keeps_frontend_source_head_and_release_consistent(self):
         doc = read_matrix_document(
             REPO_ROOT / "docs" / "release" / "compatibility_matrix.md"
         )
         frontend = doc["metadata"]["reference_baselines"]["comfyui_frontend"]
-        self.assertNotEqual(frontend["source_head"], frontend["release_tag_commit"])
-        self.assertEqual(frontend["release_version"], "1.60.0")
-        self.assertEqual(frontend["package_version"], "1.60.0")
+        same_commit = frontend["source_head"] == frontend["release_tag_commit"]
+        exact_tag = frontend["source_describe"] == frontend["release_tag"]
+        # The head and the release may be one commit only when the describe is exactly
+        # the release tag, and an exact-tag describe requires one commit.
+        self.assertEqual(same_commit, exact_tag)
+        if not same_commit:
+            self.assertTrue(
+                frontend["source_describe"].startswith(f"{frontend['release_tag']}-")
+            )
+        self.assertEqual(frontend["release_version"], "1.61.8")
+        self.assertEqual(frontend["package_version"], "1.61.8")
+        self.assertEqual(
+            frontend["release_tag_commit"], "388973acb56af768df63749b90627ac767c31be0"
+        )
         core = doc["metadata"]["reference_baselines"]["comfyui"]
         self.assertNotEqual(core["source_head"], core["tag_commit"])
-        self.assertEqual(core["bundled_frontend_version"], "1.57.6")
+        self.assertEqual(core["bundled_frontend_version"], "1.59.11")
+        self.assertEqual(core["tag"], "v0.46.0")
 
     def test_schema_v3_metadata_validates(self):
         validation, codes = self._codes(self._schema3())
@@ -718,13 +763,69 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
         self.assertFalse(validation["ok"])
         self.assertIn("R254_EVIDENCE_ID_SHARED", codes)
 
-    def test_collapsed_frontend_subjects_are_rejected(self):
+    def _schema3_with_frontend(self, **overrides):
         metadata = self._schema3()
-        frontend = metadata["reference_baselines"]["comfyui_frontend"]
-        frontend["release_tag_commit"] = frontend["source_head"]
+        frontend = dict(AHEAD_OF_RELEASE_FRONTEND_BASELINE)
+        frontend.update(overrides)
+        metadata["reference_baselines"]["comfyui_frontend"] = frontend
+        return metadata
+
+    def test_a_head_ahead_of_its_release_is_accepted(self):
+        validation, codes = self._codes(self._schema3_with_frontend())
+        self.assertTrue(validation["ok"], msg=validation["violations"])
+        self.assertEqual(codes, set())
+
+    def test_collapsed_frontend_subjects_are_rejected(self):
+        ahead = AHEAD_OF_RELEASE_FRONTEND_BASELINE
+        metadata = self._schema3_with_frontend(release_tag_commit=ahead["source_head"])
         validation, codes = self._codes(metadata)
         self.assertFalse(validation["ok"])
         self.assertIn("R254_BASELINE_SUBJECT_COLLAPSE", codes)
+
+    def test_collapsed_frontend_subjects_with_another_tags_describe_are_rejected(self):
+        ahead = AHEAD_OF_RELEASE_FRONTEND_BASELINE
+        metadata = self._schema3_with_frontend(
+            release_tag_commit=ahead["source_head"], source_describe="v1.59.0"
+        )
+        validation, codes = self._codes(metadata)
+        self.assertFalse(validation["ok"])
+        self.assertIn("R254_BASELINE_SUBJECT_COLLAPSE", codes)
+
+    def test_a_reviewed_head_that_is_the_tagged_release_is_accepted(self):
+        # The two subjects may coincide only when the describe is exactly the release
+        # tag: the head then is the release and nothing source-only can be claimed.
+        ahead = AHEAD_OF_RELEASE_FRONTEND_BASELINE
+        metadata = self._schema3_with_frontend(
+            release_tag_commit=ahead["source_head"],
+            source_describe=ahead["release_tag"],
+        )
+        validation, codes = self._codes(metadata)
+        self.assertTrue(validation["ok"], msg=validation["violations"])
+        self.assertEqual(codes, set())
+
+    def test_the_repository_baseline_is_the_exact_tag_case(self):
+        validation, codes = self._codes(self._schema3())
+        frontend = EXPECTED_REFERENCE_BASELINES["comfyui_frontend"]
+        self.assertEqual(frontend["source_head"], frontend["release_tag_commit"])
+        self.assertEqual(frontend["source_describe"], frontend["release_tag"])
+        self.assertTrue(validation["ok"], msg=validation["violations"])
+        self.assertEqual(codes, set())
+
+    def test_an_exact_tag_describe_with_a_distinct_head_is_rejected(self):
+        ahead = AHEAD_OF_RELEASE_FRONTEND_BASELINE
+        self.assertNotEqual(ahead["source_head"], ahead["release_tag_commit"])
+        metadata = self._schema3_with_frontend(source_describe=ahead["release_tag"])
+        validation, codes = self._codes(metadata)
+        self.assertFalse(validation["ok"])
+        self.assertIn("R254_BASELINE_DESCRIBE_MISMATCH", codes)
+
+    def test_a_distinct_head_still_needs_a_commits_ahead_describe(self):
+        metadata = self._schema3_with_frontend(
+            source_describe="v1.59.0-209-gaa4e48c08d"
+        )
+        validation, codes = self._codes(metadata)
+        self.assertFalse(validation["ok"])
+        self.assertIn("R254_BASELINE_DESCRIBE_MISMATCH", codes)
 
     def test_short_or_malformed_baseline_commits_are_rejected(self):
         metadata = self._schema3()

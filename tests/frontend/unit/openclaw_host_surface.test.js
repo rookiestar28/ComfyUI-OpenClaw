@@ -11,21 +11,37 @@ import {
     stampHostSurfaceMetadata,
 } from "../../../web/openclaw_host_surface.js";
 
+// A reviewed frontend head and its release may be one commit only when the describe is
+// exactly the release tag; a head ahead of its release needs a distinct revision and a
+// "<tag>-N-g<sha>" describe. Returns the rules the pair breaks.
+function headReleaseViolations(reference) {
+    const sameRevision = reference.sourceRevision === reference.releaseRevision;
+    const exactTag = reference.sourceDescribe === reference.releaseTag;
+    const aheadDescribe = reference.sourceDescribe.startsWith(`${reference.releaseTag}-`);
+    const violations = [];
+    if (sameRevision && !exactTag) violations.push("collapsed");
+    if (exactTag && !sameRevision) violations.push("exact_tag_with_distinct_head");
+    if (!sameRevision && !exactTag && !aheadDescribe) {
+        violations.push("distinct_head_without_commits_ahead_describe");
+    }
+    return violations;
+}
+
 describe("openclaw_host_surface", () => {
     it("publishes exact standalone and two-generation desktop references", () => {
         expect(HOST_SURFACE_REFERENCES[HOST_SURFACES.standaloneFrontend]).toEqual({
-            frontendVersion: "1.60.0",
-            sourceRevision: "aa4e48c08d",
-            sourceDescribe: "v1.60.0-209-gaa4e48c08d",
-            releaseVersion: "1.60.0",
-            releaseTag: "v1.60.0",
-            releaseRevision: "5cb2899f",
+            frontendVersion: "1.61.8",
+            sourceRevision: "388973acb5",
+            sourceDescribe: "v1.61.8",
+            releaseVersion: "1.61.8",
+            releaseTag: "v1.61.8",
+            releaseRevision: "388973acb5",
         });
         expect(HOST_SURFACE_REFERENCES[HOST_SURFACES.desktop]).toEqual({
             desktopVersion: "0.9.4",
             coreVersion: "0.22.3",
             embeddedFrontendVersion: "1.43.18",
-            standaloneFrontendVersion: "1.60.0",
+            standaloneFrontendVersion: "1.61.8",
             frontendParity: "lagging",
             generation: "legacy_fixed_bundle",
             hostedVersionMode: "fixed",
@@ -271,7 +287,7 @@ describe("openclaw_host_surface", () => {
         });
         expect(container.dataset.openclawHostSurface).toBe("desktop");
         expect(container.dataset.openclawDesktopHost).toBe("true");
-        expect(container.dataset.openclawReferenceFrontend).toBe("1.60.0");
+        expect(container.dataset.openclawReferenceFrontend).toBe("1.61.8");
         expect(container.dataset.openclawCurrentDesktopVersion).toBe("1.0.32-rc.1");
         expect(container.dataset.openclawCurrentDesktopGeneration).toBe("managed_install");
         expect(container.dataset.openclawCurrentDesktopHostedVersionMode).toBe(
@@ -381,26 +397,50 @@ describe("openclaw_host_surface", () => {
 describe("R254 host reference baseline separation", () => {
     it("publishes core source, tag and bundled-frontend facts as distinct values", () => {
         expect(HOST_CORE_REFERENCE).toEqual({
-            sourceRevision: "7c4390a6",
-            sourceDescribe: "v0.43.0-21-g7c4390a6f",
-            version: "0.43.0",
-            tag: "v0.43.0",
-            tagRevision: "426f5eea",
-            bundledFrontendVersion: "1.57.6",
+            sourceRevision: "da8bd08e",
+            sourceDescribe: "v0.46.0-46-gda8bd08e4",
+            version: "0.46.0",
+            tag: "v0.46.0",
+            tagRevision: "a277b5bf",
+            bundledFrontendVersion: "1.59.11",
         });
         expect(HOST_CORE_REFERENCE.sourceRevision).not.toBe(HOST_CORE_REFERENCE.tagRevision);
     });
 
-    it("keeps the reviewed frontend source head distinct from the runnable release", () => {
+    it("lets the reviewed frontend source head equal the release only for an exact-tag describe", () => {
+        expect(headReleaseViolations(HOST_SURFACE_REFERENCES[HOST_SURFACES.standaloneFrontend])).toEqual([]);
+
+        // The pinned reference is the exact-tag case: the head IS the tagged release.
         const standalone = HOST_SURFACE_REFERENCES[HOST_SURFACES.standaloneFrontend];
-        expect(standalone.sourceRevision).not.toBe(standalone.releaseRevision);
-        expect(standalone.sourceDescribe.startsWith(`${standalone.releaseTag}-`)).toBe(true);
+        expect(standalone.sourceRevision).toBe(standalone.releaseRevision);
+        expect(standalone.sourceDescribe).toBe(standalone.releaseTag);
     });
 
-    it("reports the completed real-host validation independently from source review", () => {
+    it("still rejects a collapsed or inconsistent head and release pair", () => {
+        const ahead = {
+            releaseTag: "v1.60.0",
+            releaseRevision: "5cb2899f",
+            sourceRevision: "aa4e48c08d",
+            sourceDescribe: "v1.60.0-209-gaa4e48c08d",
+        };
+        // A head ahead of its release stays valid, with a distinct revision and describe.
+        expect(headReleaseViolations(ahead)).toEqual([]);
+        // The same revision under a commits-ahead describe collapses the two subjects.
+        expect(headReleaseViolations({ ...ahead, sourceRevision: ahead.releaseRevision })).toEqual(["collapsed"]);
+        // An exact-tag describe over a distinct head is a false claim of equality.
+        expect(headReleaseViolations({ ...ahead, sourceDescribe: ahead.releaseTag })).toEqual([
+            "exact_tag_with_distinct_head",
+        ]);
+        // A distinct head must still derive its describe from the release tag.
+        expect(headReleaseViolations({ ...ahead, sourceDescribe: "v1.59.0-209-gaa4e48c08d" })).toEqual([
+            "distinct_head_without_commits_ahead_describe",
+        ]);
+    });
+
+    it("keeps real-host validation pending independently from source review", () => {
         // CRITICAL: source review and the local gate are not runtime proof. Only
         // an authorized real-host campaign on these exact subjects may change this.
-        expect(HOST_REAL_VALIDATION_STATE).toBe("validated");
+        expect(HOST_REAL_VALIDATION_STATE).toBe("pending");
     });
 
     it("stamps the separated reference facts on every host surface", () => {
@@ -408,18 +448,16 @@ describe("R254 host reference baseline separation", () => {
             const container = document.createElement("div");
             stampHostSurfaceMetadata(container, { app: { hostSurface: surface }, win: {} });
 
-            expect(container.dataset.openclawCoreSourceRevision, surface).toBe("7c4390a6");
-            expect(container.dataset.openclawCoreVersion, surface).toBe("0.43.0");
-            expect(container.dataset.openclawCoreTagRevision, surface).toBe("426f5eea");
-            expect(container.dataset.openclawCoreBundledFrontend, surface).toBe("1.57.6");
-            expect(container.dataset.openclawFrontendSourceRevision, surface).toBe("aa4e48c08d");
-            expect(container.dataset.openclawFrontendReleaseVersion, surface).toBe("1.60.0");
-            expect(container.dataset.openclawFrontendReleaseRevision, surface).toBe("5cb2899f");
-            expect(container.dataset.openclawRealHostValidation, surface).toBe(
-                surface === HOST_SURFACES.desktop || surface === HOST_SURFACES.comfyDesktop
-                    ? "pending"
-                    : "validated",
-            );
+            expect(container.dataset.openclawCoreSourceRevision, surface).toBe("da8bd08e");
+            expect(container.dataset.openclawCoreVersion, surface).toBe("0.46.0");
+            expect(container.dataset.openclawCoreTagRevision, surface).toBe("a277b5bf");
+            expect(container.dataset.openclawCoreBundledFrontend, surface).toBe("1.59.11");
+            expect(container.dataset.openclawFrontendSourceRevision, surface).toBe("388973acb5");
+            expect(container.dataset.openclawFrontendReleaseVersion, surface).toBe("1.61.8");
+            expect(container.dataset.openclawFrontendReleaseRevision, surface).toBe("388973acb5");
+            // Both Desktop surfaces are pending by construction; the standalone surface is
+            // pending because no campaign has run against the refreshed subjects.
+            expect(container.dataset.openclawRealHostValidation, surface).toBe("pending");
         }
     });
 

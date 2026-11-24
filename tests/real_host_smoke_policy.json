@@ -15,35 +15,66 @@
   },
   "core": {
     "repository": "https://github.com/comfyanonymous/ComfyUI.git",
-    "source_head": "7c4390a6f70cd8eb41014d6af52969397a752fc4",
-    "project_version": "0.43.0",
-    "bundled_frontend_version": "1.57.6"
+    "source_head": "da8bd08e48deee74d9f6c3bc00aed365b00ec209",
+    "project_version": "0.46.0",
+    "bundled_frontend_version": "1.59.11"
   },
   "subjects": {
     "bundled": {
       "id": "bundled",
-      "frontend_version": "1.57.6",
+      "frontend_version": "1.59.11",
       "front_end_version_arg": null,
-      "summary": "The frontend package the core manifest pins. The host serves it when no frontend version is requested."
+      "package_wheel_size_bytes": 30237438,
+      "package_wheel_sha256": "6174105a66d390e10d59d7d5b5c969c8a06157039b9fdc1791c39f55e6a2649e",
+      "package_digest_source": "PyPI release metadata for comfyui-frontend-package 1.59.11; publisher-reported on 2026-11-24 and not independently downloaded here. The host installs the package through the core manifest, so this records the bytes the bundle names, not bytes the lane fetches.",
+      "summary": "The frontend package the core manifest pins. The host serves it when no frontend version is requested. It comes from the frontend core/1.59 release line, which does not carry the per-workflow graph model of the standalone v1.61 release."
     },
     "standalone_release": {
       "id": "standalone_release",
-      "frontend_version": "1.60.0",
-      "front_end_version_arg": "Comfy-Org/ComfyUI_frontend@v1.60.0",
-      "release_tag": "v1.60.0",
-      "release_tag_commit": "5cb2899fc4bc5034513fbafae72b39265c4a213e",
+      "frontend_version": "1.61.8",
+      "front_end_version_arg": "Comfy-Org/ComfyUI_frontend@v1.61.8",
+      "release_tag": "v1.61.8",
+      "release_tag_commit": "388973acb56af768df63749b90627ac767c31be0",
       "release_asset_name": "dist.zip",
-      "release_asset_sha256": "3b802ce095609a80e62e2557a5a18551070ba51f614839eb89c7314bed4dd5a2",
-      "release_asset_size_bytes": 29336742,
-      "release_asset_digest_source": "GitHub release API, tag v1.60.0, asset dist.zip; publisher-reported and independently downloaded and hashed on 2026-11-01. The lane hashes downloaded bytes and refuses a mismatch.",
-      "web_root_relative": "web_custom_versions/Comfy-Org_ComfyUI_frontend/1.60.0",
+      "release_asset_sha256": "36daaecc9581467f9ec40a81b01c53f04ed4d3017404051ece008c81a459f9f0",
+      "release_asset_size_bytes": 32829082,
+      "release_asset_digest_source": "GitHub release API, tag v1.61.8, asset dist.zip; publisher-reported on 2026-11-24 and not independently downloaded here. The lane hashes downloaded bytes and refuses a mismatch.",
+      "web_root_relative": "web_custom_versions/Comfy-Org_ComfyUI_frontend/1.61.8",
       "summary": "The reproducible standalone release. Its asset digest is pinned from published release metadata, so the lane verifies the artifact before the host sees it; the subject still refuses to run without explicit authorization."
     }
   },
   "not_executed": {
-    "frontend_source_head": "aa4e48c08d364dcd36071131455a7aec40b852ac",
-    "frontend_source_describe": "v1.60.0-209-gaa4e48c08d",
-    "reason": "A reviewed checkout 209 commits ahead of release v1.60.0 despite sharing package version 1.60.0. Its queue UI refresh, status retries and extension-loader changes are source-only, not evidence for the release. No runtime evidence may name this source commit."
+    "frontend_source_head": "388973acb56af768df63749b90627ac767c31be0",
+    "frontend_source_describe": "v1.61.8",
+    "reason": "The reviewed frontend source head is the tagged release v1.61.8 itself, so there is no source-only commit to keep apart from the release. The only runnable form of it is the hash-pinned release asset of the standalone release subject, and no runtime evidence may name this commit except as that subject's release tag commit.",
+    "core_published_release": {
+      "tag": "v0.46.0",
+      "tag_commit": "a277b5bf213e8a44fa34817b7770b54f86ef4cea",
+      "bundled_frontend_version": "1.59.6",
+      "package_wheel_size_bytes": 30145435,
+      "package_wheel_sha256": "7564e716da2d1e122612f067bcffda6c3b9bc766f3b9f8c85fc44cf1d9c54f85",
+      "reason": "The latest published core release. The pinned core source is 46 commits ahead of it and pins a newer bundle, so it was not run and no result may be attributed to it."
+    },
+    "core_tag_only_patch_releases": [
+      {
+        "tag": "v0.46.1",
+        "tag_commit": "e19f5e957964737da3e80fc54cd21f190a9c7ef3"
+      },
+      {
+        "tag": "v0.46.2",
+        "tag_commit": "10cdd12609eb17e8a90f2a2dd811b1c82f6107e7"
+      },
+      {
+        "tag": "v0.46.3",
+        "tag_commit": "cab5f4e13b83c58482cd514afb22ca925e117638"
+      }
+    ],
+    "core_tag_only_reason": "Tags on a release branch that is not an ancestor of the pinned core source. All pin bundled frontend 1.59.6 and none had a published release when the subjects were reviewed. They were not run.",
+    "frontend_core_line_patch": {
+      "version": "1.59.14",
+      "published_at": "2026-11-24T09:00:53Z",
+      "reason": "A newer patch on the frontend core/1.59 line, published after the pinned core source was reviewed. The core still pins 1.59.11, so the bundled subject stays 1.59.11 and this version was not run. It is never a substitute for the bundle the core pins."
+    }
   },
   "deadlines_seconds": {
     "fetch": 900,
@@ -78,9 +109,9 @@
     "matrix_path": "docs/release/compatibility_matrix.md",
     "surface_module": "web/openclaw_host_surface.js",
     "evidence_key": "real_host",
-    "current_state": "validated",
-    "run_id": "host-pair-20261101-isolated-01",
-    "evidence_id": "host-evidence-20261101-isolated-01",
+    "current_state": "pending",
+    "run_id": null,
+    "evidence_id": null,
     "states_requiring_run_id": [
       "validated",
       "failed"
