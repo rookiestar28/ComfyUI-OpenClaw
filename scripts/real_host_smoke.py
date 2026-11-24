@@ -179,17 +179,166 @@ def build_host_args(
     return args
 
 
+FAILURE_TAIL_LINES = 40
+FAILURE_TAIL_CHARACTERS = 4096
+FAILURE_TAIL_INDENT = "    | "
+REDACTION_MARK = "***"
+_URL_CREDENTIALS = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]{0,31}://)[^\s/@]+@")
+_AUTHORIZATION_VALUE = re.compile(
+    r"""(authorization["']?[ \t]{0,4}[=:][ \t]{0,4})[^\r\n]+""", re.IGNORECASE
+)
+_SECRET_ASSIGNMENT = re.compile(
+    r"""((?:token|password)["']?[ \t]{0,4}[=:][ \t]{0,4})"""
+    r"""("[^"\r\n]*"?|'[^'\r\n]*'?|[^\s"'&]+)""",
+    re.IGNORECASE,
+)
+_BEARER_VALUE = re.compile(r"(\bbearer[ \t]{1,4})[A-Za-z0-9._~+/=\-]+", re.IGNORECASE)
+_COMMAND_WORD = re.compile(r"[A-Za-z][A-Za-z0-9_.\-]*\Z")
+
+
+def _home_directory_pattern() -> re.Pattern[str] | None:
+    """Match the current user's home directory in each spelling a log can carry."""
+    try:
+        home = Path.home()
+    except (RuntimeError, OSError):
+        return None
+    text = str(home)
+    # A drive or filesystem root would turn every path in the output into "~...".
+    if len(text) < 4 or home == Path(home.anchor):
+        return None
+    spellings = {text, home.as_posix(), text.replace("\\", "\\\\")}
+    alternatives = "|".join(
+        re.escape(spelling) for spelling in sorted(spellings, key=len, reverse=True)
+    )
+    return re.compile(
+        rf"(?:{alternatives})(?![\w.\-])", re.IGNORECASE if os.name == "nt" else 0
+    )
+
+
+def _redact(text: str) -> str:
+    """Mask credentials and the user's home directory in subprocess output.
+
+    The caller redacts the whole stream before it cuts the tail, so a secret that
+    straddles the cut cannot leave its second half behind without the key that
+    names it. Nothing here is a bounded-length value: cutting a long secret off at
+    some limit would leave the rest of it in the log, so each value runs to its own
+    end. No pattern starts with an open-ended run, so a long stream that merely
+    resembles one cannot make the scan quadratic.
+    """
+    text = _URL_CREDENTIALS.sub(lambda m: f"{m.group(1)}{REDACTION_MARK}@", text)
+    text = _AUTHORIZATION_VALUE.sub(lambda m: f"{m.group(1)}{REDACTION_MARK}", text)
+    text = _SECRET_ASSIGNMENT.sub(lambda m: f"{m.group(1)}{REDACTION_MARK}", text)
+    text = _BEARER_VALUE.sub(lambda m: f"{m.group(1)}{REDACTION_MARK}", text)
+    home = _home_directory_pattern()
+    return text if home is None else home.sub("~", text)
+
+
+def _stream_text(stream: str | bytes | None) -> str:
+    """Text of a captured stream; a timeout reports bytes even in text mode."""
+    if stream is None:
+        return ""
+    if isinstance(stream, bytes):
+        return stream.decode("utf-8", errors="replace")
+    return stream
+
+
+def _tail(text: str) -> tuple[str, bool]:
+    """The last lines of a stream, within both bounds, and whether any were cut."""
+    lines = text.rstrip().splitlines()
+    cut = len(lines) > FAILURE_TAIL_LINES
+    tail = "\n".join(lines[-FAILURE_TAIL_LINES:])
+    if len(tail) > FAILURE_TAIL_CHARACTERS:
+        tail = tail[-FAILURE_TAIL_CHARACTERS:]
+        cut = True
+    return tail, cut
+
+
+def _command_label(command: list[str]) -> str:
+    """Name a command by its program and subcommand, never by its arguments.
+
+    Arguments carry workspace paths, repository addresses and inline code, so
+    none of them is printed. A word counts only when it looks like one, which
+    keeps an address or a path out even when it sits where a subcommand would.
+    """
+    if not command:
+        return "command"
+    program = ntpath.basename(command[0])
+    if program.lower().endswith(".exe"):
+        program = program[:-4]
+    label = [program or "command"]
+    words: list[str] = []
+    skip_value = False
+    runs_module = False
+    for token in command[1:]:
+        if skip_value:
+            skip_value = False
+        elif token in ("-C", "-c"):
+            skip_value = True
+        elif token == "-m":
+            runs_module = True
+        elif token.startswith("-"):
+            if words:
+                break
+        elif _COMMAND_WORD.match(token):
+            words.append(token)
+            if len(words) == 2:
+                break
+        else:
+            break
+    if runs_module:
+        label.append("-m")
+    return _redact(" ".join(label + words))
+
+
+def _describe_failure(
+    command: list[str],
+    outcome: str,
+    stdout: str | bytes | None,
+    stderr: str | bytes | None,
+) -> str:
+    """The printed cause of a failed command: its outcome and a redacted tail."""
+    lines = [f"{_command_label(command)} {outcome}"]
+    shown = False
+    for name, stream in (("stderr", stderr), ("stdout", stdout)):
+        tail, cut = _tail(_redact(_stream_text(stream)))
+        if not tail:
+            continue
+        shown = True
+        lines.append(f"{name} tail{' (earlier output omitted)' if cut else ''}:")
+        lines.extend(f"{FAILURE_TAIL_INDENT}{line}" for line in tail.splitlines())
+    if not shown:
+        lines.append("no output was captured")
+    return "\n".join(lines)
+
+
 def _run(
     command: list[str], *, cwd: Path | None = None, timeout: float
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        command,
-        cwd=None if cwd is None else str(cwd),
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=timeout,
-    )
+    # CRITICAL: a failed command must reach the log with a redacted tail of its own
+    # output. A bare CalledProcessError names only the command and its exit status,
+    # which left a failed dependency install in the hosted lane without any recorded
+    # cause; printing the output unredacted would instead put credentials and home
+    # paths into public CI logs. Do not let the subprocess errors propagate again,
+    # and do not print a stream that has not been through _redact.
+    try:
+        return subprocess.run(
+            command,
+            cwd=None if cwd is None else str(cwd),
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=timeout,
+        )
+    except subprocess.CalledProcessError as exc:
+        outcome = f"failed with exit status {exc.returncode}"
+        raise SmokeError(
+            _describe_failure(command, outcome, exc.stdout, exc.stderr)
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        outcome = f"timed out after {exc.timeout:g}s"
+        raise SmokeError(
+            _describe_failure(command, outcome, exc.stdout, exc.stderr)
+        ) from exc
 
 
 def fetch_core(
