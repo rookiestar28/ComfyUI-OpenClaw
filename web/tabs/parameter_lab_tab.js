@@ -4,11 +4,13 @@ import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 import { openclawApi } from "../openclaw_api.js";
 import {
+    captureGraphBinding,
     findComparableWidget,
     getGraphNodeCatalog,
     getGraphWidgetCatalog,
     getGraphWidgetValueCandidates,
     resolveGraphWidget,
+    verifyGraphBinding,
 } from "../openclaw_graph_host.js";
 import {
     PARAMETER_LAB_POLICY,
@@ -20,6 +22,11 @@ import {
 } from "../openclaw_parameter_lab_policy.js";
 import { createParameterLabReceiptCoordinator } from "../openclaw_parameter_lab_receipt.js";
 import { openclawUI } from "../openclaw_ui.js";
+
+const WORKFLOW_CHANGED_MESSAGE =
+    "The workflow changed. Return to the original workflow or rebuild the plan.";
+const PLAN_WORKFLOW_CHANGED_MESSAGE =
+    "The workflow changed while the plan was being built. Rebuild the plan from the current workflow.";
 
 /**
  * F52: Parameter Lab Tab
@@ -36,6 +43,8 @@ export const ParameterLabTab = {
     // State
     dimensions: [],
     plan: null,
+    // The workflow graph the active plan was built from (or loaded into); see verifyGraphBinding.
+    _graphBinding: null,
     experimentId: null,
     isRunning: false,
     results: [],
@@ -159,6 +168,7 @@ export const ParameterLabTab = {
             this._receiptCoordinator || this._runController || this.es
         );
         this._disposeRunRuntime();
+        this._graphBinding = null;
         return hadRuntime;
     },
 
@@ -232,6 +242,7 @@ export const ParameterLabTab = {
             const res = await openclawApi.fetch(openclawApi._path(`/lab/experiments/${expId}`));
             if (res.ok && res.data) {
                 this.plan = res.data.experiment;
+                this._graphBinding = captureGraphBinding(app);
                 this.experimentId = this.plan.experiment_id;
                 this.renderPlan();
             }
@@ -642,7 +653,18 @@ export const ParameterLabTab = {
         }
 
         try {
-            const graphJson = JSON.stringify(app.graph.serialize());
+            // Serialize the very graph the plan will be bound to: one accessor path, never a second
+            // read of the host's graph alias, which can name a different graph than the root one.
+            const binding = captureGraphBinding(app);
+            const bound = binding ? verifyGraphBinding(binding, app) : null;
+            if (!bound?.ok) {
+                openclawUI.showBanner(
+                    "error",
+                    "Parameter Lab validation failed: invalid_payload"
+                );
+                return;
+            }
+            const graphJson = JSON.stringify(bound.graph.serialize());
             const workflowValidation = validateParameterLabWorkflow(graphJson);
             if (!workflowValidation.ok) {
                 openclawUI.showBanner(
@@ -686,7 +708,12 @@ export const ParameterLabTab = {
             });
 
             if (res.ok && res.data) {
+                if (!verifyGraphBinding(binding, app).ok) {
+                    openclawUI.showBanner("error", PLAN_WORKFLOW_CHANGED_MESSAGE);
+                    return;
+                }
                 this.plan = res.data.plan;
+                this._graphBinding = binding;
                 this.experimentId = this.plan.experiment_id;
                 this.renderPlan();
                 openclawUI.showBanner("success", `Plan generated: ${this.plan.runs.length} runs.`);
@@ -771,6 +798,8 @@ export const ParameterLabTab = {
             return;
         }
         const signal = this._runController.signal;
+        const binding = this._graphBinding;
+        let workflowChanged = false;
 
         try {
             for (let i = 0; i < this.plan.runs.length; i++) {
@@ -784,6 +813,11 @@ export const ParameterLabTab = {
                 statusSpan.textContent = "Queuing...";
 
                 try {
+                    // 0. Fail before any write or submission when the plan's workflow is gone.
+                    if (!verifyGraphBinding(binding, app).ok) {
+                        throw Object.assign(new Error("workflow_changed"), { code: "workflow_changed" });
+                    }
+
                     // 1. Apply overrides
                     const receiptWidget = this.applyOverrides(run);
                     if (!receiptWidget) {
@@ -796,6 +830,7 @@ export const ParameterLabTab = {
                         runId: String(i),
                         widget: receiptWidget,
                         signal,
+                        binding,
                     });
                     if (signal.aborted) {
                         receipt.release();
@@ -822,6 +857,16 @@ export const ParameterLabTab = {
                     });
                 } catch (error) {
                     if (signal.aborted) break;
+                    if (error?.code === "workflow_changed") {
+                        statusSpan.className = "run-status error";
+                        statusSpan.textContent = "Workflow changed";
+                        await this._updateRun(i, { status: "failed" });
+                        console.error("[OpenClaw] Parameter Lab queue failed", {
+                            code: "workflow_changed",
+                        });
+                        workflowChanged = true;
+                        break;
+                    }
                     statusSpan.className = "run-status error";
                     statusSpan.textContent = "Queue Failed";
                     await this._updateRun(i, { status: "failed" });
@@ -834,7 +879,11 @@ export const ParameterLabTab = {
             }
         } finally {
             this._queueingComplete = true;
-            if (!signal.aborted) {
+            if (workflowChanged && !signal.aborted) {
+                // Runs queued before the change keep being monitored; the rest of the sweep is dropped.
+                if (this._activePromptIds.size === 0) this.isRunning = false;
+                openclawUI.showBanner("error", WORKFLOW_CHANGED_MESSAGE);
+            } else if (!signal.aborted) {
                 if (this._queuedRunCount > 0 && this._activePromptIds.size > 0) {
                     openclawUI.showBanner(
                         "success",
@@ -899,6 +948,10 @@ export const ParameterLabTab = {
     },
 
     replayRun(run) {
+        if (!verifyGraphBinding(this._graphBinding, app).ok) {
+            openclawUI.showBanner("error", WORKFLOW_CHANGED_MESSAGE);
+            return;
+        }
         if (confirm("Apply these parameter values to the current workflow?")) {
             try {
                 this.applyOverrides(run);

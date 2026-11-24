@@ -5,6 +5,8 @@
  * selection, and adds a transient UUID only to the matching serialized workflow.
  */
 
+import { verifyGraphBinding } from "./openclaw_graph_host.js";
+
 export const PARAMETER_LAB_RECEIPT_KEY = "__openclaw_parameter_lab_receipt__";
 export const PARAMETER_LAB_RECEIPT_VERSION = 1;
 
@@ -122,7 +124,7 @@ class ParameterLabReceiptCoordinator {
     };
   }
 
-  queue({ experimentId, runId, widget, signal } = {}) {
+  queue({ experimentId, runId, widget, signal, binding } = {}) {
     if (this.disposed) {
       return Promise.reject(receiptError("coordinator_disposed"));
     }
@@ -131,6 +133,12 @@ class ParameterLabReceiptCoordinator {
     }
     if (!widget || typeof widget !== "object") {
       return Promise.reject(receiptError("receipt_widget_required"));
+    }
+    if (!binding || typeof binding !== "object") {
+      return Promise.reject(receiptError("workflow_binding_required"));
+    }
+    if (!verifyGraphBinding(binding, this.app).ok) {
+      return Promise.reject(receiptError("workflow_changed"));
     }
     if (this.attempts.size >= MAX_ACTIVE_ATTEMPTS) {
       return Promise.reject(receiptError("too_many_receipt_attempts"));
@@ -166,6 +174,7 @@ class ParameterLabReceiptCoordinator {
       runId,
       promptId,
       signal,
+      binding,
     });
     if (ownsNewWindow) this.hostWindowOwned = true;
     this.captureAttempt = attempt;
@@ -212,13 +221,14 @@ class ParameterLabReceiptCoordinator {
     this._uninstall();
   }
 
-  _createAttempt({ experimentId, runId, promptId, signal }) {
+  _createAttempt({ experimentId, runId, promptId, signal, binding }) {
     const id = this.nextAttemptId++;
     const attempt = {
       id,
       experimentId: String(experimentId ?? ""),
       runId: String(runId ?? ""),
       promptId,
+      binding,
       requestId: null,
       state: "pending",
       serializedCount: 0,
@@ -378,7 +388,15 @@ class ParameterLabReceiptCoordinator {
 
   _armSerialization(attempt) {
     const coordinator = this;
-    const graph = this.app.rootGraph ?? this.app.graph;
+    // IMPORTANT: arm only on the graph this attempt was bound to. The host can switch workflows
+    // between queuePrompt() and beforeQueued; arming whichever graph is active then would stamp the
+    // receipt into the other workflow's submission and record it as this run's success.
+    const verified = verifyGraphBinding(attempt.binding, this.app);
+    if (!verified.ok) {
+      this._failAttempt(attempt, "workflow_changed");
+      return;
+    }
+    const graph = verified.graph;
     if (!graph || typeof graph.serialize !== "function") {
       this._failAttempt(attempt, "unsupported_graph_serialization");
       return;

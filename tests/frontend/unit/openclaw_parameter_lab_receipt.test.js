@@ -4,11 +4,25 @@ import {
   PARAMETER_LAB_RECEIPT_KEY,
   createParameterLabReceiptCoordinator,
 } from "../../../web/openclaw_parameter_lab_receipt.js";
+import { captureGraphBinding } from "../../../web/openclaw_graph_host.js";
 
 class FakeApi extends EventTarget {
   emit(type, detail) {
     this.dispatchEvent(new CustomEvent(type, { detail }));
   }
+}
+
+function createFakeGraph(id = "workflow-a") {
+  return {
+    id,
+    extra: { preserved: true },
+    onSerialize: vi.fn(),
+    serialize() {
+      const data = { nodes: [], extra: { ...this.extra } };
+      this.onSerialize?.(data);
+      return data;
+    },
+  };
 }
 
 function createHostFixture({ updateUi = () => Promise.resolve() } = {}) {
@@ -20,15 +34,8 @@ function createHostFixture({ updateUi = () => Promise.resolve() } = {}) {
     beforeQueued: beforeQueuedSpy,
     afterQueued: afterQueuedSpy,
   };
-  const graph = {
-    extra: { preserved: true },
-    onSerialize: vi.fn(),
-    serialize() {
-      const data = { nodes: [], extra: { ...this.extra } };
-      this.onSerialize?.(data);
-      return data;
-    },
-  };
+  const graph = createFakeGraph();
+  const hooks = { afterPreamble: null };
   let nextRequestId = 1;
   let nextForeignId = 1;
   const app = {
@@ -44,13 +51,15 @@ function createHostFixture({ updateUi = () => Promise.resolve() } = {}) {
 
       this.processingQueue = true;
       await Promise.resolve();
+      // Models the host's async preamble, during which the user can switch workflow tabs.
+      hooks.afterPreamble?.();
       try {
         while (this.queueItems.length) {
           const request = this.queueItems.pop();
           let queuedCount = 0;
           for (let index = 0; index < request.batchCount; index += 1) {
             widget.beforeQueued?.({ isPartialExecution: false });
-            const workflow = graph.serialize();
+            const workflow = (this.rootGraph ?? this.graph).serialize();
             const marker = workflow.extra?.[PARAMETER_LAB_RECEIPT_KEY];
             const promptId = marker?.prompt_id || `foreign-${nextForeignId++}`;
             submissions.push({
@@ -74,10 +83,16 @@ function createHostFixture({ updateUi = () => Promise.resolve() } = {}) {
       return true;
     },
   };
+  function switchWorkflow(next) {
+    app.graph = next;
+    app.rootGraph = next;
+  }
   return {
     api,
     app,
     graph,
+    hooks,
+    switchWorkflow,
     submissions,
     widget,
     beforeQueuedSpy,
@@ -97,7 +112,7 @@ describe("Parameter Lab authoritative queue receipt", () => {
     const coordinator = createParameterLabReceiptCoordinator({
       app: fixture.app, api: fixture.api, uuidFactory: () => id, timeoutMs: 1000,
     });
-    const receipt = await coordinator.queue({ experimentId: "exp-delayed-ui", runId: "0", widget: fixture.widget });
+    const receipt = await coordinator.queue({ experimentId: "exp-delayed-ui", runId: "0", widget: fixture.widget, binding: captureGraphBinding(fixture.app) });
     expect(receipt.promptId).toBe(id);
     expect(fixture.submissions).toHaveLength(1);
     expect(fixture.beforeQueuedSpy).toHaveBeenCalledTimes(1);
@@ -127,11 +142,13 @@ describe("Parameter Lab authoritative queue receipt", () => {
       experimentId: "exp-one",
       runId: "0",
       widget: fixture.widget,
+      binding: captureGraphBinding(fixture.app),
     });
     const second = coordinator.queue({
       experimentId: "exp-two",
       runId: "0",
       widget: fixture.widget,
+      binding: captureGraphBinding(fixture.app),
     });
     const unrelated = fixture.app.queuePrompt(0, 1);
 
@@ -192,6 +209,7 @@ describe("Parameter Lab authoritative queue receipt", () => {
       experimentId: "exp-life",
       runId: "7",
       widget: fixture.widget,
+      binding: captureGraphBinding(fixture.app),
     });
     const observed = [];
     receipt.subscribeLifecycle((event) => observed.push(event.type));
@@ -223,6 +241,7 @@ describe("Parameter Lab authoritative queue receipt", () => {
       experimentId: "exp-consumer-failure",
       runId: "0",
       widget: fixture.widget,
+      binding: captureGraphBinding(fixture.app),
     });
     receipt.subscribeLifecycle(() => {
       throw new Error("private lifecycle consumer detail");
@@ -253,6 +272,7 @@ describe("Parameter Lab authoritative queue receipt", () => {
       experimentId: "exp-private",
       runId: "0",
       widget: fixture.widget,
+      binding: captureGraphBinding(fixture.app),
     });
     const observed = [];
     receipt.subscribeLifecycle((event) => observed.push(event));
@@ -290,6 +310,7 @@ describe("Parameter Lab authoritative queue receipt", () => {
       experimentId: "exp-sequential",
       runId: "0",
       widget: fixture.widget,
+      binding: captureGraphBinding(fixture.app),
     });
     expect(fixture.app.processingQueue).toBe(false);
 
@@ -297,6 +318,7 @@ describe("Parameter Lab authoritative queue receipt", () => {
       experimentId: "exp-sequential",
       runId: "1",
       widget: fixture.widget,
+      binding: captureGraphBinding(fixture.app),
     });
 
     expect(first.promptId).toBe("36363636-3636-4636-8636-363636363636");
@@ -321,6 +343,7 @@ describe("Parameter Lab authoritative queue receipt", () => {
         experimentId: "exp-busy",
         runId: "0",
         widget: fixture.widget,
+        binding: captureGraphBinding(fixture.app),
       }),
     ).rejects.toMatchObject({ code: "host_queue_unobserved_busy" });
     expect(fixture.app.queueItems).toEqual([]);
@@ -341,6 +364,7 @@ describe("Parameter Lab authoritative queue receipt", () => {
         experimentId: "exp-bad",
         runId: "0",
         widget: malformedFixture.widget,
+        binding: captureGraphBinding(malformedFixture.app),
       }),
     ).rejects.toMatchObject({ code: "invalid_receipt_id" });
     malformed.dispose();
@@ -361,6 +385,7 @@ describe("Parameter Lab authoritative queue receipt", () => {
         experimentId: "exp-cancel",
         runId: "0",
         widget: fixture.widget,
+        binding: captureGraphBinding(fixture.app),
         signal: controller.signal,
       }),
     ).rejects.toMatchObject({ code: "attempt_cancelled" });
@@ -389,6 +414,7 @@ describe("Parameter Lab authoritative queue receipt", () => {
       experimentId: "exp-fast",
       runId: "0",
       widget: fixture.widget,
+      binding: captureGraphBinding(fixture.app),
     });
     const observed = [];
     receipt.subscribeLifecycle((event) => observed.push(event.type));
@@ -416,6 +442,7 @@ describe("Parameter Lab authoritative queue receipt", () => {
         experimentId: "exp-collision",
         runId: "0",
         widget: collision.widget,
+        binding: captureGraphBinding(collision.app),
       }),
     ).rejects.toMatchObject({ code: "receipt_marker_collision" });
     collisionCoordinator.dispose();
@@ -437,6 +464,7 @@ describe("Parameter Lab authoritative queue receipt", () => {
         experimentId: "exp-callback",
         runId: "0",
         widget: callbackFailure.widget,
+        binding: captureGraphBinding(callbackFailure.app),
       }),
     ).rejects.toMatchObject({ code: "host_queue_failed" });
     expect(callbackFailure.widget.beforeQueued).toBe(originalBefore);
@@ -470,6 +498,7 @@ describe("Parameter Lab authoritative queue receipt", () => {
         experimentId: "exp-timeout",
         runId: "0",
         widget: fixture.widget,
+        binding: captureGraphBinding(fixture.app),
       });
       const rejection = expect(pending).rejects.toMatchObject({
         code: "receipt_timeout",
@@ -499,6 +528,7 @@ describe("Parameter Lab authoritative queue receipt", () => {
       experimentId: "exp-boundary-flood",
       runId: "0",
       widget: fixture.widget,
+      binding: captureGraphBinding(fixture.app),
     });
     const observed = [];
     receipt.subscribeLifecycle((event) => observed.push(event.type));
@@ -519,6 +549,73 @@ describe("Parameter Lab authoritative queue receipt", () => {
       lifecycleSubscriptions: 0,
       installed: false,
     });
+    coordinator.dispose();
+  });
+});
+
+describe("Parameter Lab receipt workflow binding", () => {
+  const id = "55555555-5555-4555-8555-555555555555";
+
+  function createBoundCoordinator(fixture) {
+    return createParameterLabReceiptCoordinator({
+      app: fixture.app,
+      api: fixture.api,
+      uuidFactory: () => id,
+      timeoutMs: 1000,
+    });
+  }
+
+  it("rejects a queue request that carries no workflow binding before touching the host", async () => {
+    const fixture = createHostFixture();
+    const serializer = fixture.graph.onSerialize;
+    const queuePrompt = vi.spyOn(fixture.app, "queuePrompt");
+    const coordinator = createBoundCoordinator(fixture);
+    await expect(
+      coordinator.queue({ experimentId: "exp-unbound", runId: "0", widget: fixture.widget }),
+    ).rejects.toMatchObject({ code: "workflow_binding_required" });
+    expect(queuePrompt).not.toHaveBeenCalled();
+    expect(fixture.widget.beforeQueued).toBe(fixture.beforeQueuedSpy);
+    expect(fixture.graph.onSerialize).toBe(serializer);
+    expect(coordinator.debugSnapshot()).toMatchObject({ activeAttempts: 0, installed: false });
+    coordinator.dispose();
+  });
+
+  it("rejects before any host call when the workflow already changed", async () => {
+    const fixture = createHostFixture();
+    const other = createFakeGraph("workflow-b");
+    const otherSerializer = other.onSerialize;
+    const queuePrompt = vi.spyOn(fixture.app, "queuePrompt");
+    const coordinator = createBoundCoordinator(fixture);
+    const binding = captureGraphBinding(fixture.app);
+    fixture.switchWorkflow(other);
+    await expect(
+      coordinator.queue({ experimentId: "exp-switched", runId: "0", widget: fixture.widget, binding }),
+    ).rejects.toMatchObject({ code: "workflow_changed" });
+    expect(queuePrompt).not.toHaveBeenCalled();
+    expect(fixture.widget.beforeQueued).toBe(fixture.beforeQueuedSpy);
+    expect(other.onSerialize).toBe(otherSerializer);
+    expect(coordinator.debugSnapshot()).toMatchObject({ activeAttempts: 0, installed: false });
+    coordinator.dispose();
+  });
+
+  it("fails the run and arms nothing on the other workflow when a switch lands inside the host preamble", async () => {
+    const fixture = createHostFixture();
+    const other = createFakeGraph("workflow-b");
+    const otherSerializer = other.onSerialize;
+    const coordinator = createBoundCoordinator(fixture);
+    const binding = captureGraphBinding(fixture.app);
+    fixture.hooks.afterPreamble = () => fixture.switchWorkflow(other);
+
+    await expect(
+      coordinator.queue({ experimentId: "exp-preamble", runId: "0", widget: fixture.widget, binding }),
+    ).rejects.toMatchObject({ code: "workflow_changed" });
+
+    // The host still submitted what the other workflow serialized; it carries no marker and
+    // nothing was recorded as this run's success.
+    expect(fixture.submissions).toHaveLength(1);
+    expect(fixture.submissions[0].marker).toBeNull();
+    expect(other.onSerialize).toBe(otherSerializer);
+    expect(coordinator.debugSnapshot()).toMatchObject({ activeAttempts: 0, lifecycleSubscriptions: 0 });
     coordinator.dispose();
   });
 });

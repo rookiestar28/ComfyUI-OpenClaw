@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+    captureGraphBinding,
     findComparableWidget,
     getGraphNodeEntry,
     getGraphNodeEntryByObject,
     getGraphNodeCatalog,
     getGraphWidgetCatalog,
     getGraphWidgetValueCandidates,
+    readActiveWorkflowGraph,
     resolveGraphWidget,
+    verifyGraphBinding,
 } from "../../../web/openclaw_graph_host.js";
 
 describe("host store-backed widget values", () => {
@@ -477,5 +480,128 @@ describe("opaque graph execution identities", () => {
         }
         expect(resolveGraphWidget(graph, childId, "ckpt_name")).toBeNull();
         expect(widget.value).toBe("untouched");
+    });
+});
+
+describe("workflow graph binding", () => {
+    const WORKFLOW_CHANGED = { ok: false, reason: "workflow_changed" };
+
+    function makeApp({ graph, root, rootOrUndefined, workflow } = {}) {
+        const reads = { rootGraph: 0, rootGraphOrUndefined: 0 };
+        const app = { extensionManager: { workflow: { activeWorkflow: workflow ?? null } } };
+        if (graph !== undefined) app.graph = graph;
+        if (root !== undefined) {
+            Object.defineProperty(app, "rootGraph", {
+                get() {
+                    reads.rootGraph += 1;
+                    return root;
+                },
+                enumerable: true,
+            });
+        }
+        if (rootOrUndefined !== undefined) {
+            Object.defineProperty(app, "rootGraphOrUndefined", {
+                get() {
+                    reads.rootGraphOrUndefined += 1;
+                    return rootOrUndefined.value;
+                },
+                enumerable: true,
+            });
+        }
+        return { app, reads };
+    }
+
+    it("reads rootGraphOrUndefined when the host has it and never touches rootGraph", () => {
+        const graphA = { id: "a", _nodes: [] };
+        const holder = { value: graphA };
+        const { app, reads } = makeApp({ graph: { id: "view" }, root: { id: "root" }, rootOrUndefined: holder });
+        expect(readActiveWorkflowGraph(app)).toBe(graphA);
+        holder.value = undefined;
+        expect(readActiveWorkflowGraph(app)).toBeNull();
+        expect(captureGraphBinding(app)).toBeNull();
+        expect(reads.rootGraph).toBe(0);
+        expect(reads.rootGraphOrUndefined).toBe(3);
+    });
+
+    it("falls back to rootGraph, then graph, on hosts without rootGraphOrUndefined", () => {
+        const view = { id: "view" };
+        const root = { id: "root" };
+        expect(readActiveWorkflowGraph(makeApp({ graph: view, root }).app)).toBe(root);
+        expect(readActiveWorkflowGraph(makeApp({ graph: view }).app)).toBe(view);
+        expect(readActiveWorkflowGraph(makeApp({ graph: view, root: null }).app)).toBe(view);
+        expect(readActiveWorkflowGraph(makeApp({}).app)).toBeNull();
+        expect(readActiveWorkflowGraph(null)).toBeNull();
+        expect(captureGraphBinding(makeApp({}).app)).toBeNull();
+    });
+
+    it("binds to one graph object and holds it only weakly", () => {
+        const graph = { id: "a" };
+        const binding = captureGraphBinding(makeApp({ graph }).app);
+        expect(binding.graphId).toBe("a");
+        expect(typeof binding.graphRef.deref).toBe("function");
+        if (typeof WeakRef === "function") {
+            expect(binding.graphRef).toBeInstanceOf(WeakRef);
+        }
+        expect(Object.values(binding)).not.toContain(graph);
+        expect(verifyGraphBinding(binding, makeApp({ graph }).app)).toEqual({ ok: true, graph });
+    });
+
+    it("fails closed on a per-workflow host when the active graph object changes, and recovers on return", () => {
+        const graphA = { id: "a" };
+        const graphB = { id: "b" };
+        const binding = captureGraphBinding(makeApp({ graph: graphA, root: graphA }).app);
+        expect(verifyGraphBinding(binding, makeApp({ graph: graphB, root: graphB }).app)).toEqual(WORKFLOW_CHANGED);
+        expect(verifyGraphBinding(binding, makeApp({ graph: graphA, root: graphA }).app)).toEqual({ ok: true, graph: graphA });
+    });
+
+    it("fails closed on a shared-graph host when the same object is reconfigured with another id", () => {
+        const shared = { id: "workflow-one", _nodes: [] };
+        const binding = captureGraphBinding(makeApp({ graph: shared }).app);
+        shared.id = "workflow-two";
+        shared._nodes = [{ id: 1 }];
+        expect(verifyGraphBinding(binding, makeApp({ graph: shared }).app)).toEqual(WORKFLOW_CHANGED);
+        shared.id = "workflow-one";
+        expect(verifyGraphBinding(binding, makeApp({ graph: shared }).app)).toEqual({ ok: true, graph: shared });
+    });
+
+    it("uses the public active-workflow object as an extra signal only when it was present at capture", () => {
+        const graph = { id: "same-id-in-two-tabs" };
+        const workflowOne = { path: "one.json" };
+        const workflowTwo = { path: "two.json" };
+        const binding = captureGraphBinding(makeApp({ graph, workflow: workflowOne }).app);
+        expect(verifyGraphBinding(binding, makeApp({ graph, workflow: workflowOne }).app).ok).toBe(true);
+        expect(verifyGraphBinding(binding, makeApp({ graph, workflow: workflowTwo }).app)).toEqual(WORKFLOW_CHANGED);
+        expect(verifyGraphBinding(binding, makeApp({ graph, workflow: null }).app)).toEqual(WORKFLOW_CHANGED);
+
+        const hostApp = makeApp({ graph, workflow: null }).app;
+        delete hostApp.extensionManager;
+        const unsignalled = captureGraphBinding(hostApp);
+        expect(unsignalled.workflowRef).toBeNull();
+        expect(verifyGraphBinding(unsignalled, makeApp({ graph, workflow: workflowTwo }).app).ok).toBe(true);
+    });
+
+    it("treats a throwing workflow signal as a mismatch once the binding relied on it", () => {
+        const graph = { id: "a" };
+        const workflow = { path: "one.json" };
+        const binding = captureGraphBinding(makeApp({ graph, workflow }).app);
+        const hostile = makeApp({ graph }).app;
+        Object.defineProperty(hostile.extensionManager.workflow, "activeWorkflow", {
+            get() {
+                throw new Error("store unavailable");
+            },
+        });
+        expect(verifyGraphBinding(binding, hostile)).toEqual(WORKFLOW_CHANGED);
+    });
+
+    it("counts a released graph reference, a missing current graph and a malformed binding as a mismatch", () => {
+        const graph = { id: "a" };
+        const live = captureGraphBinding(makeApp({ graph }).app);
+        const released = { graphRef: { deref: () => undefined }, graphId: "a", workflowRef: null };
+        expect(verifyGraphBinding(released, makeApp({ graph }).app)).toEqual(WORKFLOW_CHANGED);
+        expect(verifyGraphBinding(live, makeApp({}).app)).toEqual(WORKFLOW_CHANGED);
+        expect(verifyGraphBinding(live, null)).toEqual(WORKFLOW_CHANGED);
+        for (const malformed of [null, undefined, {}, { graphRef: {} }, { graphRef: "a" }, []]) {
+            expect(verifyGraphBinding(malformed, makeApp({ graph }).app)).toEqual(WORKFLOW_CHANGED);
+        }
     });
 });

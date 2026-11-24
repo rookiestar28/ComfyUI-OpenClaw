@@ -305,3 +305,77 @@ export function findComparableWidget(graph, nodeRefOrId) {
 export function hasComparableWidget(graph, nodeRefOrId) {
     return !!findComparableWidget(graph, nodeRefOrId);
 }
+
+const WORKFLOW_CHANGED = Object.freeze({ ok: false, reason: "workflow_changed" });
+
+function holdWeakly(value) {
+    // A released workflow graph must not be kept alive by a plan that outlives its tab.
+    return typeof WeakRef === "function" ? new WeakRef(value) : { deref: () => value };
+}
+
+function readActiveWorkflow(app) {
+    try {
+        const workflow = app?.extensionManager?.workflow?.activeWorkflow;
+        return workflow && typeof workflow === "object" ? workflow : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Reads the graph of the workflow that is active right now, exactly once.
+ * Newer hosts expose `rootGraphOrUndefined`; reading `rootGraph` before the host has
+ * initialised logs a console error, so it is only read when that property is absent.
+ */
+export function readActiveWorkflowGraph(app) {
+    if (!app || typeof app !== "object") {
+        return null;
+    }
+    try {
+        const graph = "rootGraphOrUndefined" in app ? app.rootGraphOrUndefined : (app.rootGraph ?? app.graph);
+        return graph && typeof graph === "object" ? graph : null;
+    } catch {
+        return null;
+    }
+}
+
+/** Captures the identity signals of the active workflow graph, or null when there is none. */
+export function captureGraphBinding(app) {
+    const graph = readActiveWorkflowGraph(app);
+    if (!graph) {
+        return null;
+    }
+    const workflow = readActiveWorkflow(app);
+    return Object.freeze({
+        graphRef: holdWeakly(graph),
+        graphId: graph.id,
+        workflowRef: workflow ? holdWeakly(workflow) : null,
+    });
+}
+
+/**
+ * Verifies that the active workflow is still the one the binding was captured from.
+ * Returns `{ ok: true, graph }` with the bound graph, or `{ ok: false, reason: "workflow_changed" }`.
+ */
+export function verifyGraphBinding(binding, app) {
+    // CRITICAL: a Parameter Lab plan must never write to, or queue from, a workflow other than the one it
+    // was built from. Hosts differ: some keep one graph object per workflow (object identity changes), others
+    // reconfigure one shared graph object (only `id` changes), and some expose the active workflow object.
+    // Compare every signal that was captured. Resolving against the current graph alone, or dropping the
+    // `id` comparison, silently retargets a stale plan onto whichever tab is open.
+    const bound = typeof binding?.graphRef?.deref === "function" ? binding.graphRef.deref() : undefined;
+    if (!bound) {
+        return WORKFLOW_CHANGED;
+    }
+    const current = readActiveWorkflowGraph(app);
+    if (current !== bound || current.id !== binding.graphId) {
+        return WORKFLOW_CHANGED;
+    }
+    if (binding.workflowRef) {
+        const boundWorkflow = typeof binding.workflowRef.deref === "function" ? binding.workflowRef.deref() : undefined;
+        if (!boundWorkflow || readActiveWorkflow(app) !== boundWorkflow) {
+            return WORKFLOW_CHANGED;
+        }
+    }
+    return { ok: true, graph: bound };
+}
