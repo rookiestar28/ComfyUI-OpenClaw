@@ -685,3 +685,217 @@ test.describe('Parameter Lab - Opaque Identities', () => {
         });
     }
 });
+
+test.describe('Parameter Lab - Workflow Binding', () => {
+    const SWITCH_MESSAGE = 'The workflow changed. Return to the original workflow or rebuild the plan.';
+
+    // A host either keeps one graph object per workflow (the active object is replaced) or
+    // reconfigures one shared graph object with the other workflow (only its id and nodes change).
+    for (const model of ['per-workflow', 'shared-graph']) {
+        test.describe(`${model} host`, () => {
+            test.beforeEach(async ({ page }) => {
+                await mockComfyUiCore(page);
+                await page.goto('test-harness.html');
+                await waitForOpenClawReady(page);
+
+                await page.evaluate(async (hostModel) => {
+                    const mod = await import('/web/openclaw_api.js');
+                    const { api } = await import('/scripts/api.js');
+                    const receiptMod = await import('/web/openclaw_parameter_lab_receipt.js');
+
+                    const makeNodes = (seed) => [
+                        {
+                            id: 10,
+                            type: 'KSampler',
+                            title: 'Sampler',
+                            widgets: [{ name: 'seed', type: 'number', value: seed, options: {} }]
+                        }
+                    ];
+                    const makeGraph = (id, seed) => ({
+                        id,
+                        _nodes: makeNodes(seed),
+                        getNodeById(nodeId) { return this._nodes.find((node) => node.id === nodeId); },
+                        serialize() {
+                            const data = { nodes: [], extra: {} };
+                            this.onSerialize?.(data);
+                            return data;
+                        }
+                    });
+
+                    const first = makeGraph('workflow-a', 100);
+                    const second = makeGraph('workflow-b', 200);
+                    const shared = makeGraph('workflow-a', 100);
+                    shared._nodes = first._nodes;
+                    const definitions = { first: { id: 'workflow-a', nodes: first._nodes }, second: { id: 'workflow-b', nodes: second._nodes } };
+                    const state = {
+                        model: hostModel,
+                        first,
+                        second,
+                        shared,
+                        definitions,
+                        queueCalls: 0,
+                        runUpdates: [],
+                        sweepRequests: 0,
+                        switchAfterFirstQueue: false,
+                        switchDuringPlanRequest: false,
+                        activate(which) {
+                            if (hostModel === 'per-workflow') {
+                                const next = which === 'first' ? first : second;
+                                window.app.graph = next;
+                                window.app.rootGraph = next;
+                                return;
+                            }
+                            shared.id = definitions[which].id;
+                            shared._nodes = definitions[which].nodes;
+                            window.app.graph = shared;
+                            window.app.rootGraph = shared;
+                        },
+                        seedOf(which) { return definitions[which].nodes[0].widgets[0].value; }
+                    };
+                    window.__wf = state;
+                    state.activate('first');
+
+                    window.app.processingQueue = false;
+                    window.app.queueItems = [];
+                    window.app.nextQueueRequestId = 1;
+                    window.app.queuePrompt = async function (number, batchCount = 1) {
+                        state.queueCalls += 1;
+                        const requestId = this.nextQueueRequestId++;
+                        this.queueItems.push({ requestId, number, batchCount });
+                        api.dispatchCustomEvent('promptQueueing', { requestId, batchCount });
+                        if (this.processingQueue) return false;
+
+                        this.processingQueue = true;
+                        await Promise.resolve();
+                        try {
+                            while (this.queueItems.length) {
+                                const request = this.queueItems.pop();
+                                let queuedCount = 0;
+                                for (let index = 0; index < request.batchCount; index += 1) {
+                                    const active = this.rootGraph ?? this.graph;
+                                    for (const node of active._nodes) {
+                                        for (const widget of node.widgets || []) {
+                                            widget.beforeQueued?.({ isPartialExecution: false });
+                                        }
+                                    }
+                                    const workflow = active.serialize();
+                                    const marker = workflow.extra?.[receiptMod.PARAMETER_LAB_RECEIPT_KEY];
+                                    if (!marker?.prompt_id) throw new Error('missing receipt marker');
+                                    for (const node of active._nodes) {
+                                        for (const widget of node.widgets || []) {
+                                            widget.afterQueued?.({ isPartialExecution: false });
+                                        }
+                                    }
+                                    queuedCount += 1;
+                                }
+                                api.dispatchCustomEvent('promptQueued', {
+                                    requestId: request.requestId,
+                                    batchCount: queuedCount,
+                                    number: request.number
+                                });
+                            }
+                        } finally {
+                            this.processingQueue = false;
+                        }
+                        if (state.switchAfterFirstQueue) {
+                            state.switchAfterFirstQueue = false;
+                            state.activate('second');
+                        }
+                        return true;
+                    };
+
+                    const originalFetch = mod.openclawApi.fetch.bind(mod.openclawApi);
+                    mod.openclawApi.fetch = async (url, options = {}) => {
+                        const normalizedPath = String(url || '').replace(/^\/moltbot/, '/openclaw');
+                        if (normalizedPath.endsWith('/lab/sweep')) {
+                            state.sweepRequests += 1;
+                            if (state.switchDuringPlanRequest) state.activate('second');
+                            return {
+                                ok: true,
+                                status: 200,
+                                data: {
+                                    plan: {
+                                        experiment_id: 'exp_binding',
+                                        dimensions: [{ node_id: 10, widget_name: 'seed', values: [111, 222], strategy: 'grid' }],
+                                        runs: [{ '10.seed': 111 }, { '10.seed': 222 }]
+                                    }
+                                }
+                            };
+                        }
+                        if (normalizedPath.includes('/lab/experiments/exp_binding/runs/')) {
+                            state.runUpdates.push({
+                                path: normalizedPath.split('/runs/')[1],
+                                body: JSON.parse(options?.body || '{}')
+                            });
+                            return { ok: true, status: 200, data: {} };
+                        }
+                        return originalFetch(url, options);
+                    };
+                    window.confirm = () => true;
+                }, model);
+
+                await clickTab(page, 'Parameter Lab');
+            });
+
+            async function buildPlan(page) {
+                await page.click('#lab-add-dim');
+                await page.selectOption('.dim-node-select', { value: '10' });
+                await page.selectOption('.dim-widget-select', { value: 'seed' });
+                await page.fill('.dim-manual-input', '111');
+                await page.press('.dim-manual-input', 'Enter');
+                await page.click('#lab-generate');
+                await expect(page.locator('#lab-run-all')).toBeVisible();
+            }
+
+            test('stops a sweep that loses its workflow without writing to or queueing the other one', async ({ page }) => {
+                await buildPlan(page);
+                await page.evaluate(() => { window.__wf.switchAfterFirstQueue = true; });
+                await page.click('#lab-run-all');
+
+                await expect(page.locator('.openclaw-banner')).toContainText(SWITCH_MESSAGE);
+                const observed = await page.evaluate(() => ({
+                    queueCalls: window.__wf.queueCalls,
+                    firstSeed: window.__wf.seedOf('first'),
+                    secondSeed: window.__wf.seedOf('second'),
+                    updates: window.__wf.runUpdates
+                }));
+                expect(observed.queueCalls).toBe(1);
+                expect(observed.firstSeed).toBe(111);
+                expect(observed.secondSeed).toBe(200);
+                expect(observed.updates).toEqual([
+                    expect.objectContaining({ path: '0', body: expect.objectContaining({ status: 'queued' }) }),
+                    { path: '1', body: { status: 'failed' } }
+                ]);
+                await expect(page.locator('.openclaw-lab-run-item .run-status').nth(1)).toHaveText('Workflow changed');
+            });
+
+            test('refuses a replay after a workflow switch and allows it again after returning', async ({ page }) => {
+                await buildPlan(page);
+                await page.evaluate(() => window.__wf.activate('second'));
+                await page.locator('.replay-run').first().click();
+
+                await expect(page.locator('.openclaw-banner')).toContainText(SWITCH_MESSAGE);
+                expect(await page.evaluate(() => [window.__wf.seedOf('first'), window.__wf.seedOf('second')])).toEqual([100, 200]);
+
+                await page.evaluate(() => window.__wf.activate('first'));
+                await page.locator('.replay-run').first().click();
+                await expect(page.locator('.openclaw-banner')).toContainText('Values applied to nodes.');
+                expect(await page.evaluate(() => [window.__wf.seedOf('first'), window.__wf.seedOf('second')])).toEqual([111, 200]);
+            });
+
+            test('discards a plan whose generation was interrupted by a workflow switch', async ({ page }) => {
+                await page.evaluate(() => { window.__wf.switchDuringPlanRequest = true; });
+                await page.click('#lab-add-dim');
+                await page.selectOption('.dim-node-select', { value: '10' });
+                await page.selectOption('.dim-widget-select', { value: 'seed' });
+                await page.fill('.dim-manual-input', '111');
+                await page.press('.dim-manual-input', 'Enter');
+                await page.click('#lab-generate');
+
+                await expect(page.locator('.openclaw-banner')).toContainText('The workflow changed while the plan was being built.');
+                await expect(page.locator('#lab-run-all')).toHaveCount(0);
+                expect(await page.evaluate(() => window.__wf.sweepRequests)).toBe(1);
+            });
+        });
+    }
+});
