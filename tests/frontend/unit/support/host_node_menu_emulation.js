@@ -7,8 +7,27 @@
 //                                                  extractLegacyItems (the accessor that warns)
 //   src/composables/useContextMenuTranslation.ts  the wrapper that appends hook items, then legacy items
 //   src/scripts/app.ts                             collectNodeMenuItems over the `getNodeMenuItems` hook
+// The startup pass is a port of a fourth place, the one that runs every extension's `setup`:
+//   src/services/extensionService.ts                              (v1.59.11) invokeExtensionsAsync
+//   src/platform/extensions/services/extensionService.ts          (v1.61.8)  invokeExtensionsAsync
+//   src/scripts/app.ts                                            (v1.0.0, a host without the hook)
+//                                                                  #invokeExtensionsAsync over extensions.map
 // Nothing here imports or executes host code. If a pinned host changes one of those places, this
 // port must be re-read against the new source, not adapted until a test passes.
+
+/**
+ * How every host generation runs `setup`: once, over the extensions registered when the pass starts.
+ * The hooks are started in order without waiting for each other, and the pass ends when all of them
+ * have ended. An extension registered while a hook is still running is not in that list, so the host
+ * never calls its own `setup`; `registerExtension` itself only stores it.
+ *
+ * One deliberate difference: the hosts log a failing hook and carry on, while this lets the failure
+ * reach the test that caused it.
+ */
+async function runSetupPass(extensions, runHook) {
+    const pass = extensions.slice();
+    await Promise.all(pass.map((extension) => (typeof extension.setup === "function" ? runHook(extension) : undefined)));
+}
 
 class LegacyMenuCompat {
     constructor(warn) {
@@ -128,14 +147,14 @@ export function installCurrentHostNodeMenu({ app, canvasClass, baseItems, warn }
         extensions,
         // The extension service marks an extension as current for the duration of its setup hook.
         async runSetup() {
-            for (const extension of extensions) {
+            await runSetupPass(extensions, async (extension) => {
                 compat.setCurrentExtension(extension.name);
                 try {
-                    await extension.setup?.();
+                    return await extension.setup();
                 } finally {
                     compat.setCurrentExtension(null);
                 }
-            }
+            });
         },
         menuFor(node) {
             return canvasClass.prototype.getNodeMenuOptions.call(new canvasClass(), node);
@@ -159,7 +178,7 @@ export function installLegacyHostNodeMenu({ app, canvasClass, baseItems }) {
     return {
         extensions,
         async runSetup() {
-            for (const extension of extensions) await extension.setup?.();
+            await runSetupPass(extensions, (extension) => extension.setup());
         },
         menuFor(node) {
             return canvasClass.prototype.getNodeMenuOptions.call(new canvasClass(), node);

@@ -81,41 +81,61 @@ export function hostCollectsNodeMenuItems() {
     return typeof Object.getOwnPropertyDescriptor(prototype, "getNodeMenuOptions")?.set === "function";
 }
 
+async function loadActions() {
+    // Wait for OpenClaw actions singleton to be available.
+    const { openclawActions } = await import("../openclaw_ui.js");
+    return openclawActions;
+}
+
+/** The fallback for hosts that predate the hook: append the entries to what the host's own method returns. */
+function installLegacyMenuPatch(actions) {
+    const originalGetNodeMenuOptions = LGraphCanvas.prototype.getNodeMenuOptions;
+
+    LGraphCanvas.prototype.getNodeMenuOptions = function (node) {
+        const options = originalGetNodeMenuOptions.apply(this, arguments);
+        if (!options) return options;
+
+        options.push(...buildContextToolboxItems(node, actions));
+        return options;
+    };
+}
+
 export function registerContextToolbox() {
-    // Set by `setup` once the actions exist; read by the hook whenever a menu opens.
-    let actions = null;
-    let legacyPatchInstalled = false;
+    // GUARD: a host runs every extension's `setup` once, over the extensions that exist when its startup
+    // pass begins (ComfyUI frontend v1.59.11 and v1.61.8, invokeExtensionsAsync). OpenClaw registers this
+    // toolbox from inside its own async `setup`, so the host never calls a `setup` of this extension, and
+    // work placed in one silently never runs: the node menu stays empty and nothing reports an error.
+    // Everything the menu needs therefore starts here, at registration. The only later call the host makes
+    // is `getNodeMenuItems`, which it reads from the live extension list each time a menu opens. Do not
+    // move the loading or the hook-or-patch decision back into a `setup`.
+    const hostHasHook = hostCollectsNodeMenuItems();
+    // Set once the actions exist, and only on a host that has the hook; read whenever a menu opens.
+    let hookActions = null;
 
     app.registerExtension({
         name: "OpenClaw.ContextToolbox",
         // Current hosts call this for every node menu and append what it returns.
         getNodeMenuItems(node) {
-            if (!actions || legacyPatchInstalled) return [];
-            return buildContextToolboxItems(node, actions);
-        },
-        async setup() {
-            // Wait for OpenClaw actions singleton to be available.
-            const { openclawActions } = await import("../openclaw_ui.js");
-            actions = openclawActions;
+            return hookActions ? buildContextToolboxItems(node, hookActions) : [];
+        }
+    });
 
-            // GUARD: exactly one of the hook above and the prototype patch below may register these
+    loadActions()
+        .then((actions) => {
+            // GUARD: exactly one of the hook above and the prototype patch may register these
             // entries. Current hosts append `getNodeMenuItems` results themselves and make assigning
             // getNodeMenuOptions log "[DEPRECATED] Monkey-patching getNodeMenuOptions ... (Extension: ...)"
             // naming this extension, so patching there would warn and show every entry twice. The patch
             // is only the fallback for hosts that predate the hook. Do not turn this into an
             // unconditional patch, or into a hook-only path that leaves those older hosts without the menu.
-            if (hostCollectsNodeMenuItems()) return;
-
-            legacyPatchInstalled = true;
-            const originalGetNodeMenuOptions = LGraphCanvas.prototype.getNodeMenuOptions;
-
-            LGraphCanvas.prototype.getNodeMenuOptions = function (node) {
-                const options = originalGetNodeMenuOptions.apply(this, arguments);
-                if (!options) return options;
-
-                options.push(...buildContextToolboxItems(node, openclawActions));
-                return options;
-            };
-        }
-    });
+            if (hostHasHook) {
+                hookActions = actions;
+                return;
+            }
+            installLegacyMenuPatch(actions);
+        })
+        .catch((error) => {
+            // Until the actions exist the hook answers with no entries, so a failure here only costs the menu.
+            console.error("[OpenClaw] Context toolbox could not start; its node menu entries are unavailable.", error);
+        });
 }
