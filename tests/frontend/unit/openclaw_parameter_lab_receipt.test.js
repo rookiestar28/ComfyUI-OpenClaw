@@ -619,3 +619,148 @@ describe("Parameter Lab receipt workflow binding", () => {
     coordinator.dispose();
   });
 });
+
+// Host-contract characterization. These are target-owned simulations of how ComfyUI's boolean
+// app.queuePrompt() and its request boundaries behave; they import nothing from a host and
+// invent no host field. Each case pins what the coordinator does when the host breaks a
+// boundary the receipt depends on, so a host change that removes a boundary fails here
+// instead of producing a receipt that was never serialized.
+describe("Parameter Lab host-contract characterization", () => {
+  const firstId = "66666666-6666-4666-8666-666666666666";
+  const secondId = "77777777-7777-4777-8777-777777777777";
+  const thirdId = "88888888-8888-4888-8888-888888888888";
+
+  function createCoordinator(fixture, ids) {
+    let next = 0;
+    return createParameterLabReceiptCoordinator({
+      app: fixture.app,
+      api: fixture.api,
+      uuidFactory: () => ids[next++],
+      timeoutMs: 1000,
+    });
+  }
+
+  function expectNothingWritten(fixture, serializer, serialize) {
+    // No receipt was written on the graph and nothing was serialized under the coordinator.
+    expect(serialize).not.toHaveBeenCalled();
+    expect(fixture.graph.extra).toEqual({ preserved: true });
+    expect(fixture.graph.onSerialize).toBe(serializer);
+    expect(fixture.submissions).toHaveLength(0);
+    expect(fixture.widget.beforeQueued).toBe(fixture.beforeQueuedSpy);
+    expect(fixture.widget.afterQueued).toBe(fixture.afterQueuedSpy);
+  }
+
+  it("fails closed with missing_request_boundary when queuePrompt returns false and announces no request", async () => {
+    const fixture = createHostFixture();
+    const serializer = fixture.graph.onSerialize;
+    const serialize = vi.spyOn(fixture.graph, "serialize");
+    // A host that refuses the call without ever emitting promptQueueing.
+    fixture.app.queuePrompt = function () {
+      return false;
+    };
+    const coordinator = createCoordinator(fixture, [firstId]);
+
+    await expect(
+      coordinator.queue({
+        experimentId: "exp-no-request-boundary",
+        runId: "0",
+        widget: fixture.widget,
+        binding: captureGraphBinding(fixture.app),
+      }),
+    ).rejects.toMatchObject({ code: "missing_request_boundary" });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expectNothingWritten(fixture, serializer, serialize);
+    expect(coordinator.debugSnapshot()).toEqual({
+      activeAttempts: 0,
+      pendingRequests: 0,
+      lifecycleSubscriptions: 0,
+      installed: false,
+    });
+    coordinator.dispose();
+  });
+
+  it("fails closed with missing_queued_boundary when a request is announced and queuePrompt returns false without promptQueued", async () => {
+    const fixture = createHostFixture();
+    const serializer = fixture.graph.onSerialize;
+    const serialize = vi.spyOn(fixture.graph, "serialize");
+    // The host announces the request, then gives up before queueing: no beforeQueued, no promptQueued.
+    fixture.app.queuePrompt = function () {
+      fixture.api.emit("promptQueueing", { requestId: 41, batchCount: 1 });
+      return false;
+    };
+    const coordinator = createCoordinator(fixture, [firstId]);
+
+    await expect(
+      coordinator.queue({
+        experimentId: "exp-no-queued-boundary",
+        runId: "0",
+        widget: fixture.widget,
+        binding: captureGraphBinding(fixture.app),
+      }),
+    ).rejects.toMatchObject({ code: "missing_queued_boundary" });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expectNothingWritten(fixture, serializer, serialize);
+    expect(coordinator.debugSnapshot()).toEqual({
+      activeAttempts: 0,
+      pendingRequests: 0,
+      lifecycleSubscriptions: 0,
+      installed: false,
+    });
+    coordinator.dispose();
+  });
+
+  it("keeps each receipt on its own plan graph when the host hands out a new graph object between two queue calls", async () => {
+    const fixture = createHostFixture();
+    const graphA = fixture.graph;
+    const graphB = createFakeGraph("workflow-b");
+    const serializerB = graphB.onSerialize;
+    const coordinator = createCoordinator(fixture, [firstId, secondId, thirdId]);
+
+    const bindingA = captureGraphBinding(fixture.app);
+    const first = await coordinator.queue({
+      experimentId: "exp-graph-a",
+      runId: "0",
+      widget: fixture.widget,
+      binding: bindingA,
+    });
+    first.release();
+
+    // The host now reports a different graph object, as a per-workflow host does after a tab switch.
+    fixture.switchWorkflow(graphB);
+    expect(fixture.app.rootGraph).toBe(graphB);
+    expect(fixture.app.graph).toBe(graphB);
+
+    const bindingB = captureGraphBinding(fixture.app);
+    const second = await coordinator.queue({
+      experimentId: "exp-graph-b",
+      runId: "0",
+      widget: fixture.widget,
+      binding: bindingB,
+    });
+    second.release();
+
+    // Each submission carries the marker of the run bound to the graph that was serialized.
+    expect(fixture.submissions.map((entry) => entry.marker?.prompt_id)).toEqual([firstId, secondId]);
+    expect(first.promptId).toBe(firstId);
+    expect(second.promptId).toBe(secondId);
+
+    // A plan built on graph A cannot be queued against graph B: nothing is written on B.
+    const submissionsBefore = fixture.submissions.length;
+    await expect(
+      coordinator.queue({
+        experimentId: "exp-graph-a-stale",
+        runId: "1",
+        widget: fixture.widget,
+        binding: bindingA,
+      }),
+    ).rejects.toMatchObject({ code: "workflow_changed" });
+    expect(fixture.submissions).toHaveLength(submissionsBefore);
+    expect(graphB.onSerialize).toBe(serializerB);
+    expect(graphB.extra).toEqual({ preserved: true });
+    expect(graphA.extra).toEqual({ preserved: true });
+    expect(coordinator.debugSnapshot()).toMatchObject({ activeAttempts: 0, installed: false });
+    coordinator.dispose();
+  });
+});
