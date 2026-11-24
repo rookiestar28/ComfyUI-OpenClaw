@@ -7,8 +7,11 @@
  * own layout, that a width the host's splitter writes while OpenClaw is mounted
  * survives a tab switch, that a promoted widget connects a host input to an inner node and
  * survives an OpenClaw edit and prompt serialization, that an annotated temporary
- * result is fetched from the temporary directory, and that OpenClaw releases the shared mount when the
- * host hands it to another custom tab without calling a destroy callback.
+ * result is fetched from the temporary directory, that OpenClaw releases the shared mount when the
+ * host hands it to another custom tab without calling a destroy callback, that a Parameter Lab plan
+ * stays bound to the workflow it was built from while the host switches workflows, that OpenClaw's
+ * entries reach the host's node context menu, and that the host reports no warning naming an
+ * OpenClaw extension.
  *
  * HOTSPOT: selectors here must be owned by the host or by OpenClaw, never by the
  * mocked harness. `#sidebar-tab-comfyui-openclaw`, for example, exists only
@@ -34,12 +37,16 @@ import {
   detectSubjectMismatch,
   evaluateAnnotatedTempResult,
   evaluateHostWidthOwnership,
+  evaluateNodeMenuEntries,
   evaluatePromotedWidget,
   evaluateSidebarGeometry,
+  evaluateWorkflowBinding,
+  findOpenClawExtensionWarnings,
   HOST_WIDTH_TOLERANCE_PX,
   parseHostBindOrigin,
   parseHostWebRoot,
   partitionBrowserErrors,
+  removeDeclaredMessages,
   resolveSubject,
 } from '../helpers/real_host_subjects.js';
 
@@ -278,6 +285,158 @@ async function restoreIdentityFixture(page) {
   });
 }
 
+// The console error OpenClaw writes when it refuses to run a plan on another workflow. The binding case
+// provokes it deliberately and declares it, so the run does not report its own probe as a failure.
+const REFUSED_RUN_CONSOLE_ERROR = '[OpenClaw] Parameter Lab queue failed';
+
+// Two synthetic workflows that hold the same node ID and widget name with different values, so a write
+// that reaches the wrong workflow changes a value the case can read back.
+const BINDING_FIRST = { name: 'OpenClaw binding A', id: '00000000-0000-4000-8000-0000000000a1', width: 512 };
+const BINDING_SECOND = { name: 'OpenClaw binding B', id: '00000000-0000-4000-8000-0000000000b2', width: 640 };
+const BINDING_PLANNED_WIDTH = 704;
+const BANNER_BUDGET_MS = 15_000;
+// Where the node menu fixture sits: right of the 560px OpenClaw sidebar floor and inside the default viewport.
+const NODE_MENU_POSITION = [760, 260];
+// The host's DOM context menu and a Vue menu both mark each entry with this role.
+const NODE_MENU_ENTRIES = '.litecontextmenu [role="menuitem"], [role="menu"] [role="menuitem"]';
+// Written to the console by the warning audit as its control. It must not name an OpenClaw extension.
+const WARNING_COLLECTOR_PROBE = 'real-host warning collector probe';
+
+function bindingWorkflow({ id, width }) {
+  return {
+    id, last_node_id: 1, last_link_id: 0,
+    nodes: [{
+      id: 1, type: 'EmptyLatentImage', pos: [100, 100], size: [300, 120],
+      flags: {}, order: 0, mode: 0, inputs: [],
+      outputs: [{ name: 'LATENT', type: 'LATENT', links: null, slot_index: 0 }],
+      properties: {}, widgets_values: [width, 512, 1],
+    }],
+    links: [], groups: [], config: {}, extra: {}, version: 0.4,
+  };
+}
+
+async function readActiveWorkflowPath(page) {
+  return page.evaluate(() => window.app.extensionManager?.workflow?.activeWorkflow?.path ?? null);
+}
+
+/** Open a synthetic workflow the way a user opening a file would: the host adds it as its own tab. */
+async function openBindingWorkflow(page, spec) {
+  await page.evaluate(async ({ workflow, name }) => {
+    if (await window.app.loadGraphData(workflow, true, true, name, { skipAssetScans: true }) === false) {
+      throw new Error('host refused the synthetic binding workflow');
+    }
+  }, { workflow: bindingWorkflow(spec), name: spec.name });
+  await expect.poll(() => readActiveWorkflowPath(page), {
+    timeout: 30_000, message: `host did not activate ${spec.name}`,
+  }).toMatch(new RegExp(`${spec.name}\\.json$`));
+  await settleFrames(page);
+  return readActiveWorkflowPath(page);
+}
+
+/** The width widget of node 1 in whichever workflow's graph the host has active right now. */
+async function readBindingWidth(page) {
+  return page.evaluate(() => {
+    const app = window.app;
+    const graph = 'rootGraphOrUndefined' in app ? app.rootGraphOrUndefined : (app.rootGraph ?? app.graph);
+    const node = (graph?._nodes ?? graph?.nodes ?? []).find((entry) => String(entry.id) === '1');
+    return node?.widgets?.find((widget) => widget.name === 'width')?.value;
+  });
+}
+
+/**
+ * Switch workflows through the host's own tab strip. The host publishes the active workflow after it has
+ * configured the graph, so once the path changes the graph can be read.
+ */
+async function switchToBindingWorkflow(page, spec, expectedPath) {
+  await page.locator('[data-testid="workflow-tab"]').filter({ hasText: spec.name }).first().click();
+  await expect.poll(() => readActiveWorkflowPath(page), {
+    timeout: 30_000, message: `host did not switch to ${spec.name}`,
+  }).toBe(expectedPath);
+  await settleFrames(page);
+}
+
+/**
+ * OpenClaw keeps one banner element, and an error banner suppresses a later non-error banner until it
+ * expires, so a success message can only be observed once the previous error has gone.
+ */
+async function waitForNoErrorBanner(page) {
+  await page.waitForFunction(
+    () => !document.querySelector('.openclaw-banner[data-severity="error"]'),
+    null,
+    { timeout: BANNER_BUDGET_MS },
+  );
+}
+
+/**
+ * The banner text once it matches, or whatever the banner holds when the budget runs out, so that the
+ * evaluator reports what the product actually said instead of a wait that expired.
+ */
+async function readBannerMatching(page, pattern) {
+  await page.waitForFunction(
+    (source) => [...document.querySelectorAll('.openclaw-banner')]
+      .some((banner) => new RegExp(source).test(banner.innerText)),
+    pattern.source,
+    { timeout: BANNER_BUDGET_MS },
+  ).catch(() => undefined);
+  return page.evaluate(() => [...document.querySelectorAll('.openclaw-banner')]
+    .map((banner) => banner.innerText.trim()).join(' | '));
+}
+
+/** Load one synthetic loader node clear of the sidebar and return the screen point of its title bar. */
+async function loadNodeMenuFixture(page) {
+  const point = await page.evaluate(async (position) => {
+    const app = window.app;
+    const workflow = {
+      last_node_id: 1, last_link_id: 0,
+      nodes: [{
+        id: 1, type: 'CheckpointLoaderSimple', pos: position, size: [300, 120],
+        flags: {}, order: 0, mode: 0, inputs: [],
+        outputs: ['MODEL', 'CLIP', 'VAE'].map((type, slot_index) => ({ name: type, type, links: null, slot_index })),
+        properties: {}, widgets_values: ['base.ckpt'],
+      }],
+      links: [], groups: [], config: {}, extra: { ds: { scale: 1, offset: [0, 0] } }, version: 0.4,
+    };
+    if (await app.loadGraphData(workflow, true, true, 'OpenClaw node menu', { skipAssetScans: true }) === false) {
+      throw new Error('host refused the synthetic node menu workflow');
+    }
+    const graph = 'rootGraphOrUndefined' in app ? app.rootGraphOrUndefined : (app.rootGraph ?? app.graph);
+    const node = (graph?._nodes ?? graph?.nodes ?? []).find((entry) => entry.type === 'CheckpointLoaderSimple');
+    const widget = node?.widgets?.find((entry) => entry.name === 'ckpt_name');
+    if (!node || !widget) throw new Error('host did not create the synthetic loader node');
+    // Only the fixture choice is synthetic; the node, its widget and its menu stay host-owned.
+    widget.options.values = ['base.ckpt', 'xl.ckpt'];
+    widget.value = 'base.ckpt';
+    const canvas = app.canvas;
+    const rect = canvas.canvas.getBoundingClientRect();
+    const { scale, offset } = canvas.ds;
+    const titleHeight = window.LiteGraph?.NODE_TITLE_HEIGHT ?? 30;
+    const x = rect.left + (node.pos[0] + 60 + offset[0]) * scale;
+    const y = rect.top + (node.pos[1] - titleHeight / 2 + offset[1]) * scale;
+    const top = document.elementFromPoint(x, y);
+    return {
+      x, y, onCanvas: top === canvas.canvas,
+      covering: top ? `${top.tagName.toLowerCase()}.${String(top.className).split(' ')[0]}` : null,
+    };
+  }, NODE_MENU_POSITION);
+  // Hit testing reads the nodes the canvas drew last, so let one frame land first.
+  await settleFrames(page);
+  return point;
+}
+
+/**
+ * Wait until the host's own menu assembly offers an OpenClaw entry for the fixture node. The check is on the
+ * assembled items, not on how OpenClaw registered them, so it holds for any registration path the host supports.
+ */
+async function waitForOpenClawMenuAssembly(page) {
+  await expect.poll(() => page.evaluate(() => {
+    const app = window.app;
+    const graph = 'rootGraphOrUndefined' in app ? app.rootGraphOrUndefined : (app.rootGraph ?? app.graph);
+    const node = (graph?._nodes ?? graph?.nodes ?? []).find((entry) => entry.type === 'CheckpointLoaderSimple');
+    const items = node ? app.canvas.getNodeMenuOptions(node) : [];
+    return items.some((item) => typeof item?.content === 'string' && item.content.includes('OpenClaw:'));
+  }), { timeout: 30_000, message: 'the host never offered an OpenClaw entry for the synthetic node' }).toBe(true);
+}
+
 test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
   const consoleErrors = [];
   const pageErrors = [];
@@ -289,6 +448,11 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
   // A check that deliberately provokes a failing request declares it here, so
   // the run does not report the check's own probe as an unexplained failure.
   const declaredProbes = [];
+  // Warnings are kept apart from errors: the host reports its own deprecations as warnings, and
+  // the "no warning names an OpenClaw extension" case reads exactly these.
+  const consoleWarnings = [];
+  // A check that deliberately makes the product log an error declares the start of its message here.
+  const declaredConsoleErrors = [];
 
   test.beforeEach(async ({ page }) => {
     // Restore an empty real workflow instead of probing models from the host's default example.
@@ -314,9 +478,13 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
     pageErrors.length = 0;
     failedRequests.length = 0;
     declaredProbes.length = 0;
+    consoleWarnings.length = 0;
+    declaredConsoleErrors.length = 0;
     page.on('console', (message) => {
       if (message.type() === 'error') {
         consoleErrors.push(message.text());
+      } else if (message.type() === 'warning') {
+        consoleWarnings.push(message.text());
       }
     });
     page.on('pageerror', (error) => pageErrors.push(String(error)));
@@ -869,6 +1037,129 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
     expect(after.openclawRootRemoved).toBe(true);
   });
 
+  test('a Parameter Lab plan stays bound to the workflow it was built from', async ({ page }) => {
+    const queuedPrompts = [];
+    let confirmations = 0;
+    // The host queues through POST /prompt (behind the API prefix on newer hosts). A refused run sends none.
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && /\/prompt$/.test(new URL(request.url()).pathname)) {
+        queuedPrompts.push(request.url());
+      }
+    });
+    page.on('dialog', (dialog) => {
+      confirmations += 1;
+      void dialog.accept();
+    });
+
+    await openOpenClawSidebar(page);
+    await page.click('.openclaw-tabs .openclaw-tab:has-text("Parameter Lab")');
+
+    const firstPath = await openBindingWorkflow(page, BINDING_FIRST);
+    expect(await readBindingWidth(page)).toBe(BINDING_FIRST.width);
+    // The plan is built through the product, because the binding is captured when a plan is generated.
+    await page.click('#lab-add-dim');
+    await page.selectOption('.dim-node-select', '1');
+    await page.selectOption('.dim-widget-select', 'width');
+    await page.fill('.dim-manual-input', String(BINDING_PLANNED_WIDTH));
+    await page.press('.dim-manual-input', 'Enter');
+    await page.click('#lab-generate');
+    await expect(page.locator('#lab-run-all')).toBeVisible({ timeout: 30_000 });
+    const planRuns = await page.locator('.replay-run').count();
+
+    // Another workflow with the same node ID and widget name becomes the active one.
+    const secondPath = await openBindingWorkflow(page, BINDING_SECOND);
+    const separatedPath = await readActiveWorkflowPath(page);
+    await waitForNoErrorBanner(page);
+    const confirmationsBeforeReplay = confirmations;
+    await page.locator('.replay-run').first().click();
+    const separatedReplayMessage = await readBannerMatching(page, /The workflow changed|Values applied/);
+    const separatedReplayConfirmations = confirmations - confirmationsBeforeReplay;
+    const valueAfterSeparatedReplay = await readBindingWidth(page);
+
+    await waitForNoErrorBanner(page);
+    await page.click('#lab-run-all');
+    const separatedRunMessage = await readBannerMatching(page, /The workflow changed/);
+    // The refused run logs one error of its own; declare it so the end-of-test audit does not charge it.
+    declaredConsoleErrors.push(REFUSED_RUN_CONSOLE_ERROR);
+    await page.waitForFunction(
+      () => document.querySelector('.openclaw-lab-run-list .run-status')?.textContent.trim() === 'Workflow changed',
+      null,
+      { timeout: BANNER_BUDGET_MS },
+    ).catch(() => undefined);
+    const separatedRunStatus = (await page.locator('.openclaw-lab-run-list .run-status').first().innerText()).trim();
+    const valueAfterSeparatedRun = await readBindingWidth(page);
+
+    // Back in the first workflow the same plan applies there, and only there.
+    await waitForNoErrorBanner(page);
+    await switchToBindingWorkflow(page, BINDING_FIRST, firstPath);
+    const returnedPath = await readActiveWorkflowPath(page);
+    const valueBeforeReturnedReplay = await readBindingWidth(page);
+    await page.locator('.replay-run').first().click();
+    const returnedReplayMessage = await readBannerMatching(page, /Values applied|The workflow changed/);
+    const valueAfterReturnedReplay = await readBindingWidth(page);
+
+    await switchToBindingWorkflow(page, BINDING_SECOND, secondPath);
+    const evidence = {
+      firstPath,
+      secondPath,
+      firstValue: BINDING_FIRST.width,
+      secondValue: BINDING_SECOND.width,
+      plannedValue: BINDING_PLANNED_WIDTH,
+      planRuns,
+      separated: {
+        activePath: separatedPath,
+        replayMessage: separatedReplayMessage,
+        replayConfirmations: separatedReplayConfirmations,
+        valueAfterReplay: valueAfterSeparatedReplay,
+        runMessage: separatedRunMessage,
+        runStatus: separatedRunStatus,
+        valueAfterRun: valueAfterSeparatedRun,
+      },
+      returned: {
+        activePath: returnedPath,
+        valueBeforeReplay: valueBeforeReturnedReplay,
+        replayMessage: returnedReplayMessage,
+        valueAfterReplay: valueAfterReturnedReplay,
+      },
+      revisited: { activePath: await readActiveWorkflowPath(page), value: await readBindingWidth(page) },
+      queuedPrompts: queuedPrompts.length,
+    };
+    const failures = evaluateWorkflowBinding(evidence);
+    expect(failures, `${failures.join('\n')}\n${JSON.stringify(evidence)}`).toEqual([]);
+  });
+
+  test('OpenClaw entries appear in the host node context menu for a synthetic node', async ({ page }) => {
+    await openOpenClawSidebar(page);
+    const point = await loadNodeMenuFixture(page);
+    await waitForOpenClawMenuAssembly(page);
+    expect(point.onCanvas, `the node title bar is covered by ${point.covering}`).toBe(true);
+
+    // A real right-click on the node, so the entries are read from the menu the host renders.
+    await page.mouse.click(point.x, point.y, { button: 'right' });
+    await page.waitForSelector(NODE_MENU_ENTRIES, { timeout: 15_000 });
+    const labels = await page.$$eval(NODE_MENU_ENTRIES, (items) => items.map((item) => item.textContent ?? ''));
+    const failures = evaluateNodeMenuEntries(labels);
+    expect(failures, `${failures.join('\n')}\nentries: ${JSON.stringify(labels)}`).toEqual([]);
+  });
+
+  test('the host reports no warning naming an OpenClaw extension', async ({ page }) => {
+    await openOpenClawSidebar(page);
+    await loadNodeMenuFixture(page);
+    // Every OpenClaw setup hook has run once the host's own menu assembly offers an OpenClaw entry, which
+    // is when a deprecation about how the extension registered would already have been reported.
+    await waitForOpenClawMenuAssembly(page);
+    await settleFrames(page);
+
+    // A control, so an empty audit means the host said nothing rather than that nothing was collected.
+    await page.evaluate((probe) => console.warn(probe), WARNING_COLLECTOR_PROBE);
+    await expect.poll(() => consoleWarnings.includes(WARNING_COLLECTOR_PROBE), {
+      message: 'the console warning collector did not see a warning written by the page',
+    }).toBe(true);
+
+    const offending = findOpenClawExtensionWarnings(consoleWarnings);
+    expect(offending, `warnings naming an OpenClaw extension:\n${offending.join('\n')}`).toEqual([]);
+  });
+
   test.afterEach(async ({ page }) => {
     // A stock pinned host runs only OpenClaw and the peer fixture, so "no errors
     // at all" is right there. A real installation also runs whatever else the user
@@ -877,11 +1168,13 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
     // exactly where the check would otherwise be most valuable. The assertion is
     // scoped, not dropped: anything attributable to OpenClaw, to the peer fixture,
     // or to no extension at all still fails.
+    // A check that provoked an error on purpose has declared it; each declaration excuses one occurrence.
+    const observedConsoleErrors = removeDeclaredMessages(consoleErrors, declaredConsoleErrors);
     const bases = await extensionBases(page);
     if (bases === null) {
       // The host could not say which path is ours, so nothing may be excused.
       expect(pageErrors, pageErrors.join('\n')).toEqual([]);
-      expect(consoleErrors, consoleErrors.join('\n')).toEqual([]);
+      expect(observedConsoleErrors, observedConsoleErrors.join('\n')).toEqual([]);
       return;
     }
 
@@ -892,7 +1185,7 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
     };
     const requestOptions = { ...options, expectedUrls: declaredProbes };
     const fromPage = partitionBrowserErrors(pageErrors, options);
-    const fromConsole = partitionBrowserErrors(consoleErrors, options);
+    const fromConsole = partitionBrowserErrors(observedConsoleErrors, options);
     const fromRequests = classifyFailedRequests(failedRequests, requestOptions);
     const setAside = [...fromPage.foreign, ...fromConsole.foreign, ...fromRequests.foreign];
     if (setAside.length > 0) {

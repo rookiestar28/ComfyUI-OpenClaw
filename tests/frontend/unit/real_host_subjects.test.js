@@ -5,6 +5,9 @@ import { describe, expect, it } from "vitest";
 import {
     BUNDLED_SUBJECT,
     FRONTEND_FALLBACK_LOG_MARKER,
+    GRAPH_PATCH_REPORT_MARKER,
+    OPENCLAW_EXTENSION_NAMES,
+    OPENCLAW_NODE_MENU_ENTRIES,
     STANDALONE_RELEASE_SUBJECT,
     SubjectError,
     assertSubjectRunnable,
@@ -12,15 +15,19 @@ import {
     detectSubjectMismatch,
     evaluateAnnotatedTempResult,
     evaluateHostWidthOwnership,
+    evaluateNodeMenuEntries,
     evaluatePromotedWidget,
     evaluateSidebarGeometry,
+    evaluateWorkflowBinding,
     evidenceUpdateIsAllowed,
+    findOpenClawExtensionWarnings,
     classifyFailedRequests,
     isContentlessSubresourceEcho,
     isHostOwnedConsoleMessage,
     partitionBrowserErrors,
     parseHostBindOrigin,
     parseHostWebRoot,
+    removeDeclaredMessages,
     resolveSubject,
 } from "../../../tests/real_host/helpers/real_host_subjects.js";
 
@@ -540,6 +547,222 @@ describe("real host annotated temp result", () => {
         ).toHaveLength(2);
         expect(evaluateAnnotatedTempResult({ viewUrl: "" })).toEqual([
             "annotated temp result produced no view link",
+        ]);
+    });
+});
+
+describe("real host node context menu", () => {
+    const rendered = () => [
+        "Properties Panel",
+        "🔍 OpenClaw: Inspect",
+        "💉 OpenClaw: Doctor",
+        "⏳ OpenClaw: Queue Status",
+        "⚖️ OpenClaw: Compare...",
+        "⚙️ OpenClaw: Settings",
+        "Remove",
+    ];
+
+    it("accepts a menu that lists every OpenClaw entry once, whatever emoji prefixes it", () => {
+        expect(evaluateNodeMenuEntries(rendered())).toEqual([]);
+        expect(evaluateNodeMenuEntries(rendered().map((label) => label.replace(/^\S+ (?=OpenClaw)/, "")))).toEqual([]);
+    });
+
+    it("names each missing entry", () => {
+        for (const entry of OPENCLAW_NODE_MENU_ENTRIES) {
+            const labels = rendered().filter((label) => !label.includes(entry));
+            expect(evaluateNodeMenuEntries(labels)).toEqual([
+                `the host node context menu has no "${entry}" entry`,
+            ]);
+        }
+    });
+
+    it("rejects an entry the host lists twice", () => {
+        expect(evaluateNodeMenuEntries([...rendered(), "⚙️ OpenClaw: Settings"])).toEqual([
+            'the host node context menu lists "OpenClaw: Settings" 2 times',
+        ]);
+    });
+
+    it("does not accept a lookalike label as the entry", () => {
+        const labels = rendered().map((label) => label.replace("OpenClaw: Doctor", "OpenClaw: Doctor (legacy)"));
+        expect(evaluateNodeMenuEntries(labels)).toEqual(['the host node context menu has no "OpenClaw: Doctor" entry']);
+    });
+
+    it("rejects a menu that rendered nothing", () => {
+        for (const labels of [[], null, undefined, "OpenClaw: Inspect"]) {
+            expect(evaluateNodeMenuEntries(labels)).toEqual(["the host rendered no node context menu entries"]);
+        }
+    });
+});
+
+describe("real host extension warnings", () => {
+    const deprecation = (name) =>
+        `[DEPRECATED] Monkey-patching getNodeMenuOptions is deprecated. (Extension: "${name}")`;
+
+    it("names the extensions the product registers", () => {
+        expect(OPENCLAW_EXTENSION_NAMES).toEqual(["ComfyUI-OpenClaw", "OpenClaw.ContextToolbox"]);
+    });
+
+    it("keeps a warning that names an OpenClaw extension", () => {
+        for (const name of OPENCLAW_EXTENSION_NAMES) {
+            expect(findOpenClawExtensionWarnings([deprecation(name)])).toEqual([deprecation(name)]);
+        }
+    });
+
+    it("keeps the graph-patch report even when the text does not name the extension", () => {
+        const report = `[reportError] ${GRAPH_PATCH_REPORT_MARKER} Error: an extension patches app.graph`;
+        expect(findOpenClawExtensionWarnings([report])).toEqual([report]);
+    });
+
+    it("lets through warnings that name no OpenClaw extension", () => {
+        const others = [
+            deprecation("Comfy.SomeOtherPack"),
+            "Failed to load resource: the server responded with a status of 404",
+            "OpenClaw smoke peer mounted",
+        ];
+        expect(findOpenClawExtensionWarnings(others)).toEqual([]);
+    });
+
+    it("reports nothing for an empty or missing list", () => {
+        expect(findOpenClawExtensionWarnings([])).toEqual([]);
+        expect(findOpenClawExtensionWarnings(undefined)).toEqual([]);
+    });
+
+    it("keeps only the offending messages and their order", () => {
+        const messages = ["noise", deprecation("OpenClaw.ContextToolbox"), "more noise", deprecation("ComfyUI-OpenClaw")];
+        expect(findOpenClawExtensionWarnings(messages)).toEqual([messages[1], messages[3]]);
+    });
+});
+
+describe("console errors a check provokes on purpose", () => {
+    const refused = "[OpenClaw] Parameter Lab queue failed JSHandle@object";
+
+    it("removes one occurrence per declaration", () => {
+        expect(removeDeclaredMessages([refused], ["[OpenClaw] Parameter Lab queue failed"])).toEqual([]);
+    });
+
+    it("leaves a second occurrence that was never declared", () => {
+        expect(removeDeclaredMessages([refused, refused], ["[OpenClaw] Parameter Lab queue failed"])).toEqual([refused]);
+    });
+
+    it("matches the start of the message only", () => {
+        const unrelated = "TypeError: [OpenClaw] Parameter Lab queue failed";
+        expect(removeDeclaredMessages([unrelated], ["[OpenClaw] Parameter Lab queue failed"])).toEqual([unrelated]);
+    });
+
+    it("keeps every other message and leaves the input untouched", () => {
+        const input = ["boom", refused, "bang"];
+        expect(removeDeclaredMessages(input, ["[OpenClaw] Parameter Lab queue failed"])).toEqual(["boom", "bang"]);
+        expect(input).toHaveLength(3);
+    });
+
+    it("tolerates a missing list or declaration", () => {
+        expect(removeDeclaredMessages(undefined, undefined)).toEqual([]);
+        expect(removeDeclaredMessages([refused], undefined)).toEqual([refused]);
+    });
+});
+
+describe("real host Parameter Lab workflow binding", () => {
+    const refusal = "The workflow changed. Return to the original workflow or rebuild the plan.";
+    const honoured = () => ({
+        firstPath: "workflows/OpenClaw binding A.json",
+        secondPath: "workflows/OpenClaw binding B.json",
+        firstValue: 512,
+        secondValue: 640,
+        plannedValue: 704,
+        planRuns: 1,
+        separated: {
+            activePath: "workflows/OpenClaw binding B.json",
+            replayMessage: refusal,
+            replayConfirmations: 0,
+            valueAfterReplay: 640,
+            runMessage: refusal,
+            runStatus: "Workflow changed",
+            valueAfterRun: 640,
+        },
+        returned: {
+            activePath: "workflows/OpenClaw binding A.json",
+            valueBeforeReplay: 512,
+            replayMessage: "Values applied to nodes.",
+            valueAfterReplay: 704,
+        },
+        revisited: { activePath: "workflows/OpenClaw binding B.json", value: 640 },
+        queuedPrompts: 0,
+    });
+    const withChange = (change) => {
+        const evidence = honoured();
+        change(evidence);
+        return evidence;
+    };
+
+    it("accepts a plan that is refused elsewhere and applied only where it was built", () => {
+        expect(evaluateWorkflowBinding(honoured())).toEqual([]);
+    });
+
+    it("rejects evidence that was not read", () => {
+        for (const evidence of [null, undefined, "evidence"]) {
+            expect(evaluateWorkflowBinding(evidence)).toEqual(["no workflow binding evidence was read from the host"]);
+        }
+    });
+
+    it("rejects a replay or a run that writes into the other workflow", () => {
+        expect(evaluateWorkflowBinding(withChange((e) => { e.separated.valueAfterReplay = 704; }))).toEqual([
+            "replay wrote into the other workflow: 704, expected 640",
+        ]);
+        expect(evaluateWorkflowBinding(withChange((e) => { e.separated.valueAfterRun = 704; }))).toEqual([
+            "a run wrote into the other workflow: 704, expected 640",
+        ]);
+    });
+
+    it("rejects a refusal that is not visible or that asked for confirmation first", () => {
+        expect(evaluateWorkflowBinding(withChange((e) => { e.separated.replayMessage = ""; }))).toHaveLength(1);
+        expect(evaluateWorkflowBinding(withChange((e) => { e.separated.runMessage = "Experiment started"; }))).toHaveLength(1);
+        expect(evaluateWorkflowBinding(withChange((e) => { e.separated.runStatus = "Queue Failed"; }))).toHaveLength(1);
+        expect(evaluateWorkflowBinding(withChange((e) => { e.separated.replayConfirmations = 1; }))).toHaveLength(1);
+    });
+
+    it("rejects any queued prompt", () => {
+        expect(evaluateWorkflowBinding(withChange((e) => { e.queuedPrompts = 2; }))).toEqual([
+            "2 prompt(s) were queued; a refused run must queue none",
+        ]);
+        expect(evaluateWorkflowBinding(withChange((e) => { delete e.queuedPrompts; }))).toHaveLength(1);
+    });
+
+    it("rejects a replay that does not apply after returning, or that reaches the second workflow", () => {
+        expect(evaluateWorkflowBinding(withChange((e) => { e.returned.replayMessage = refusal; }))).toHaveLength(1);
+        expect(evaluateWorkflowBinding(withChange((e) => { e.returned.valueAfterReplay = 512; }))).toHaveLength(1);
+        expect(evaluateWorkflowBinding(withChange((e) => { e.returned.valueBeforeReplay = 704; }))).toHaveLength(1);
+        expect(evaluateWorkflowBinding(withChange((e) => { e.revisited.value = 704; }))).toEqual([
+            "the replay reached the second workflow: 704, expected 640",
+        ]);
+    });
+
+    it("rejects a switch that did not happen", () => {
+        expect(evaluateWorkflowBinding(withChange((e) => { e.separated.activePath = e.firstPath; }))).toHaveLength(1);
+        expect(evaluateWorkflowBinding(withChange((e) => { e.returned.activePath = e.secondPath; }))).toHaveLength(1);
+        expect(evaluateWorkflowBinding(withChange((e) => { e.revisited.activePath = e.firstPath; }))).toHaveLength(1);
+        expect(evaluateWorkflowBinding(withChange((e) => { e.secondPath = e.firstPath; }))).not.toEqual([]);
+    });
+
+    it("rejects a fixture whose values could not show a write", () => {
+        // Every dependent reading is kept consistent, so the distinct-values check is the only one that can fire.
+        const sameAsFirst = withChange((e) => {
+            e.secondValue = e.firstValue;
+            e.separated.valueAfterReplay = e.firstValue;
+            e.separated.valueAfterRun = e.firstValue;
+            e.revisited.value = e.firstValue;
+        });
+        expect(evaluateWorkflowBinding(sameAsFirst)).toEqual([
+            "the fixture values must be three different numbers, got [512,512,704]",
+        ]);
+        const notANumber = withChange((e) => {
+            e.plannedValue = "704";
+            e.returned.valueAfterReplay = "704";
+        });
+        expect(evaluateWorkflowBinding(notANumber)).toEqual([
+            'the fixture values must be three different numbers, got [512,640,"704"]',
+        ]);
+        expect(evaluateWorkflowBinding(withChange((e) => { e.planRuns = 0; }))).toEqual([
+            "no plan was built from the first workflow",
         ]);
     });
 });

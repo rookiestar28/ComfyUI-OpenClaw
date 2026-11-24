@@ -832,6 +832,96 @@ class TestSpecUsesSurfacesThatExistOutsideTheMock(unittest.TestCase):
         self.assertIn("no sidebar registration API", peer)
 
 
+class TestTheWorkflowMenuAndWarningCasesDependOnProductSurfaces(unittest.TestCase):
+    """The three cases that read product text must read text the product still writes.
+
+    A case that waits for a message the product no longer shows would fail on every
+    host, and an audit keyed to a stale extension name would pass on every host. Each
+    string, selector and name the cases rely on is therefore checked against the
+    product source here, where a drift is visible without a host.
+    """
+
+    def setUp(self):
+        self.spec = SPEC_PATH.read_text(encoding="utf-8")
+        self.helpers = (
+            REPO_ROOT / "tests" / "real_host" / "helpers" / "real_host_subjects.js"
+        ).read_text(encoding="utf-8")
+        self.parameter_lab = (
+            REPO_ROOT / "web" / "tabs" / "parameter_lab_tab.js"
+        ).read_text(encoding="utf-8")
+        self.toolbox = (
+            REPO_ROOT / "web" / "extensions" / "context_toolbox.js"
+        ).read_text(encoding="utf-8")
+
+    def _js_list(self, name: str) -> list:
+        block = re.search(
+            rf"export const {name} = Object\.freeze\(\[(.*?)\]\);", self.helpers, re.S
+        )
+        self.assertIsNotNone(block, f"{name} is not exported as a frozen list")
+        return re.findall(r'"([^"]+)"', block.group(1))
+
+    def test_the_audited_extension_names_are_exactly_the_registered_ones(self):
+        registered = set()
+        for path in (REPO_ROOT / "web").rglob("*.js"):
+            text = path.read_text(encoding="utf-8")
+            registered.update(
+                re.findall(r'registerExtension\(\{\s*name:\s*["\']([^"\']+)["\']', text)
+            )
+
+        self.assertTrue(registered, "the product registers no extension to audit")
+        self.assertEqual(set(self._js_list("OPENCLAW_EXTENSION_NAMES")), registered)
+
+    def test_the_expected_menu_entries_are_the_ones_the_toolbox_adds(self):
+        added = re.findall(r'content:\s*"[^"]*?(OpenClaw: [^"]+)"', self.toolbox)
+
+        self.assertEqual(
+            sorted(self._js_list("OPENCLAW_NODE_MENU_ENTRIES")), sorted(added)
+        )
+
+    def test_the_binding_case_reads_messages_and_controls_the_product_provides(self):
+        for text in (
+            "The workflow changed. Return to the original workflow or rebuild the plan.",
+            "Values applied to nodes.",
+            '"Workflow changed"',
+            "openclaw-lab-run-list",
+            "replay-run",
+            "lab-run-all",
+            "lab-generate",
+            "lab-add-dim",
+            "dim-node-select",
+            "dim-widget-select",
+            "dim-manual-input",
+        ):
+            with self.subTest(text=text):
+                self.assertIn(text, self.parameter_lab)
+        banner = (REPO_ROOT / "web" / "openclaw_banner_manager.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("dataset.severity", banner)
+        self.assertIn('.openclaw-banner[data-severity="error"]', self.spec)
+
+    def test_the_declared_console_error_is_the_one_a_refused_run_writes(self):
+        declared = re.search(r"const REFUSED_RUN_CONSOLE_ERROR = '([^']+)';", self.spec)
+
+        self.assertIsNotNone(declared)
+        self.assertIn(f'console.error("{declared.group(1)}"', self.parameter_lab)
+
+    def test_the_warning_audit_control_does_not_name_an_extension(self):
+        probe = re.search(r"const WARNING_COLLECTOR_PROBE = '([^']+)';", self.spec)
+
+        self.assertIsNotNone(probe)
+        for name in self._js_list("OPENCLAW_EXTENSION_NAMES"):
+            self.assertNotIn(name, probe.group(1))
+        self.assertNotIn("deprecated_extension_graph_patch", probe.group(1))
+
+    def test_no_case_in_the_spec_is_skipped_or_isolated(self):
+        code = re.sub(r"/\*.*?\*/", "", self.spec, flags=re.S)
+        code = re.sub(r"^\s*//.*$", "", code, flags=re.M)
+
+        hits = re.findall(r"\btest\.(?:skip|fixme|only|fail|slow)\b|\.skip\(", code)
+        self.assertEqual(hits, [], "a case may not be filtered to obtain a passing run")
+
+
 class TestTheCopyStepExcludesWhatItClaims(unittest.TestCase):
     def test_the_repository_is_copied_with_exclusions_and_never_symlinked(self):
         source = (REPO_ROOT / "scripts" / "real_host_smoke.py").read_text(

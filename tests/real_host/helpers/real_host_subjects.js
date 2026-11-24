@@ -361,6 +361,174 @@ export function evaluateAnnotatedTempResult(result) {
 }
 
 /**
+ * Every extension name the product registers with the host. The extension-warning
+ * audit below can only recognise a warning that names one of these, so a contract
+ * test keeps this list equal to the names the product actually registers.
+ */
+export const OPENCLAW_EXTENSION_NAMES = Object.freeze(["ComfyUI-OpenClaw", "OpenClaw.ContextToolbox"]);
+
+/** The entries OpenClaw adds to the host's node context menu, as text after any leading emoji. */
+export const OPENCLAW_NODE_MENU_ENTRIES = Object.freeze([
+    "OpenClaw: Inspect",
+    "OpenClaw: Doctor",
+    "OpenClaw: Queue Status",
+    "OpenClaw: Compare...",
+    "OpenClaw: Settings",
+]);
+
+/** The host prints the `errorType` of its graph-patch deprecation report as the console message prefix. */
+export const GRAPH_PATCH_REPORT_MARKER = "deprecated_extension_graph_patch";
+
+function menuEntryText(label) {
+    // The product prefixes each label with an emoji; the host renders the label as written.
+    return String(label).replace(/^[^A-Za-z]+/, "").trim();
+}
+
+/**
+ * The host node context menu must list each OpenClaw entry exactly once.
+ *
+ * Once is deliberate: an entry registered through two host paths shows twice, and a
+ * menu that quietly doubles its items is a regression the user sees.
+ */
+export function evaluateNodeMenuEntries(labels, required = OPENCLAW_NODE_MENU_ENTRIES) {
+    if (!Array.isArray(labels) || labels.length === 0) {
+        return ["the host rendered no node context menu entries"];
+    }
+    const texts = labels.map(menuEntryText);
+    const failures = [];
+    for (const entry of required) {
+        const count = texts.filter((text) => text === entry).length;
+        if (count === 0) {
+            failures.push(`the host node context menu has no "${entry}" entry`);
+        } else if (count > 1) {
+            failures.push(`the host node context menu lists "${entry}" ${count} times`);
+        }
+    }
+    return failures;
+}
+
+/**
+ * Console warnings that name an OpenClaw extension, or carry the host's graph-patch
+ * deprecation marker.
+ *
+ * The marker counts on its own because a stock lane host runs only OpenClaw and the
+ * lane's own peer fixture, so a report carrying it that did not name the extension
+ * is still one this lane must explain; a silent pass would be the worse error.
+ */
+export function findOpenClawExtensionWarnings(messages, extensionNames = OPENCLAW_EXTENSION_NAMES) {
+    if (!Array.isArray(messages)) {
+        return [];
+    }
+    return messages
+        .map((message) => String(message))
+        .filter(
+            (text) =>
+                text.includes(GRAPH_PATCH_REPORT_MARKER) ||
+                extensionNames.some((name) => text.includes(name)),
+        );
+}
+
+/**
+ * Remove the console errors a check provokes on purpose.
+ *
+ * One occurrence per declaration, never all of them: a declaration excuses the
+ * failure it names, so a second occurrence of the same message still fails the run.
+ */
+export function removeDeclaredMessages(messages, declared) {
+    const remaining = [...(messages ?? [])];
+    for (const prefix of declared ?? []) {
+        const index = remaining.findIndex((message) => String(message).startsWith(prefix));
+        if (index !== -1) {
+            remaining.splice(index, 1);
+        }
+    }
+    return remaining;
+}
+
+/**
+ * A Parameter Lab plan belongs to the workflow it was built from.
+ *
+ * With a second workflow active, replaying the plan and running it must both be
+ * refused before any write or queued prompt; coming back to the first workflow must
+ * let the replay apply there and nowhere else. The values are read back from the host
+ * graph of whichever workflow is active, so a plan retargeted onto the wrong
+ * workflow shows up as a changed value rather than as a message.
+ */
+export function evaluateWorkflowBinding(evidence) {
+    if (!evidence || typeof evidence !== "object") {
+        return ["no workflow binding evidence was read from the host"];
+    }
+    const failures = [];
+    const { firstPath, secondPath, firstValue, secondValue, plannedValue, planRuns } = evidence;
+    const separated = evidence.separated ?? {};
+    const returned = evidence.returned ?? {};
+    const revisited = evidence.revisited ?? {};
+    const refusal = "The workflow changed";
+
+    for (const [name, path] of [["first", firstPath], ["second", secondPath]]) {
+        if (typeof path !== "string" || path.trim() === "") {
+            failures.push(`the ${name} workflow path was not read from the host`);
+        }
+    }
+    if (firstPath === secondPath) {
+        failures.push("both workflows resolved to the same host workflow");
+    }
+    const values = [firstValue, secondValue, plannedValue];
+    if (!values.every((value) => typeof value === "number") || new Set(values).size !== values.length) {
+        failures.push(`the fixture values must be three different numbers, got ${JSON.stringify(values)}`);
+    }
+    if (!(planRuns >= 1)) {
+        failures.push("no plan was built from the first workflow");
+    }
+
+    if (separated.activePath !== secondPath) {
+        failures.push(`the second workflow was not active while replaying: ${separated.activePath}`);
+    }
+    if (typeof separated.replayMessage !== "string" || !separated.replayMessage.includes(refusal)) {
+        failures.push(`replay in another workflow was not refused with a visible message: "${separated.replayMessage}"`);
+    }
+    if (separated.replayConfirmations !== 0) {
+        failures.push("replay in another workflow asked for confirmation before refusing");
+    }
+    if (separated.valueAfterReplay !== secondValue) {
+        failures.push(`replay wrote into the other workflow: ${separated.valueAfterReplay}, expected ${secondValue}`);
+    }
+    if (typeof separated.runMessage !== "string" || !separated.runMessage.includes(refusal)) {
+        failures.push(`a run in another workflow was not refused with a visible message: "${separated.runMessage}"`);
+    }
+    if (separated.runStatus !== "Workflow changed") {
+        failures.push(`the refused run was not marked as a changed workflow: "${separated.runStatus}"`);
+    }
+    if (separated.valueAfterRun !== secondValue) {
+        failures.push(`a run wrote into the other workflow: ${separated.valueAfterRun}, expected ${secondValue}`);
+    }
+
+    if (returned.activePath !== firstPath) {
+        failures.push(`the first workflow was not active after returning: ${returned.activePath}`);
+    }
+    if (returned.valueBeforeReplay !== firstValue) {
+        failures.push(`the first workflow changed while it was inactive: ${returned.valueBeforeReplay}, expected ${firstValue}`);
+    }
+    if (typeof returned.replayMessage !== "string" || !returned.replayMessage.includes("Values applied")) {
+        failures.push(`replay after returning did not report success: "${returned.replayMessage}"`);
+    }
+    if (returned.valueAfterReplay !== plannedValue) {
+        failures.push(`replay after returning did not apply the planned value: ${returned.valueAfterReplay}, expected ${plannedValue}`);
+    }
+
+    if (revisited.activePath !== secondPath) {
+        failures.push(`the second workflow was not active when revisited: ${revisited.activePath}`);
+    }
+    if (revisited.value !== secondValue) {
+        failures.push(`the replay reached the second workflow: ${revisited.value}, expected ${secondValue}`);
+    }
+    if (evidence.queuedPrompts !== 0) {
+        failures.push(`${evidence.queuedPrompts} prompt(s) were queued; a refused run must queue none`);
+    }
+    return failures;
+}
+
+/**
  * Compatibility evidence may only advance from a run that actually happened.
  *
  * The tracked matrix rejects a validated state without a run identifier and a
