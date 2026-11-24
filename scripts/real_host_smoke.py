@@ -40,7 +40,7 @@ import urllib.request
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import IO, Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -204,15 +204,15 @@ def _home_directory_pattern() -> re.Pattern[str] | None:
         return None
     text = str(home)
     # A drive or filesystem root would turn every path in the output into "~...".
-    if len(text) < 4 or home == Path(home.anchor):
+    if len(text) < 4 or home.parent == home:
         return None
     spellings = {text, home.as_posix(), text.replace("\\", "\\\\")}
     alternatives = "|".join(
         re.escape(spelling) for spelling in sorted(spellings, key=len, reverse=True)
     )
-    return re.compile(
-        rf"(?:{alternatives})(?![\w.\-])", re.IGNORECASE if os.name == "nt" else 0
-    )
+    # Windows paths compare without regard to case; POSIX paths do not.
+    flags = re.IGNORECASE if isinstance(home, PureWindowsPath) else 0
+    return re.compile(rf"(?:{alternatives})(?![\w.\-])", flags)
 
 
 def _redact(text: str) -> str:

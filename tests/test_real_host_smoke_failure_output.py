@@ -22,7 +22,7 @@ import time
 import unittest
 import unittest.mock
 from collections.abc import Iterator
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from scripts import real_host_smoke
 from scripts.real_host_smoke import AUTHORIZATION_ENV, SmokeError, _run, main
@@ -470,17 +470,23 @@ class TestSecretsAreRedactedFromEveryTail(unittest.TestCase):
                     self.assertNotIn("synthetic-person", printed)
                     self.assertIn("~", printed)
 
-    @unittest.skipUnless(
-        os.name == "nt", "path comparison is case-insensitive on Windows"
-    )
-    def test_the_home_directory_is_matched_without_regard_to_case_on_windows(self):
+    def test_a_windows_home_directory_is_matched_without_regard_to_case(self):
         with unittest.mock.patch.object(
-            Path, "home", return_value=Path("C:\\Users\\Synthetic-Person")
+            Path, "home", return_value=PureWindowsPath("C:\\Users\\Synthetic-Person")
         ):
             printed = self._printed_for(
                 "open c:\\users\\SYNTHETIC-person\\cache failed"
             )
         self.assertNotIn("synthetic-person", printed.lower())
+
+    def test_a_posix_home_directory_is_matched_exactly(self):
+        with unittest.mock.patch.object(
+            Path, "home", return_value=PurePosixPath("/home/Synthetic-Person")
+        ):
+            printed = self._printed_for(
+                "open /home/Synthetic-Person/cache and /home/synthetic-person/cache"
+            )
+        self.assertIn("open ~/cache and /home/synthetic-person/cache", printed)
 
     def test_a_drive_root_is_never_treated_as_a_home_directory(self):
         root = Path(Path.cwd().anchor)
