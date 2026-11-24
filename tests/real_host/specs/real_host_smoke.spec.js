@@ -860,9 +860,12 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
           await expect(page.locator('.dim-node-select')).toHaveValue(fixture.executionId);
         }
         await page.evaluate(() => {
-          const { tab, executionId } = window.__openclawIdentity;
+          const { tab, executionId, graphHost } = window.__openclawIdentity;
           tab.experimentId = 'host-identity';
           tab.plan = { dimensions: [], runs: [{ [`${executionId}.ckpt_name`]: 'xl.ckpt' }] };
+          // Bind the hand-built plan to the graph it targets, as generating or loading a plan does.
+          // A plan without a binding is refused before any value is resolved.
+          tab._graphBinding = graphHost.captureGraphBinding(window.app);
           tab.renderPlan();
         });
         await page.click('.replay-run');
@@ -893,6 +896,9 @@ test.describe(`real host frontend smoke (${SUBJECT.id})`, () => {
         const values = [widget.value, control.value, collision.widgets.find((entry) => entry.name === 'ckpt_name').value];
         tab.experimentId = 'host-collision';
         tab.plan = { dimensions: [], runs: [{ 'control.width': 513, [`${executionId}.ckpt_name`]: 'xl.ckpt' }] };
+        // Bind the hand-built plan to the graph it targets, as generating or loading a plan does.
+        // A plan without a binding is refused before any value is resolved.
+        tab._graphBinding = graphHost.captureGraphBinding(window.app);
         tab.renderPlan();
         return { values, ambiguous: graphHost.getGraphNodeEntry(window.app.graph, executionId) === null };
       });
