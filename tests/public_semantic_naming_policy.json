@@ -308,7 +308,7 @@
     "web/ErrorBoundary.js": 1,
     "web/admin_console_app.js": 2,
     "web/admin_errors.js": 1,
-    "web/extensions/context_toolbox.js": 3,
+    "web/extensions/context_toolbox.js": 2,
     "web/global_error_handler.js": 1,
     "web/openclaw.js": 5,
     "web/openclaw_actions.js": 1,
