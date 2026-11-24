@@ -674,6 +674,10 @@ test.describe('Parameter Lab - Opaque Identities', () => {
                 const tab = tabManager.tabs.find((entry) => entry.id === 'parameter-lab');
                 tab.experimentId = 'identity-reject';
                 tab.plan = { dimensions: [], runs: [{ 'control.seed': 99, [bad]: 77 }] };
+                // Bind the hand-built plan to the graph it targets, as generating or loading a plan does.
+                // A plan without a binding is refused before any value is resolved.
+                const { captureGraphBinding } = await import('/web/openclaw_graph_host.js');
+                tab._graphBinding = captureGraphBinding(window.app);
                 tab.renderPlan();
                 window.confirm = () => true;
             }, failure);
@@ -876,6 +880,12 @@ test.describe('Parameter Lab - Workflow Binding', () => {
 
                 await expect(page.locator('.openclaw-banner')).toContainText(SWITCH_MESSAGE);
                 expect(await page.evaluate(() => [window.__wf.seedOf('first'), window.__wf.seedOf('second')])).toEqual([100, 200]);
+
+                // The banner manager keeps an error banner on screen over a later non-error one, so the
+                // workflow-changed error is dismissed first, as a user would. It also expires on its own
+                // after a few seconds, hence the optional close.
+                await page.evaluate(() => document.querySelector('.openclaw-banner-close')?.click());
+                await expect(page.locator('.openclaw-banner')).toHaveCount(0);
 
                 await page.evaluate(() => window.__wf.activate('first'));
                 await page.locator('.replay-run').first().click();
