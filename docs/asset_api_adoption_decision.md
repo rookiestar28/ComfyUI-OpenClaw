@@ -4,7 +4,7 @@
 
 - Current source is `da8bd08e` (`v0.46.0-46-gda8bd08e4`, project `0.46.0`), bundle `1.59.11`. Tag `v0.46.0` instead pins `1.59.6`.
 - The reviewed standalone frontend is release `1.61.8`, and its source head is that tagged release.
-- The no-go decision stays in effect: OpenClaw continues to use `/history` and bounded `/view` refs rather than direct `/api/assets` access. The refreshed subjects are pending live qualification, and the 2026-11-01 qualification below applies only to its own subjects.
+- The no-go decision stays in effect: OpenClaw continues to use `/history` and bounded `/view` refs rather than direct `/api/assets` access. The refreshed subjects passed paired isolated CPU host qualification on 2026-11-24, and the 2026-11-01 qualification below applies only to its own subjects.
 
 ## Historical 2026-11-01 source review
 

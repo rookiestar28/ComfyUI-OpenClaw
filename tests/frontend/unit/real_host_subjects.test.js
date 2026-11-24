@@ -808,10 +808,10 @@ describe("real host evidence gating", () => {
                 evidenceId: POLICY.evidence.evidence_id,
             }).allowed,
         ).toBe(true);
-        // No campaign has run against the refreshed subjects: pending, with no identifiers.
-        expect(POLICY.evidence.current_state).toBe("pending");
-        expect(POLICY.evidence.run_id).toBeNull();
-        expect(POLICY.evidence.evidence_id).toBeNull();
+        // The paired campaign on the refreshed subjects ran: validated, with its identifiers.
+        expect(POLICY.evidence.current_state).toBe("validated");
+        expect(POLICY.evidence.run_id).toBe("host-pair-20261124-isolated-01");
+        expect(POLICY.evidence.evidence_id).toBe("host-evidence-20261124-isolated-01");
     });
 });
 

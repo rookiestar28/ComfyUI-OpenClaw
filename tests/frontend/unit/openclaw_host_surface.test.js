@@ -437,10 +437,10 @@ describe("R254 host reference baseline separation", () => {
         ]);
     });
 
-    it("keeps real-host validation pending independently from source review", () => {
+    it("reports the validated real-host state independently from source review", () => {
         // CRITICAL: source review and the local gate are not runtime proof. Only
         // an authorized real-host campaign on these exact subjects may change this.
-        expect(HOST_REAL_VALIDATION_STATE).toBe("pending");
+        expect(HOST_REAL_VALIDATION_STATE).toBe("validated");
     });
 
     it("stamps the separated reference facts on every host surface", () => {
@@ -455,9 +455,13 @@ describe("R254 host reference baseline separation", () => {
             expect(container.dataset.openclawFrontendSourceRevision, surface).toBe("388973acb5");
             expect(container.dataset.openclawFrontendReleaseVersion, surface).toBe("1.61.8");
             expect(container.dataset.openclawFrontendReleaseRevision, surface).toBe("388973acb5");
-            // Both Desktop surfaces are pending by construction; the standalone surface is
-            // pending because no campaign has run against the refreshed subjects.
-            expect(container.dataset.openclawRealHostValidation, surface).toBe("pending");
+            // Both Desktop surfaces stay pending by construction because the campaign
+            // exercised standalone ComfyUI only; the standalone surface carries the module state.
+            expect(container.dataset.openclawRealHostValidation, surface).toBe(
+                surface === HOST_SURFACES.desktop || surface === HOST_SURFACES.comfyDesktop
+                    ? "pending"
+                    : "validated",
+            );
         }
     });
 

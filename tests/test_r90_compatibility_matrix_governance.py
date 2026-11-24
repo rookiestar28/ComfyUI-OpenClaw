@@ -573,7 +573,7 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
         validation = validate_metadata(metadata, today=date(2026, 9, 6))
         return validation, {entry["code"] for entry in validation["violations"]}
 
-    def test_repo_matrix_keeps_refreshed_pair_pending_and_history_scoped(self):
+    def test_repo_matrix_keeps_refreshed_pair_validated_and_history_scoped(self):
         metadata = read_matrix_document(
             REPO_ROOT / "docs/release/compatibility_matrix.md"
         )["metadata"]
@@ -586,11 +586,25 @@ class TestR254ReferenceBaselineEvidence(unittest.TestCase):
                 "evidence_id": "source-review-20261124",
             },
         )
-        # Nothing validated the refreshed subjects yet: no run, no evidence id, no date.
-        pending = {"state": "pending", "run_id": None, "evidence_id": None}
-        self.assertEqual(states["real_host"], pending)
-        self.assertEqual(states["repository_validation"], pending)
-        self.assertIsNone(metadata["last_validated_date"])
+        # The paired campaign and the Windows gate validated the refreshed subjects, each
+        # under its own run and evidence identifiers, dated by the campaign.
+        self.assertEqual(
+            states["real_host"],
+            {
+                "state": "validated",
+                "run_id": "host-pair-20261124-isolated-01",
+                "evidence_id": "host-evidence-20261124-isolated-01",
+            },
+        )
+        self.assertEqual(
+            states["repository_validation"],
+            {
+                "state": "validated",
+                "run_id": "windows-full-gate-20261124-host-refresh",
+                "evidence_id": "repo-validation-20261124-host-refresh",
+            },
+        )
+        self.assertEqual(metadata["last_validated_date"], "2026-11-24")
 
         history = metadata["historical_evidence"]
         self.assertEqual(

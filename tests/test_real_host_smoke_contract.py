@@ -323,17 +323,20 @@ class TestHostStartupIsBoundedAndLoopbackOnly(unittest.TestCase):
 
 
 class TestEvidenceCannotAdvanceWithoutARun(unittest.TestCase):
-    def test_the_matrix_reports_the_refreshed_subjects_as_pending(self):
+    def test_the_matrix_reports_the_refreshed_pair_as_validated(self):
         states = _matrix_metadata()["evidence_states"]["real_host"]
 
-        # No campaign has run against the refreshed subjects, so the lane's recorded
-        # state, the matrix and the frontend module all stay pending with no identifiers.
+        # The paired campaign on the refreshed subjects ran, so the lane's recorded
+        # state, the matrix and the frontend module all carry the same validated state
+        # and the same identifiers.
         self.assertEqual(states["state"], POLICY["evidence"]["current_state"])
-        self.assertEqual(states["state"], "pending")
-        self.assertIsNone(states["run_id"])
-        self.assertIsNone(states["evidence_id"])
-        self.assertIsNone(POLICY["evidence"]["run_id"])
-        self.assertIsNone(POLICY["evidence"]["evidence_id"])
+        self.assertEqual(states["state"], "validated")
+        self.assertEqual(states["run_id"], "host-pair-20261124-isolated-01")
+        self.assertEqual(states["evidence_id"], "host-evidence-20261124-isolated-01")
+        self.assertEqual(POLICY["evidence"]["run_id"], "host-pair-20261124-isolated-01")
+        self.assertEqual(
+            POLICY["evidence"]["evidence_id"], "host-evidence-20261124-isolated-01"
+        )
         self.assertEqual(
             evidence_update_is_allowed(
                 POLICY, states["state"], states["run_id"], states["evidence_id"]
@@ -367,11 +370,11 @@ class TestEvidenceCannotAdvanceWithoutARun(unittest.TestCase):
             ],
         )
 
-    def test_the_frontend_module_reports_pending_real_host_validation(self):
+    def test_the_frontend_module_reports_validated_real_host_validation(self):
         surface = HOST_SURFACE_PATH.read_text(encoding="utf-8")
 
-        self.assertIn('HOST_REAL_VALIDATION_STATE = "pending"', surface)
-        self.assertNotIn('HOST_REAL_VALIDATION_STATE = "validated"', surface)
+        self.assertIn('HOST_REAL_VALIDATION_STATE = "validated"', surface)
+        self.assertNotIn('HOST_REAL_VALIDATION_STATE = "pending"', surface)
 
     def test_a_validated_state_requires_both_identifiers(self):
         self.assertEqual(
