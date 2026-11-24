@@ -99,6 +99,11 @@ jobs:
       - name: Install Node deps
         run: |
           npm ci
+      # IMPORTANT: `ubuntu-latest` is Ubuntu 26.04 from 2026-11, and Playwright below
+      # 1.61.0 refuses to install Chromium there ("Playwright does not support chromium
+      # on ubuntu26.04-x64"). Keep the locked Playwright at 1.61.0 or newer (the
+      # frontend dependency hardening test enforces this floor). Do not lower the lock,
+      # and do not pin the runner image to work around it.
       - name: Install Playwright browsers
         run: |
           npx playwright install chromium

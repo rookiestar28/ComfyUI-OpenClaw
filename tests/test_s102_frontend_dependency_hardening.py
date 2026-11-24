@@ -13,12 +13,30 @@ CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 TEST_SOP = ROOT / "tests" / "TEST_SOP.md"
 CI_POLICY = ROOT / "docs" / "release" / "ci_regression_policy.md"
 
+PLAYWRIGHT_PACKAGES = ("@playwright/test", "playwright", "playwright-core")
+# IMPORTANT: GitHub's `ubuntu-latest` label has meant Ubuntu 26.04 since 2026-11, and
+# Playwright releases before 1.61.0 refuse to install Chromium there ("Playwright does
+# not support chromium on ubuntu26.04-x64"). Lowering the lock or the manifest floor
+# below this value silently breaks the Linux E2E job and the weekly real-host lane.
+# Pinning the runner image back to Ubuntu 24.04 is not an accepted substitute: it only
+# postpones the same failure until that image is retired.
+PLAYWRIGHT_UBUNTU_2604_FLOOR = (1, 61, 0)
+
 
 def _version_tuple(value: str) -> tuple[int, int, int]:
     match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", value)
     if match is None:
         raise AssertionError(f"expected a stable semantic version, got {value!r}")
     return tuple(int(part) for part in match.groups())
+
+
+def _range_floor(spec: str) -> tuple[int, int, int]:
+    match = re.fullmatch(r"(?:\^|~|>=)?(\d+\.\d+\.\d+)", spec)
+    if match is None:
+        raise AssertionError(
+            f"expected a caret, tilde, minimum or exact version range, got {spec!r}"
+        )
+    return _version_tuple(match.group(1))
 
 
 def _assert_ordered(test: unittest.TestCase, content: str, *needles: str) -> None:
@@ -74,6 +92,27 @@ class TestFrontendDependencyHardening(unittest.TestCase):
         for version in versions:
             with self.subTest(version=version):
                 self.assertGreaterEqual(_version_tuple(version), (1, 2, 2))
+
+    def test_lock_pins_one_playwright_version_with_ubuntu_2604_support(self):
+        packages = self.lock["packages"]
+        versions = {
+            name: packages[f"node_modules/{name}"]["version"]
+            for name in PLAYWRIGHT_PACKAGES
+        }
+        self.assertEqual(
+            len(set(versions.values())),
+            1,
+            f"the Playwright packages must lock one shared version: {versions}",
+        )
+        for name, version in versions.items():
+            with self.subTest(package=name, version=version):
+                self.assertGreaterEqual(
+                    _version_tuple(version), PLAYWRIGHT_UBUNTU_2604_FLOOR
+                )
+
+    def test_manifest_floor_keeps_playwright_at_ubuntu_2604_support(self):
+        spec = self.package["devDependencies"]["@playwright/test"]
+        self.assertGreaterEqual(_range_floor(spec), PLAYWRIGHT_UBUNTU_2604_FLOOR)
 
     def test_windows_full_gate_reconciles_then_audits_frontend_tree(self):
         content = WINDOWS_GATE.read_text(encoding="utf-8")
