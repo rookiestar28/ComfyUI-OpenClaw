@@ -18,9 +18,9 @@ from __future__ import annotations
 import argparse
 import functools
 import sys
+from collections.abc import Sequence
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Sequence
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LOOPBACK_HOST = "127.0.0.1"

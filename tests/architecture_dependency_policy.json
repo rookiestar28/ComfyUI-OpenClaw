@@ -127,6 +127,7 @@
       "scripts/contract_digest.py",
       "scripts/devtools/debug_s35_import.py",
       "scripts/devtools/verify_s30_doctor.py",
+      "scripts/e2e_static_server.py",
       "scripts/generate_openapi_spec.py",
       "scripts/generate_provenance.py",
       "scripts/high_risk_acceptance.py",
