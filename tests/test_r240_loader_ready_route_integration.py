@@ -170,6 +170,22 @@ def _thread_fingerprint() -> tuple[tuple[str, int | None, bool], ...]:
     )
 
 
+def _threads_started_since(
+    before: tuple[tuple[str, int | None, bool], ...],
+) -> tuple[tuple[str, int | None, bool], ...]:
+    # IMPORTANT: compare only threads that appeared during this test. A thread that
+    # already existed may exit at any moment (for example a bounded retry thread left
+    # by an earlier test), so whole-set equality fails for reasons this test did not
+    # cause. Only a new live thread is this test's leak. Do not restore whole-set
+    # equality.
+    known = {(name, ident) for name, ident, _daemon in before}
+    return tuple(
+        fingerprint
+        for fingerprint in _thread_fingerprint()
+        if (fingerprint[0], fingerprint[1]) not in known
+    )
+
+
 def _top_level_api_aliases() -> tuple[str, ...]:
     return tuple(
         sorted(name for name in sys.modules if name == "api" or name.startswith("api."))
@@ -476,7 +492,7 @@ class LoaderReadyRouteIntegrationTests(unittest.TestCase):
             if state_root.exists() and not any(state_root.iterdir()):
                 state_root.rmdir()
         self.assertEqual(dict(os.environ), env_before)
-        self.assertEqual(_thread_fingerprint(), threads_before)
+        self.assertEqual(_threads_started_since(threads_before), ())
         self.assertEqual(_top_level_api_aliases(), aliases_before)
 
 
