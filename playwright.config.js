@@ -63,7 +63,11 @@ module.exports = defineConfig({
   },
   webServer: {
     // IMPORTANT: allow overriding port for environments where 3000 is blocked/reserved.
-    command: `${process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3')} -m http.server ${e2ePort}`,
+    // CRITICAL: do not go back to `python -m http.server` (backlog 5, all interfaces). With the
+    // default worker count on a high-core Windows host the suite then fails with
+    // net::ERR_CONNECTION_REFUSED; scripts/e2e_static_server.py keeps a large accept backlog
+    // and binds 127.0.0.1 only.
+    command: `${process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3')} scripts/e2e_static_server.py ${e2ePort}`,
     url: `${e2eBase}/tests/e2e/test-harness.html`,
     reuseExistingServer: true,
     timeout: timeoutMs,

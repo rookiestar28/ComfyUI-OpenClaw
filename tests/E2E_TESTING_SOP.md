@@ -34,12 +34,12 @@ Boundary:
 
 - Node.js matching `^20.19.0 || ^22.12.0 || >=24.0.0` (from package.json)
 - npm 9+
-- Python 3.10+ from the project-local environment (the repository floor also applies to the Playwright web server: `python -m http.server 3000`)
+- Python 3.10+ from the project-local environment (the repository floor also applies to the Playwright web server: `python scripts/e2e_static_server.py 3000`)
 - Playwright browsers installed (`npx playwright install chromium`)
 
 Notes:
 
-- The E2E suite uses `python -m http.server` like ComfyUI-Doctor.
+- The E2E suite serves the repository root with `scripts/e2e_static_server.py` (standard library only, bound to `127.0.0.1`, large accept backlog). Do not switch it back to `python -m http.server`: with the default worker count on a high-core Windows host that server refuses connections (`net::ERR_CONNECTION_REFUSED`).
 - If your environment only has `python3`, provide a local shim named `python` (see below).
 - On WSL running from `/mnt/c/...`, set a writable temp dir to avoid permission issues.
 
