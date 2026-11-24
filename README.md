@@ -91,6 +91,28 @@ Deployment profiles and hardening references:
 
 <details>
 
+<summary><strong>Host compatibility updated for ComfyUI 0.46.0 with frontend 1.59.11 and 1.61.8</strong></summary>
+
+- ComfyUI `0.46.0` at `da8bd08e`, with bundled frontend `1.59.11` or standalone frontend
+  release `1.61.8`, passed eighteen browser checks per frontend in an isolated CPU host on
+  2026-11-24. Desktop surfaces remain unverified.
+- Parameter Lab binds each plan to the workflow it was generated or loaded from. Running,
+  replaying or queueing a plan after switching to another workflow now stops with a message,
+  instead of writing values into the workflow that happens to be open.
+- The in-canvas context toolbox entries now appear in the node right-click menu. They were
+  registered too late in startup and could be missing entirely; they are now added through
+  the frontend's node-menu hook, which also avoids the frontend's deprecated monkey-patching
+  warning. Frontends without that hook keep the previous fallback.
+- When a real-host validation step fails, the output now ends with a bounded, redacted tail of
+  the failing command's output, with credentials, tokens and home-directory paths masked, so
+  the failure names its cause.
+- The CI browser lanes support Ubuntu 26.04 runners, and the mocked browser test server
+  listens on loopback only.
+
+</details>
+
+<details>
+
 <summary><strong>Host compatibility updated in v1.3.2</strong></summary>
 
 - ComfyUI `0.43.0` at `7c4390a6`, with bundled frontend `1.57.6` or standalone
@@ -165,34 +187,6 @@ Deployment profiles and hardening references:
   separate, unexecuted subjects.
 - The scheduled release download now follows the pinned version and digest policy;
   acceptance receipts follow the applicable self-review or independent-review rule.
-
-</details>
-
-<details>
-
-<summary><strong>Operator alerts now retire when their condition ends</strong></summary>
-
-- A dismissed alert can appear again. Previously, dismissing a notification left a permanent
-  record that suppressed any identical alert for the life of that browser profile, so
-  dismissing a connectivity error silently disabled connectivity errors for good. Producers
-  now resolve a condition that has ended, which clears the record and lets a genuine
-  recurrence show. Dismissing an error while its condition is still ongoing still works as
-  before, so a polling check cannot undo the dismissal.
-- Connectivity errors are retired automatically when the connection returns, instead of
-  remaining on screen as a red error describing a condition that ended minutes earlier. The
-  high-load warning is retired the same way once the host stops dropping events.
-- A durable connectivity error is now written only after repeated consecutive failures. The
-  operator is still warned immediately on the first failed health check, but that immediate
-  warning leaves no record, so a routine ComfyUI restart no longer leaves a permanent error
-  behind. Isolated blips do not accumulate, because the failure count resets on any healthy
-  check.
-- A startup diagnostic that reported a missing host API shim on every page load was repaired.
-  It checked an identifier the module never imported, so it always fired even though the shim
-  was working correctly; it now checks the real binding and describes only what it can
-  actually detect.
-- Verified against a running ComfyUI host: a healthy session leaves no stored alerts, a
-  sustained outage records exactly one, recovery clears it, and the false startup warning is
-  gone.
 
 </details>
 
@@ -557,6 +551,8 @@ Parameter Lab now supports experiment history and run replay:
 
 - `History` lists saved experiments from local state.
 - `Load` opens stored experiment details and run statuses.
+- A plan is bound to the workflow it was generated or loaded from; running, replaying or
+  queueing it after switching workflows stops with a message instead of writing elsewhere.
 - `Replay` applies a selected run's parameter values back into the active workflow graph while
   preserving complete node IDs, including IDs containing colons. Shared subgraph definitions
   are resolved through their instance paths; ambiguous IDs or targets fail before any write.

@@ -13,6 +13,28 @@ and host qualification, use the [compatibility matrix](compatibility_matrix.md).
 
 <details>
 
+<summary><strong>Host compatibility updated for ComfyUI 0.46.0 with frontend 1.59.11 and 1.61.8</strong></summary>
+
+- ComfyUI `0.46.0` at `da8bd08e`, with bundled frontend `1.59.11` or standalone frontend
+  release `1.61.8`, passed eighteen browser checks per frontend in an isolated CPU host on
+  2026-11-24. Desktop surfaces remain unverified.
+- Parameter Lab binds each plan to the workflow it was generated or loaded from. Running,
+  replaying or queueing a plan after switching to another workflow now stops with a message,
+  instead of writing values into the workflow that happens to be open.
+- The in-canvas context toolbox entries now appear in the node right-click menu. They were
+  registered too late in startup and could be missing entirely; they are now added through
+  the frontend's node-menu hook, which also avoids the frontend's deprecated monkey-patching
+  warning. Frontends without that hook keep the previous fallback.
+- When a real-host validation step fails, the output now ends with a bounded, redacted tail of
+  the failing command's output, with credentials, tokens and home-directory paths masked, so
+  the failure names its cause.
+- The CI browser lanes support Ubuntu 26.04 runners, and the mocked browser test server
+  listens on loopback only.
+
+</details>
+
+<details>
+
 <summary><strong>Host compatibility updated in v1.3.2</strong></summary>
 
 - ComfyUI `0.43.0` at `7c4390a6`, with bundled frontend `1.57.6` or standalone
