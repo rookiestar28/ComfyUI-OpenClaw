@@ -95,6 +95,11 @@ interface NotificationEntry {
 
 Defines quick actions available in the node context menu (via ComfyUI extension hooks).
 
+On frontends that collect `getNodeMenuItems` results, the entries are contributed only through
+that hook and no menu prototype is patched. Frontends without the hook use one legacy patch of
+the node menu instead, never both. The entries are registered after the host's one-time
+extension `setup` pass, so their state must not depend on that `setup` running.
+
 ### Schema (TypeScript)
 
 ```typescript
@@ -157,6 +162,9 @@ Contract notes:
 - Shared subgraph definitions require an unambiguous instance path. Definition-object identity
   alone cannot select an execution instance. Duplicate IDs or unresolved target collisions
   reject an edit or replay before widget values are written.
+- A plan is bound to the workflow graph it was generated or loaded from. Running, replaying or
+  queueing it after another workflow becomes active stops with an error banner before any
+  widget value is written or any prompt is queued.
 - Experiment parameter keys such as `"10.cfg"` are display/storage keys derived from the original `node_id` plus `widget_name`; they are not a separate numeric node contract.
 - Sweep values are limited to bounded strings, booleans, integers, and finite numbers. Null,
   arrays, objects, non-finite numbers, overlong strings, presentation-ambiguous duplicates, and

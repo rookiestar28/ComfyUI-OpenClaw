@@ -67,6 +67,13 @@ widget values. Select the intended instance from the current graph and create a 
 when an older saved target no longer identifies one instance; do not shorten or numerically
 coerce its node ID to force a match.
 
+## Parameter Lab reports that the workflow changed
+
+Each plan is bound to the workflow it was generated or loaded from. If another workflow is
+active when you run, replay or queue the plan, Parameter Lab stops before changing any values
+and shows "The workflow changed." Switch back to the original workflow, or rebuild the plan
+from the workflow that is open now.
+
 ## Operator Doctor
 
 Run the built-in diagnostic tool to verify environment readiness (libraries, permissions, contract files):

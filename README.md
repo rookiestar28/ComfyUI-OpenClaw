@@ -91,11 +91,12 @@ Deployment profiles and hardening references:
 
 <details>
 
-<summary><strong>Host compatibility updated for ComfyUI 0.46.0 with frontend 1.59.11 and 1.61.8</strong></summary>
+<summary><strong>Host compatibility updated in v1.3.5</strong></summary>
 
 - ComfyUI `0.46.0` at `da8bd08e`, with bundled frontend `1.59.11` or standalone frontend
   release `1.61.8`, passed eighteen browser checks per frontend in an isolated CPU host on
-  2026-11-24. Desktop surfaces remain unverified.
+  2026-11-24, including new checks for workflow binding, the node menu and extension
+  warnings. Desktop surfaces remain unverified.
 - Parameter Lab binds each plan to the workflow it was generated or loaded from. Running,
   replaying or queueing a plan after switching to another workflow now stops with a message,
   instead of writing values into the workflow that happens to be open.
@@ -103,12 +104,15 @@ Deployment profiles and hardening references:
   registered too late in startup and could be missing entirely; they are now added through
   the frontend's node-menu hook, which also avoids the frontend's deprecated monkey-patching
   warning. Frontends without that hook keep the previous fallback.
+- Webhook, webhook validation and submission, and preflight requests now read a body that
+  arrives in several network chunks in full, up to the 64 KiB limit, before parsing it or
+  checking its signature. Previously only the first chunk could be read, so a valid request
+  could fail its JSON or signature check.
 - When a real-host validation step fails, the output now ends with a bounded, redacted tail of
   the failing command's output, with credentials, tokens and home-directory paths masked, so
   the failure names its cause.
-- The CI browser lanes support Ubuntu 26.04 runners, and the mocked browser test server
-  listens on loopback only.
-
+- The CI browser lanes support Ubuntu 26.04 runners with Playwright `1.65`, and the mocked
+  browser test server listens on loopback only.
 </details>
 
 <details>
@@ -512,7 +516,7 @@ The OpenClaw sidebar includes these built-in tabs. Some tabs are capability-gate
 | `Packs` | Dedicated pack lifecycle tab for import/export/delete under admin boundary. | [API Overview](#api-overview) |
 | `PNG Info` | Inspects saved generation images through drag-and-drop, file picker, or scoped paste, parses A1111 infotext plus ComfyUI `prompt` / `workflow` metadata, shows extracted prompt and generation fields when recoverable, and keeps raw metadata visible for operator inspection. | [API Overview](#api-overview), [Troubleshooting](#troubleshooting) |
 | `Model Manager` | Searches model catalog/install records, queues managed downloads, monitors task lifecycle, and imports completed tasks into the managed install root with current ComfyUI folder-key normalization, including `gligen`, `latent_upscale_models`, `hypernetworks`, `photomaker`, `model_patches`, `geometry_estimation`, and `detection`, plus legacy type aliases. User-managed `datasets` remain outside model inventory and install destinations. | [API Overview](#api-overview), [Troubleshooting](#troubleshooting) |
-| `Parameter Lab` | Runs bounded sweep/compare experiments, stores history, and replays parameters back into the graph while preserving non-numeric host node IDs. | [Operator UX Features](#operator-ux-features) |
+| `Parameter Lab` | Runs bounded sweep/compare experiments, stores history, and replays parameters back into the workflow each plan was built from while preserving non-numeric host node IDs. | [Operator UX Features](#operator-ux-features) |
 
 ## Operator UX Features
 
@@ -535,15 +539,18 @@ by a transient banner that leaves no record.
 
 ### In-canvas context toolbox
 
-Right-click a node and open the `OpenClaw` menu to access:
+Right-click a node. After a separator, the node menu lists these `OpenClaw:` entries:
 
-- `Inspect`: jump to the Explorer troubleshooting path.
-- `Doctor`: run diagnostics and show readiness feedback.
-- `Queue Status`: jump directly to queue/job monitoring.
-- `Compare`: open Parameter Lab in compare setup mode for the selected node.
-- `Settings`: jump to OpenClaw settings.
+- `OpenClaw: Inspect`: jump to the Explorer troubleshooting path.
+- `OpenClaw: Doctor`: run diagnostics and show readiness feedback.
+- `OpenClaw: Queue Status`: jump directly to queue/job monitoring.
+- `OpenClaw: Compare...`: open Parameter Lab in compare setup mode for the selected node. It
+  appears only when the node has a widget that can be compared.
+- `OpenClaw: Settings`: jump to OpenClaw settings.
 
 These actions are capability-aware and degrade to safe guidance when optional backend capabilities are unavailable.
+On current frontends the entries are added through the frontend's node-menu hook; frontends
+without that hook use a compatible fallback.
 
 ### Parameter Lab history and replay
 

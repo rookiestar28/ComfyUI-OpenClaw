@@ -5,19 +5,20 @@ The README now keeps only the most recent 3-5 update summaries and links here fo
 
 Newest entries appear first.
 
-Current release notes: [v1.3.2](v1.3.2.md). Previous: [v1.3.0](v1.3.0.md),
-[v1.2.0](v1.2.0.md), [v1.1.0](v1.1.0.md).
+Current release notes: [v1.3.5](v1.3.5.md). Previous: [v1.3.2](v1.3.2.md),
+[v1.3.0](v1.3.0.md), [v1.2.0](v1.2.0.md), [v1.1.0](v1.1.0.md).
 
 These entries describe behavior at the time of each update. For current runtime requirements
 and host qualification, use the [compatibility matrix](compatibility_matrix.md).
 
 <details>
 
-<summary><strong>Host compatibility updated for ComfyUI 0.46.0 with frontend 1.59.11 and 1.61.8</strong></summary>
+<summary><strong>Host compatibility updated in v1.3.5</strong></summary>
 
 - ComfyUI `0.46.0` at `da8bd08e`, with bundled frontend `1.59.11` or standalone frontend
   release `1.61.8`, passed eighteen browser checks per frontend in an isolated CPU host on
-  2026-11-24. Desktop surfaces remain unverified.
+  2026-11-24, including new checks for workflow binding, the node menu and extension
+  warnings. Desktop surfaces remain unverified.
 - Parameter Lab binds each plan to the workflow it was generated or loaded from. Running,
   replaying or queueing a plan after switching to another workflow now stops with a message,
   instead of writing values into the workflow that happens to be open.
@@ -25,12 +26,15 @@ and host qualification, use the [compatibility matrix](compatibility_matrix.md).
   registered too late in startup and could be missing entirely; they are now added through
   the frontend's node-menu hook, which also avoids the frontend's deprecated monkey-patching
   warning. Frontends without that hook keep the previous fallback.
+- Webhook, webhook validation and submission, and preflight requests now read a body that
+  arrives in several network chunks in full, up to the 64 KiB limit, before parsing it or
+  checking its signature. Previously only the first chunk could be read, so a valid request
+  could fail its JSON or signature check.
 - When a real-host validation step fails, the output now ends with a bounded, redacted tail of
   the failing command's output, with credentials, tokens and home-directory paths masked, so
   the failure names its cause.
-- The CI browser lanes support Ubuntu 26.04 runners, and the mocked browser test server
-  listens on loopback only.
-
+- The CI browser lanes support Ubuntu 26.04 runners with Playwright `1.65`, and the mocked
+  browser test server listens on loopback only.
 </details>
 
 <details>

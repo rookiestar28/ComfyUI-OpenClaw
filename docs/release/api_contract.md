@@ -392,7 +392,7 @@ These limits are contractual and strictly enforced. Clients MUST handle `413` an
 | **Concurrency (Bridge)** | In-flight jobs | 1 | `OPENCLAW_MAX_INFLIGHT_SUBMITS_BRIDGE` |
 | **Concurrency (Per-Tenant)** | In-flight jobs per tenant | 1 | `OPENCLAW_MAX_INFLIGHT_SUBMITS_PER_TENANT` |
 | **Payload Size** | Rendered workflow | 512KB | `OPENCLAW_MAX_RENDERED_WORKFLOW_BYTES` |
-| **Webhook Body** | Raw JSON body | 10MB | `MAX_BODY_SIZE` (internal constant) |
+| **Webhook Body** | Raw JSON body, read in full up to the limit before parsing or signature checks | 64 KiB | `MAX_BODY_SIZE` (internal constant) |
 | **Trigger Inputs** | Input variables | 32KB | Hardcoded in `api/triggers.py` |
 | **Log Tail** | Max lines | 500 | Hardcoded in `api/route_handlers.py` |
 
