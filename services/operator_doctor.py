@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 import os
 import platform
@@ -628,9 +629,13 @@ def check_pre_commit(report: DoctorReport) -> None:
         )
         return
 
-    # Try as Python module
+    # Try as Python module. Ask the import system whether it can be found: importing
+    # it would run the package's import-time code just to learn that it is installed.
     try:
-        importlib.import_module("pre_commit")
+        module_found = importlib.util.find_spec("pre_commit") is not None
+    except (ImportError, ValueError):
+        module_found = False
+    if module_found:
         report.add(
             CheckResult(
                 name="pre_commit",
@@ -638,7 +643,7 @@ def check_pre_commit(report: DoctorReport) -> None:
                 message="pre-commit available as Python module",
             )
         )
-    except ImportError:
+    else:
         report.add(
             CheckResult(
                 name="pre_commit",

@@ -1387,16 +1387,6 @@
       "owner": "architecture-maintainers",
       "rationale": "Operator-doctor import health probe.",
       "review_condition": "Remove or update when the dynamic loading boundary changes."
-    },
-    {
-      "path": "services/operator_doctor.py",
-      "scope": "check_pre_commit",
-      "callee": "importlib.import_module",
-      "target_kind": "literal",
-      "target": "pre_commit",
-      "owner": "architecture-maintainers",
-      "rationale": "Optional quality-tool availability probe.",
-      "review_condition": "Remove or update when the dynamic loading boundary changes."
     }
   ]
 }
