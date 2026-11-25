@@ -6352,13 +6352,6 @@
     {
       "tool": "ruff",
       "path": "services/packs/pack_archive.py",
-      "code": "N806",
-      "message": "Variable `DANGEROUS_PATTERNS` in function should be lowercase",
-      "count": 1
-    },
-    {
-      "tool": "ruff",
-      "path": "services/packs/pack_archive.py",
       "code": "RUF003",
       "message": "Comment contains ambiguous `．` (FULLWIDTH FULL STOP). Did you mean `.` (FULL STOP)?",
       "count": 2

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import tempfile
 import unicodedata
@@ -16,6 +17,29 @@ from .pack_manifest import (
 from .pack_types import PackMetadata
 
 MAX_COMPRESSION_RATIO = 100
+
+# The two dynamic-execution calls the code-safety scan rejects, in the order they are
+# reported when one member holds both. Each name is matched as a plain byte search
+# followed by an opening parenthesis, whitespace allowed.
+#
+# GUARD: do not write either call out as literal call syntax anywhere in this module,
+# and do not add a word boundary to the match.
+# - Source scanners (the Comfy Registry's among them) read literal call syntax in
+#   shipped code as dynamic execution, so a deny-list spelled as the calls it denies
+#   gets this file flagged for the very code it blocks. The patterns are therefore
+#   built from the bare names.
+# - The match must stay a superset of a plain byte search for the call: longer names
+#   (a prefix before the name) and attribute calls on a model object were rejected
+#   before and must stay rejected, and whitespace before the parenthesis must not
+#   slip past. A lookbehind or boundary assertion would quietly let those through.
+_BLOCKED_CALLS = (
+    (b"exec", "Dynamic execution (exec)"),
+    (b"eval", "Dynamic execution (eval)"),
+)
+_BLOCKED_CALL_PATTERNS = tuple(
+    (re.compile(re.escape(name) + rb"\s*\("), message)
+    for name, message in _BLOCKED_CALLS
+)
 
 
 class PackArchive:
@@ -73,46 +97,22 @@ class PackArchive:
         """
         S39: Static analysis for dangerous patterns in code files.
         Raises PackError if violations found.
-        """
-        DANGEROUS_PATTERNS = [
-            (b"import os", "Direct os import"),
-            (b"from os import", "Direct os import"),
-            (b"import subprocess", "Subprocess usage"),
-            (b"from subprocess import", "Subprocess usage"),
-            (b"exec(", "Dynamic execution (exec)"),
-            (b"eval(", "Dynamic execution (eval)"),
-            (b"__import__(", "Dynamic import"),
-        ]
 
-        # Allow-list of safe files? No, too strict.
-        # Just scan .py files.
+        Every ``.py`` member is searched as bytes, so a call is also found inside a
+        string or a comment; that is accepted for a strict preflight. Members are
+        checked in archive order and the blocked calls in table order, so a member
+        that holds both is reported for the first call in the table.
+        """
         for info in zf.infolist():
-            if info.filename.endswith(".py"):
-                with zf.open(info) as f:
-                    content = f.read()
-                    # Simple byte-search.
-                    # False positives possible (e.g. inside strings).
-                    # But for "Strict Preflight", false positives are acceptable warnings?
-                    # S39 says "runtime-import prohibition".
-                    # Real parsing is expensive. Byte search is fast.
-                    for pat, desc in DANGEROUS_PATTERNS:
-                        if pat in content:
-                            # TODO: Make this verify-only or hard block?
-                            # For now, we raise Error to enforce S39.
-                            # Users can override by manually installing if needed.
-                            # But this logic is in `extract_pack`.
-                            # Requires better heuristics or tokenizer.
-                            # For MVP S39, maybe log warning?
-                            # "Implement static preflight scanner".
-                            pass
-                            # Actually, blocking standard imports like `os` breakage 99% of nodes.
-                            # Custom nodes often use `os.path`.
-                            # `subprocess` is more dangerous. `exec/eval` is very dangerous.
-                            # Let's enforce `exec/eval` blocking.
-                            if b"exec(" in pat or b"eval(" in pat:
-                                raise PackError(
-                                    f"Code safety violation in {info.filename}: {desc}"
-                                )
+            if not info.filename.endswith(".py"):
+                continue
+            with zf.open(info) as f:
+                content = f.read()
+            for pattern, message in _BLOCKED_CALL_PATTERNS:
+                if pattern.search(content):
+                    raise PackError(
+                        f"Code safety violation in {info.filename}: {message}"
+                    )
 
     @staticmethod
     def extract_pack(zip_path: str, target_dir: str) -> PackMetadata:

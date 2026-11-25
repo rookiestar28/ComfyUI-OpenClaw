@@ -233,7 +233,7 @@
     "services/llm_client.py": 15,
     "services/metrics.py": 2,
     "services/operator_doctor.py": 3,
-    "services/packs/pack_archive.py": 6,
+    "services/packs/pack_archive.py": 3,
     "services/packs/pack_manifest.py": 2,
     "services/parameter_lab.py": 6,
     "services/planner.py": 3,
