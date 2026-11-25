@@ -5,11 +5,26 @@ The README now keeps only the most recent 3-5 update summaries and links here fo
 
 Newest entries appear first.
 
-Current release notes: [v1.3.5](v1.3.5.md). Previous: [v1.3.2](v1.3.2.md),
-[v1.3.0](v1.3.0.md), [v1.2.0](v1.2.0.md), [v1.1.0](v1.1.0.md).
+Current release notes: [v1.3.6](v1.3.6.md). Previous: [v1.3.5](v1.3.5.md),
+[v1.3.2](v1.3.2.md), [v1.3.0](v1.3.0.md), [v1.2.0](v1.2.0.md), [v1.1.0](v1.1.0.md).
 
 These entries describe behavior at the time of each update. For current runtime requirements
 and host qualification, use the [compatibility matrix](compatibility_matrix.md).
+
+<details>
+
+<summary><strong>Pack safety check tightened in v1.3.6</strong></summary>
+
+- The pack code-safety check now also rejects dynamic-execution calls written with whitespace
+  between the function name and its parenthesis. Every pack that was rejected before is still
+  rejected, with the same message.
+- The operator doctor checks whether `pre-commit` is installed without importing it, so the
+  check no longer runs the package's own startup code. Its results are unchanged for a working
+  or a missing installation.
+- Internal code that automated source scanners misread as privilege escalation or dynamic
+  execution was rewritten without changing behavior.
+
+</details>
 
 <details>
 

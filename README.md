@@ -91,6 +91,21 @@ Deployment profiles and hardening references:
 
 <details>
 
+<summary><strong>Pack safety check tightened in v1.3.6</strong></summary>
+
+- The pack code-safety check now also rejects dynamic-execution calls written with whitespace
+  between the function name and its parenthesis. Every pack that was rejected before is still
+  rejected, with the same message.
+- The operator doctor checks whether `pre-commit` is installed without importing it, so the
+  check no longer runs the package's own startup code. Its results are unchanged for a working
+  or a missing installation.
+- Internal code that automated source scanners misread as privilege escalation or dynamic
+  execution was rewritten without changing behavior.
+
+</details>
+
+<details>
+
 <summary><strong>Host compatibility updated in v1.3.5</strong></summary>
 
 - ComfyUI `0.46.0` at `da8bd08e`, with bundled frontend `1.59.11` or standalone frontend
