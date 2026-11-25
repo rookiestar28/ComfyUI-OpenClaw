@@ -482,10 +482,12 @@ def load_config() -> ConnectorConfig:
     # Slack (F56 / S67)
     cfg.slack_bot_token = os.environ.get("OPENCLAW_CONNECTOR_SLACK_BOT_TOKEN")
     cfg.slack_signing_secret = os.environ.get("OPENCLAW_CONNECTOR_SLACK_SIGNING_SECRET")
-    if su := os.environ.get("OPENCLAW_CONNECTOR_SLACK_ALLOWED_USERS"):
-        cfg.slack_allowed_users = [u.strip() for u in su.split(",") if u.strip()]
-    if sc := os.environ.get("OPENCLAW_CONNECTOR_SLACK_ALLOWED_CHANNELS"):
-        cfg.slack_allowed_channels = [u.strip() for u in sc.split(",") if u.strip()]
+    if users_raw := os.environ.get("OPENCLAW_CONNECTOR_SLACK_ALLOWED_USERS"):
+        cfg.slack_allowed_users = [u.strip() for u in users_raw.split(",") if u.strip()]
+    if channels_raw := os.environ.get("OPENCLAW_CONNECTOR_SLACK_ALLOWED_CHANNELS"):
+        cfg.slack_allowed_channels = [
+            u.strip() for u in channels_raw.split(",") if u.strip()
+        ]
     cfg.slack_bind_host = os.environ.get("OPENCLAW_CONNECTOR_SLACK_BIND", "127.0.0.1")
     cfg.slack_bind_port = _load_bounded_int_env(
         "OPENCLAW_CONNECTOR_SLACK_PORT",
